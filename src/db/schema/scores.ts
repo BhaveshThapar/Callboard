@@ -1,6 +1,16 @@
 import { sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
-import { check, integer, json, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import {
+  check,
+  integer,
+  json,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+  uuid,
+} from "drizzle-orm/pg-core";
 import type { Rubric, TabulationInput, TabulationResult } from "@/lib/tabulation/types";
 import { comps, people } from "./orgs";
 import { rubricCriteria, rubrics } from "./rubrics";
@@ -79,24 +89,39 @@ export const deductions = pgTable(
  *
  * These three columns are `json`, not `jsonb`: jsonb reorders object keys and collapses
  * duplicates, so it cannot promise a snapshot comes back as the bytes that went in.
+ *
+ * `seq` orders the runs. `lockedAt` cannot: it defaults to `now()`, which is the transaction
+ * timestamp, so two runs can share one. `id` cannot either — it is a random v4.
  */
-export const tabRuns = pgTable("tab_runs", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  compId: uuid("comp_id")
-    .notNull()
-    .references(() => comps.id, { onDelete: "cascade" }),
-  rubricId: uuid("rubric_id")
-    .notNull()
-    .references(() => rubrics.id, { onDelete: "restrict" }),
-  inputs: json("inputs").$type<TabulationInput>().notNull(),
-  config: json("config").$type<Rubric>().notNull(),
-  results: json("results").$type<TabulationResult>().notNull(),
-  lockedAt: timestamp("locked_at", { withTimezone: true }).notNull().defaultNow(),
-  lockedByPersonId: uuid("locked_by_person_id").references(() => people.id, {
-    onDelete: "set null",
-  }),
-  supersedesId: uuid("supersedes_id").references((): AnyPgColumn => tabRuns.id, {
-    onDelete: "set null",
-  }),
-  overrideReason: text("override_reason"),
-});
+export const tabRuns = pgTable(
+  "tab_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    seq: integer("seq").generatedAlwaysAsIdentity(),
+    compId: uuid("comp_id")
+      .notNull()
+      .references(() => comps.id, { onDelete: "cascade" }),
+    rubricId: uuid("rubric_id")
+      .notNull()
+      .references(() => rubrics.id, { onDelete: "restrict" }),
+    inputs: json("inputs").$type<TabulationInput>().notNull(),
+    config: json("config").$type<Rubric>().notNull(),
+    results: json("results").$type<TabulationResult>().notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }).notNull().defaultNow(),
+    lockedByPersonId: uuid("locked_by_person_id").references(() => people.id, {
+      onDelete: "set null",
+    }),
+    supersedesId: uuid("supersedes_id").references((): AnyPgColumn => tabRuns.id, {
+      onDelete: "set null",
+    }),
+    overrideReason: text("override_reason"),
+  },
+  // Two runs superseding the same parent would fork the chain, leaving the audit trail with two
+  // heads and no fact of the matter about which result stands. A double-submitted override is the
+  // realistic way that happens, so the database refuses it rather than the application.
+  (t) => [
+    uniqueIndex("tab_runs_supersedes_unique")
+      .on(t.supersedesId)
+      .where(sql`${t.supersedesId} is not null`),
+  ],
+);

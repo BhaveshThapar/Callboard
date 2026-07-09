@@ -4,7 +4,7 @@ import { judgeAssignments, people, scores } from "@/db/schema";
 import type { BoardActor } from "@/lib/auth/scope";
 import { listTeamsForBoard } from "@/lib/auth/scope";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
-import { getRubric, latestLockedRun, liveStandings, reproduce } from "./tab";
+import { getRubric, latestLockedRun, liveStandings, reproduce, runCount } from "./tab";
 
 export type StandingRow = {
   place: number;
@@ -27,6 +27,9 @@ export type BoardSnapshot = {
   lockedAt: string | null;
   /** Whether re-running `tabulate()` on the locked snapshot reproduces the stored result. */
   reproduces: boolean | null;
+  /** Which run is showing, counted within this comp, and whether it replaced one. */
+  lockedRunNumber: number | null;
+  supersedesId: string | null;
   overrideReason: string | null;
   judges: JudgeProgress[];
   scoresSubmitted: number;
@@ -66,6 +69,7 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
 
   const results = locked ? locked.results : await liveStandings(actor.compId);
   const verification = locked ? reproduce(locked) : null;
+  const lockedRunNumber = locked ? await runCount(actor.compId) : null;
 
   const byId = new Map(teams.map((t) => [t.id, t]));
   const label = (teamId: string): string => {
@@ -89,6 +93,8 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
     locked: locked !== null,
     lockedAt: locked?.lockedAt.toISOString() ?? null,
     reproduces: verification?.matches ?? null,
+    lockedRunNumber,
+    supersedesId: locked?.supersedesId ?? null,
     overrideReason: locked?.overrideReason ?? null,
     judges,
     scoresSubmitted: row?.submitted ?? 0,

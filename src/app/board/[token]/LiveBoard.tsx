@@ -10,11 +10,12 @@ import {
   eyebrowClass,
   inputClass,
   lockButtonClass,
+  overrideButtonClass,
   pillClass,
   primaryButtonClass,
 } from "@/components/styles";
 import type { BoardSnapshot } from "@/lib/comp/board";
-import { addDeductionAction, lockAction } from "./actions";
+import { addDeductionAction, lockAction, overrideAction } from "./actions";
 import { IDLE } from "./state";
 
 const POLL_MS = 2_000;
@@ -40,6 +41,7 @@ export function LiveBoard({
   const [snapshot, setSnapshot] = useState(initial);
   const [lockState, lockFormAction, locking] = useActionState(lockAction, IDLE);
   const [deductionState, deductionFormAction, deducting] = useActionState(addDeductionAction, IDLE);
+  const [overrideState, overrideFormAction, overriding] = useActionState(overrideAction, IDLE);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,7 +62,7 @@ export function LiveBoard({
       cancelled = true;
       clearInterval(id);
     };
-  }, [token, lockState, deductionState]);
+  }, [token, lockState, deductionState, overrideState]);
 
   const progress =
     snapshot.scoresExpected > 0
@@ -327,22 +329,95 @@ export function LiveBoard({
         )}
 
         {snapshot.locked && (
-          <div className={cx(cardClass, "text-body")}>
-            <p>
-              Locked at{" "}
-              <strong className="font-semibold">
-                {new Date(snapshot.lockedAt!).toLocaleString()}
-              </strong>
-              .
-            </p>
-            {snapshot.overrideReason && (
-              <p className="mt-1 text-muted">Override reason: {snapshot.overrideReason}</p>
-            )}
-            <p className="mt-2 text-muted">
-              {snapshot.reproduces
-                ? "Re-running the tabulation against the stored snapshot reproduces these exact placements."
-                : "The stored snapshot does not reproduce. Do not announce these results."}
-            </p>
+          <div className="space-y-4">
+            <div className={cx(cardClass, "text-body")}>
+              <p>
+                Run <strong className="font-semibold tabular">{snapshot.lockedRunNumber}</strong>, locked
+                at{" "}
+                <strong className="font-semibold">
+                  {new Date(snapshot.lockedAt!).toLocaleString()}
+                </strong>
+                {snapshot.supersedesId && " — a correction of the run before it"}.
+              </p>
+              {snapshot.overrideReason && (
+                <p className="mt-1 text-muted">Reason given: {snapshot.overrideReason}</p>
+              )}
+              <p className="mt-2 text-muted">
+                {snapshot.reproduces
+                  ? "Re-running the tabulation against the stored snapshot reproduces these exact placements."
+                  : "The stored snapshot does not reproduce. Do not announce these results."}
+              </p>
+            </div>
+
+            <form
+              action={overrideFormAction}
+              className={cx(cardClass, "border-danger/30 bg-danger-light/40")}
+            >
+              <input type="hidden" name="token" value={token} />
+              <h2 className="text-card font-semibold text-heading">Correct these results</h2>
+              <p className="mt-1 text-caption text-muted">
+                Nothing above is edited. A correction records a deduction, re-runs the tabulation,
+                and writes a new run that supersedes run {snapshot.lockedRunNumber} — with your name
+                and your reason attached. Scores stay frozen.
+              </p>
+
+              <div className="mt-4 space-y-2">
+                <textarea
+                  name="overrideReason"
+                  required
+                  rows={2}
+                  placeholder="Why are these results being corrected?"
+                  aria-label="Reason for the correction"
+                  className={cx(inputClass, "resize-y")}
+                />
+                <div className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                  <select name="teamId" aria-label="Team to deduct from" className={inputClass}>
+                    <option value="">No deduction — re-tabulate only</option>
+                    {snapshot.standings.map((row) => (
+                      <option key={row.teamId} value={row.teamId}>
+                        {row.label}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    name="points"
+                    type="number"
+                    min={1}
+                    step={1}
+                    placeholder="Points"
+                    aria-label="Deduction points"
+                    className={cx(inputClass, "tabular sm:w-28")}
+                  />
+                </div>
+                <input
+                  name="reason"
+                  type="text"
+                  placeholder="Reason for the deduction (e.g. missed time penalty)"
+                  aria-label="Reason for the deduction"
+                  className={inputClass}
+                />
+              </div>
+
+              <button
+                type="submit"
+                data-testid="override-button"
+                disabled={overriding}
+                className={cx(overrideButtonClass, "mt-4")}
+              >
+                {overriding ? "Correcting…" : "Correct and re-lock"}
+              </button>
+              {overrideState.message && (
+                <p
+                  role="status"
+                  className={cx(
+                    "mt-2 text-caption",
+                    overrideState.status === "error" ? "text-danger" : "text-muted",
+                  )}
+                >
+                  {overrideState.message}
+                </p>
+              )}
+            </form>
           </div>
         )}
       </div>

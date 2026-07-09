@@ -5,7 +5,7 @@ import { db } from "@/db";
 import { deductions } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { resolveBoardActor } from "@/lib/auth/scope";
-import { latestLockedRun, lockResults } from "@/lib/comp/tab";
+import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
 export const lockAction = async (
@@ -13,40 +13,116 @@ export const lockAction = async (
   formData: FormData,
 ): Promise<BoardActionState> => {
   const token = String(formData.get("token") ?? "");
-  const overrideReason = String(formData.get("overrideReason") ?? "").trim();
 
   const actor = await resolveBoardActor(token);
   if (!actor) return { status: "error", message: "This board link is no longer valid." };
 
-  const existing = await latestLockedRun(actor.compId);
-  if (existing && !overrideReason) {
+  if (await latestLockedRun(actor.compId)) {
     return {
       status: "error",
-      message: "Results are already locked. Re-locking requires a written reason.",
+      message: "Results are already locked. Correcting them requires a written reason.",
     };
   }
 
   try {
-    const run = await lockResults(actor.compId, {
-      lockedByPersonId: actor.personId,
-      overrideReason: overrideReason || undefined,
-    });
+    const run = await lockResults(actor.compId, { lockedByPersonId: actor.personId });
 
     await recordAudit({
       compId: actor.compId,
       actorKind: "board",
       actorPersonId: actor.personId,
-      action: existing ? "tab.override" : "tab.lock",
+      action: "tab.lock",
       entity: "tab_run",
       entityId: run.id,
-      before: existing ? { tabRunId: existing.id } : null,
-      after: { tabRunId: run.id, overrideReason: run.overrideReason },
+      after: { tabRunId: run.id },
     });
 
     revalidatePath(`/board/${token}`);
-    return { status: "ok", message: existing ? "Results re-locked." : "Results locked." };
+    return { status: "ok", message: "Results locked." };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Lock failed." };
+  }
+};
+
+/**
+ * The only way a locked result changes. Scores stay immutable, so a correction is expressed as a
+ * deduction — the one append-only lever the board has — and the re-tabulation it forces. Nothing is
+ * edited: the prior run keeps its frozen inputs and a new run supersedes it, naming the person and
+ * the reason.
+ *
+ * The deduction lands before the lock so that `lockResults` picks it up. There is no transaction:
+ * the neon-http driver has none. If the lock fails after the deduction is written, the prior run
+ * still stands and the board can re-submit the correction with the deduction fields left blank.
+ */
+export const overrideAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const overrideReason = String(formData.get("overrideReason") ?? "").trim();
+  const teamId = String(formData.get("teamId") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim();
+  const rawPoints = String(formData.get("points") ?? "").trim();
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  const existing = await latestLockedRun(actor.compId);
+  if (!existing) return { status: "error", message: "Nothing is locked yet." };
+  if (!overrideReason) return { status: "error", message: "A correction needs a written reason." };
+
+  const points = Number(rawPoints);
+  const wantsDeduction = teamId !== "" || reason !== "" || rawPoints !== "";
+  if (wantsDeduction) {
+    if (!teamId) return { status: "error", message: "Pick a team, or clear the deduction fields." };
+    if (!Number.isInteger(points) || points <= 0) {
+      return { status: "error", message: "Deduction must be a whole number above zero." };
+    }
+    if (!reason) return { status: "error", message: "A deduction needs a reason." };
+  }
+
+  try {
+    if (wantsDeduction) {
+      const [row] = await db
+        .insert(deductions)
+        .values({ compId: actor.compId, teamId, points, reason, createdByPersonId: actor.personId })
+        .returning();
+
+      await recordAudit({
+        compId: actor.compId,
+        actorKind: "board",
+        actorPersonId: actor.personId,
+        action: "deduction.add",
+        entity: "team",
+        entityId: teamId,
+        after: { points, reason, deductionId: row?.id, correctsRunId: existing.id },
+      });
+    }
+
+    const run = await lockResults(actor.compId, {
+      lockedByPersonId: actor.personId,
+      overrideReason,
+    });
+    const runNumber = await runCount(actor.compId);
+
+    await recordAudit({
+      compId: actor.compId,
+      actorKind: "board",
+      actorPersonId: actor.personId,
+      action: "tab.override",
+      entity: "tab_run",
+      entityId: run.id,
+      before: { tabRunId: existing.id },
+      after: { tabRunId: run.id, overrideReason },
+    });
+
+    revalidatePath(`/board/${token}`);
+    return { status: "ok", message: `Run ${runNumber} supersedes run ${runNumber - 1}.` };
+  } catch (error) {
+    return {
+      status: "error",
+      message: error instanceof Error ? error.message : "Correction failed.",
+    };
   }
 };
 

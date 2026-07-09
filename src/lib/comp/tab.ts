@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { deductions, judgeAssignments, rubricCriteria, rubrics, scores, tabRuns, teams } from "@/db/schema";
 import { tabulate } from "@/lib/tabulation";
@@ -96,6 +96,7 @@ export const liveStandings = async (compId: string): Promise<TabulationResult> =
 
 export type LockedRun = {
   id: string;
+  seq: number;
   lockedAt: Date;
   results: TabulationResult;
   inputs: TabulationInput;
@@ -104,17 +105,32 @@ export type LockedRun = {
   overrideReason: string | null;
 };
 
+/**
+ * How many times this comp has been locked. `seq` orders runs globally and is not this number:
+ * it never resets, so the first lock of a fresh comp can carry any `seq` at all. The board is told
+ * "run 2 supersedes run 1", which is a fact about the comp, not about the table.
+ */
+export const runCount = async (compId: string): Promise<number> => {
+  const [row] = await db
+    .select({ n: count() })
+    .from(tabRuns)
+    .where(eq(tabRuns.compId, compId));
+
+  return row?.n ?? 0;
+};
+
 export const latestLockedRun = async (compId: string): Promise<LockedRun | null> => {
   const [run] = await db
     .select()
     .from(tabRuns)
     .where(eq(tabRuns.compId, compId))
-    .orderBy(desc(tabRuns.lockedAt))
+    .orderBy(desc(tabRuns.seq))
     .limit(1);
 
   return run
     ? {
         id: run.id,
+        seq: run.seq,
         lockedAt: run.lockedAt,
         results: run.results,
         inputs: run.inputs,
@@ -163,6 +179,7 @@ export const lockResults = async (
 
   return {
     id: run.id,
+    seq: run.seq,
     lockedAt: run.lockedAt,
     results: run.results,
     inputs: run.inputs,

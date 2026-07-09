@@ -17,6 +17,10 @@ export const primaryButtonClass =
 export const lockButtonClass =
   "rounded-md bg-heading px-4 py-2 text-card font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40";
 
+/** Correcting a locked result is rarer and louder than locking one. */
+export const overrideButtonClass =
+  "rounded-md bg-danger px-4 py-2 text-card font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40";
+
 export const pillClass = "rounded px-1.5 py-0.5 text-caption font-semibold";
 
 export const eyebrowClass = "text-caption font-medium uppercase tracking-wide text-subtle";

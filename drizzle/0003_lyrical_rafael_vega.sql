@@ -1,0 +1,2 @@
+ALTER TABLE "tab_runs" ADD COLUMN "seq" integer NOT NULL GENERATED ALWAYS AS IDENTITY (sequence name "tab_runs_seq_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 START WITH 1 CACHE 1);--> statement-breakpoint
+CREATE UNIQUE INDEX "tab_runs_supersedes_unique" ON "tab_runs" USING btree ("supersedes_id") WHERE "tab_runs"."supersedes_id" is not null;
