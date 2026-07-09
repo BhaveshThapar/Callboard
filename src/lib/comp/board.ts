@@ -1,9 +1,11 @@
-import { and, count, eq, isNull, max } from "drizzle-orm";
+import { count, eq, max } from "drizzle-orm";
 import { db } from "@/db";
 import { judgeAssignments, people, scores } from "@/db/schema";
 import type { BoardActor } from "@/lib/auth/scope";
 import { listTeamsForBoard } from "@/lib/auth/scope";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
+import type { JudgeProgress } from "./progress";
+import { judgeProgress, progressTotals } from "./progress";
 import { getRubric, latestLockedRun, liveStandings, reproduce, runCount } from "./tab";
 
 export type StandingRow = {
@@ -18,7 +20,7 @@ export type StandingRow = {
   resolvedBy: string | null;
 };
 
-export type JudgeProgress = { name: string; submitted: number; expected: number };
+export type { JudgeProgress } from "./progress";
 
 export type BoardSnapshot = {
   compName: string;
@@ -51,14 +53,18 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
     getRubric(actor.compId),
     latestLockedRun(actor.compId),
     db
-      .select({ submitted: count(), lastAt: max(scores.submittedAt) })
+      .select({ lastAt: max(scores.submittedAt) })
       .from(scores)
       .where(eq(scores.compId, actor.compId)),
     db
-      .select({ id: judgeAssignments.id, name: people.name })
+      .select({
+        assignmentId: judgeAssignments.id,
+        name: people.name,
+        revokedAt: judgeAssignments.revokedAt,
+      })
       .from(judgeAssignments)
       .innerJoin(people, eq(people.id, judgeAssignments.personId))
-      .where(and(eq(judgeAssignments.compId, actor.compId), isNull(judgeAssignments.revokedAt)))
+      .where(eq(judgeAssignments.compId, actor.compId))
       .orderBy(people.name),
     db
       .select({ judgeAssignmentId: scores.judgeAssignmentId, submitted: count() })
@@ -81,11 +87,16 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
   const row = progress[0];
   const expectedPerJudge = teams.length * rubric.criteria.length;
   const submittedByJudge = new Map(perJudge.map((j) => [j.judgeAssignmentId, j.submitted]));
-  const judges = roster.map((judge) => ({
-    name: judge.name,
-    submitted: submittedByJudge.get(judge.id) ?? 0,
-    expected: expectedPerJudge,
-  }));
+  const judges = judgeProgress(
+    roster.map((judge) => ({
+      assignmentId: judge.assignmentId,
+      name: judge.name,
+      revoked: judge.revokedAt !== null,
+    })),
+    submittedByJudge,
+    expectedPerJudge,
+  );
+  const totals = progressTotals(judges);
 
   return {
     compName: actor.compName,
@@ -97,8 +108,8 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
     supersedesId: locked?.supersedesId ?? null,
     overrideReason: locked?.overrideReason ?? null,
     judges,
-    scoresSubmitted: row?.submitted ?? 0,
-    scoresExpected: expectedPerJudge * judges.length,
+    scoresSubmitted: totals.submitted,
+    scoresExpected: totals.expected,
     lastScoreAt: row?.lastAt ? new Date(row.lastAt).toISOString() : null,
     standings: results.placements.map((placement) => ({
       place: placement.place,

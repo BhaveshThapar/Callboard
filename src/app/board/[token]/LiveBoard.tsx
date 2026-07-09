@@ -15,7 +15,7 @@ import {
   primaryButtonClass,
 } from "@/components/styles";
 import type { BoardSnapshot } from "@/lib/comp/board";
-import { addDeductionAction, lockAction, overrideAction } from "./actions";
+import { addDeductionAction, lockAction, overrideAction, revokeJudgeAction } from "./actions";
 import { IDLE } from "./state";
 
 const POLL_MS = 2_000;
@@ -42,6 +42,7 @@ export function LiveBoard({
   const [lockState, lockFormAction, locking] = useActionState(lockAction, IDLE);
   const [deductionState, deductionFormAction, deducting] = useActionState(addDeductionAction, IDLE);
   const [overrideState, overrideFormAction, overriding] = useActionState(overrideAction, IDLE);
+  const [revokeState, revokeFormAction, revoking] = useActionState(revokeJudgeAction, IDLE);
 
   useEffect(() => {
     let cancelled = false;
@@ -62,7 +63,7 @@ export function LiveBoard({
       cancelled = true;
       clearInterval(id);
     };
-  }, [token, lockState, deductionState, overrideState]);
+  }, [token, lockState, deductionState, overrideState, revokeState]);
 
   const progress =
     snapshot.scoresExpected > 0
@@ -85,10 +86,13 @@ export function LiveBoard({
           <p className={eyebrowClass}>Judges</p>
           <ul className="mt-3 space-y-3.5">
             {snapshot.judges.map((judge) => (
-              <li key={judge.name}>
+              <li key={judge.assignmentId}>
                 <div className="flex items-baseline justify-between gap-2">
                   <span className="truncate text-caption font-medium text-heading">
                     {judge.name}
+                    {judge.revoked && (
+                      <span className={cx(pillClass, "ml-1.5 bg-hover text-subtle")}>revoked</span>
+                    )}
                   </span>
                   <span className="tabular shrink-0 text-micro text-subtle">
                     {judge.submitted}/{judge.expected}
@@ -101,9 +105,34 @@ export function LiveBoard({
                     tone={judge.submitted >= judge.expected ? "primary" : "secondary"}
                   />
                 </div>
+                {!snapshot.locked && !judge.revoked && (
+                  <form action={revokeFormAction} className="mt-1">
+                    <input type="hidden" name="token" value={token} />
+                    <input type="hidden" name="assignmentId" value={judge.assignmentId} />
+                    <button
+                      type="submit"
+                      disabled={revoking}
+                      data-testid={`revoke-${judge.assignmentId}`}
+                      className="text-micro text-subtle underline underline-offset-2 transition-colors hover:text-danger disabled:opacity-40"
+                    >
+                      Revoke link
+                    </button>
+                  </form>
+                )}
               </li>
             ))}
           </ul>
+          {revokeState.message && (
+            <p
+              role="status"
+              className={cx(
+                "mt-3 text-micro",
+                revokeState.status === "error" ? "text-danger" : "text-subtle",
+              )}
+            >
+              {revokeState.message}
+            </p>
+          )}
         </div>
 
         <div className="mt-7 flex items-center gap-2 border-t border-border-soft pt-5">

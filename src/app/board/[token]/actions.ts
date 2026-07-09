@@ -1,8 +1,9 @@
 "use server";
 
+import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { deductions } from "@/db/schema";
+import { deductions, judgeAssignments } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { resolveBoardActor } from "@/lib/auth/scope";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
@@ -124,6 +125,54 @@ export const overrideAction = async (
       message: error instanceof Error ? error.message : "Correction failed.",
     };
   }
+};
+
+/**
+ * Kills a judge's link. Their submitted scores stand and still count -- the record is append-only,
+ * and a revoked link is not a retracted opinion. Scoped to the actor's comp so a board cannot reach
+ * another comp's judge, and idempotent: revoking twice is not an error worth surfacing.
+ */
+export const revokeJudgeAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (await latestLockedRun(actor.compId)) {
+    return { status: "error", message: "Results are locked. Judge links can no longer change." };
+  }
+  if (!assignmentId) return { status: "error", message: "Pick a judge." };
+
+  const [row] = await db
+    .update(judgeAssignments)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(judgeAssignments.id, assignmentId),
+        eq(judgeAssignments.compId, actor.compId),
+        isNull(judgeAssignments.revokedAt),
+      ),
+    )
+    .returning({ id: judgeAssignments.id, personId: judgeAssignments.personId });
+
+  if (!row) return { status: "error", message: "That judge link is already revoked." };
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "judge.revoke",
+    entity: "judge_assignment",
+    entityId: row.id,
+    after: { revokedPersonId: row.personId },
+  });
+
+  revalidatePath(`/board/${token}`);
+  return { status: "ok", message: "That scoring link no longer opens." };
 };
 
 export const addDeductionAction = async (
