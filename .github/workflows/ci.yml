@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      # The tabulation core is pure, so these need no database.
+      # `reproducibility.test.ts` is the one that must never be weakened.
+      - name: Unit tests
+        run: bun run test
+
+  # The acceptance test in PRD §8.3 needs a real Postgres and a real browser.
+  # Runs only when a database is available to the workflow.
+  acceptance:
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'push' }}
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+      - if: ${{ env.DATABASE_URL == '' }}
+        run: echo "No DATABASE_URL secret set; skipping acceptance test." && exit 0
+
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run db:migrate
+      - run: bun run e2e
