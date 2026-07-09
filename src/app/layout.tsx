@@ -7,6 +7,8 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 export const metadata: Metadata = {
   title: "Callboard",
   description: "The operating system for a collegiate competition weekend.",
+  // The deployment is a sales demo seeded with real org and team names, not a public site.
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {

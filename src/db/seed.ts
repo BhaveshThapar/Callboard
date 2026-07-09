@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { createToken } from "@/lib/auth/token";
 import { db } from "./index";
 import { comps, compRoles, judgeAssignments, orgs, people, rubricCriteria, rubrics, teams } from "./schema";
@@ -32,6 +33,8 @@ export const DEMO_CRITERIA = [
   { label: "Stage Presence", maxPoints: 20, weightBp: 10_000, sortOrder: 3 },
 ] as const;
 
+const DEMO_ORG_SLUG = "maryland-mayuri";
+
 export type SeededDemo = {
   compId: string;
   compName: string;
@@ -40,12 +43,13 @@ export type SeededDemo = {
 };
 
 export const seedDemo = async (): Promise<SeededDemo> => {
-  // orgs cascades to comps, which cascades to everything else.
-  await db.delete(orgs);
+  // Deleting the org cascades to comps, and comps cascade to everything else. Scoped to the demo
+  // org by slug so that reseeding is idempotent and cannot take a real org down with it.
+  await db.delete(orgs).where(eq(orgs.slug, DEMO_ORG_SLUG));
 
   const [org] = await db
     .insert(orgs)
-    .values({ name: "Maryland Mayuri", slug: "maryland-mayuri" })
+    .values({ name: "Maryland Mayuri", slug: DEMO_ORG_SLUG })
     .returning();
   if (!org) throw new Error("failed to seed org");
 

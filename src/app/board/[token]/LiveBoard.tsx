@@ -391,8 +391,8 @@ function VerificationTile({ snapshot }: { snapshot: BoardSnapshot }) {
         <p className={cx("text-caption font-medium", tone)}>Reproducibility</p>
         <div
           className={cx(
-            "flex size-8 items-center justify-center rounded-md text-white",
-            reproduces ? "bg-primary" : "bg-danger",
+            "flex size-8 items-center justify-center rounded-md",
+            reproduces ? "bg-primary text-on-primary" : "bg-danger text-white",
           )}
         >
           <ShieldIcon className="size-4" />

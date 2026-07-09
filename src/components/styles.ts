@@ -11,7 +11,7 @@ export const buttonClass =
 
 /** Reversible actions: submit a score, apply a deduction. */
 export const primaryButtonClass =
-  "rounded-md bg-primary px-4 py-2 text-card font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-40";
+  "rounded-md bg-primary px-4 py-2 text-card font-medium text-on-primary transition-opacity hover:opacity-90 disabled:opacity-40";
 
 /** The lock is irreversible, so it does not wear the same green as everything else. */
 export const lockButtonClass =

@@ -30,7 +30,7 @@ export function AuditTrail({ entries }: { entries: AuditRow[] }) {
               className={cx(
                 "flex size-6 shrink-0 items-center justify-center rounded-full text-micro font-bold",
                 entry.actorKind === "board"
-                  ? "bg-primary text-white"
+                  ? "bg-primary text-on-primary"
                   : "bg-hover text-muted",
               )}
               aria-hidden

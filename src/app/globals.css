@@ -5,6 +5,9 @@
 
   --color-primary: #36b76b;
   --color-primary-light: #d4f1e0;
+  /* White on this green is 2.58:1, under the 4.5:1 AA floor. Near-black is 7.34:1 and keeps
+   * the brand hue, where darkening the green to rescue white text would not. */
+  --color-on-primary: #0d1117;
   --color-secondary: #f4a13a;
   --color-secondary-light: #fef3e2;
   --color-danger: #ef4444;

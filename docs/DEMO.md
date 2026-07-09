@@ -10,13 +10,27 @@ cp .env.example .env.local     # DATABASE_URL from your Neon project
 bun run db:migrate
 ```
 
+## Which database
+
+Three Neon branches, and the demo runs on exactly one of them.
+
+| Branch | Who points at it | Wiped by |
+|---|---|---|
+| `main` | the deployed app — **this is the demo** | only you, on purpose |
+| `ci` | GitHub Actions | every push to `main` |
+| `dev` | your `.env.local` | every local `bun run e2e` |
+
+`bun run db:seed` with no override hits `dev`, which is not what a prospect is looking at. Seeding the demo means naming production explicitly, below. The split exists because seeding deletes the demo org and everything cascading from it — before the branches were separated, a merged pull request could 404 three judges' phones mid-call.
+
 ## Before the call
 
 ```bash
-bun run db:seed
+DATABASE_URL='<neon main pooled>' \
+NEXT_PUBLIC_BASE_URL='https://<your-app>.vercel.app' \
+  bun run db:seed
 ```
 
-This wipes and reseeds the demo comp — Mayuri 2027, eight competing teams, three judges, a four-criterion fusion rubric normalized by z-score with a head-to-head tiebreak — and prints four links:
+A leading environment variable wins over `.env.local`, so nothing needs editing. This wipes and reseeds the demo comp — Mayuri 2027, eight competing teams, three judges, a four-criterion fusion rubric normalized by z-score with a head-to-head tiebreak — and prints four links:
 
 ```
 Board (open on a laptop):
