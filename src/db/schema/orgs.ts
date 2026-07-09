@@ -24,8 +24,6 @@ export const comps = pgTable(
     compDate: date("comp_date"),
     venue: text("venue"),
     status: text("status").$type<CompStatus>().notNull().default("draft"),
-    /** Same primitive as a judge token, one per comp. Authorizes the tab view and the lock. */
-    boardTokenHash: text("board_token_hash").notNull().unique(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -67,3 +65,21 @@ export const compRoles = pgTable(
     check("comp_roles_role_check", sql`${t.role} in ('board','liaison','judge','captain','attendee')`),
   ],
 );
+
+/**
+ * A board member's claim on a comp. The same primitive as `judge_assignments`, and deliberately
+ * per-person rather than per-comp: a lock and an override must name the human who authorized them
+ * (PRD B6), and a link shared by the whole board can only ever name the board.
+ */
+export const boardAssignments = pgTable("board_assignments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  compId: uuid("comp_id")
+    .notNull()
+    .references(() => comps.id, { onDelete: "cascade" }),
+  personId: uuid("person_id")
+    .notNull()
+    .references(() => people.id, { onDelete: "cascade" }),
+  tokenHash: text("token_hash").notNull().unique(),
+  revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

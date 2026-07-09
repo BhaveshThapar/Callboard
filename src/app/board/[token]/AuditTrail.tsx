@@ -9,6 +9,13 @@ const ACTOR_INITIAL: Record<AuditRow["actorKind"], string> = {
   system: "S",
 };
 
+const initialsOf = (name: string): string =>
+  name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? "")
+    .join("");
+
 export function AuditTrail({ entries }: { entries: AuditRow[] }) {
   return (
     <section className="rounded-card border border-border bg-surface shadow-card">
@@ -35,7 +42,7 @@ export function AuditTrail({ entries }: { entries: AuditRow[] }) {
               )}
               aria-hidden
             >
-              {ACTOR_INITIAL[entry.actorKind]}
+              {entry.actorName ? initialsOf(entry.actorName) : ACTOR_INITIAL[entry.actorKind]}
             </div>
 
             <div
@@ -54,8 +61,9 @@ export function AuditTrail({ entries }: { entries: AuditRow[] }) {
                   {entry.at.toLocaleTimeString()}
                 </time>
               </div>
-              <p className="mt-0.5 text-micro uppercase tracking-wide text-subtle">
-                {entry.actorKind} · {entry.entity}
+              <p className="mt-0.5 text-micro tracking-wide text-subtle">
+                <span className="font-medium text-muted">{entry.actorName ?? entry.actorKind}</span>
+                <span className="uppercase"> · {entry.entity}</span>
               </p>
             </div>
           </li>

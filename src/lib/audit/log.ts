@@ -1,6 +1,6 @@
 import { desc, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { auditLog } from "@/db/schema";
+import { auditLog, people } from "@/db/schema";
 import type { ActorKind } from "@/db/schema";
 
 export type AuditEntry = {
@@ -27,16 +27,19 @@ export const recordAudit = async (entry: AuditEntry): Promise<void> => {
   });
 };
 
+/** `actorName` is null only for `system` writes, which have no person behind them. */
 export const recentAudit = (compId: string, limit = 50) =>
   db
     .select({
       id: auditLog.id,
       actorKind: auditLog.actorKind,
+      actorName: people.name,
       action: auditLog.action,
       entity: auditLog.entity,
       at: auditLog.at,
     })
     .from(auditLog)
+    .leftJoin(people, eq(people.id, auditLog.actorPersonId))
     .where(eq(auditLog.compId, compId))
     .orderBy(desc(auditLog.at))
     .limit(limit);

@@ -21,7 +21,7 @@ if (jsonPath) {
       `Seeded ${demo.compName}: ${DEMO_TEAMS.length} teams, ${DEMO_JUDGES.length} judges, zscore + head-to-head tiebreak.`,
       "",
       "Board (open on a laptop):",
-      `  ${baseUrl}/board/${demo.boardToken}`,
+      `  ${demo.boardName.padEnd(16)} ${baseUrl}/board/${demo.boardToken}`,
       "",
       "Judges (one per phone):",
       ...demo.judges.map((j) => `  ${j.name.padEnd(16)} ${baseUrl}/judge/${j.token}`),

@@ -1,7 +1,17 @@
 import { eq } from "drizzle-orm";
 import { createToken } from "@/lib/auth/token";
 import { db } from "./index";
-import { comps, compRoles, judgeAssignments, orgs, people, rubricCriteria, rubrics, teams } from "./schema";
+import {
+  boardAssignments,
+  comps,
+  compRoles,
+  judgeAssignments,
+  orgs,
+  people,
+  rubricCriteria,
+  rubrics,
+  teams,
+} from "./schema";
 
 /**
  * Seeds the demo comp described in PRD §14: eight competing teams, three judges,
@@ -26,6 +36,9 @@ export const DEMO_JUDGES = [
   { name: "Sonia Desai", email: "sonia@example.com" },
 ] as const;
 
+/** The board link is per-person, so a lock and an override carry a name. */
+export const DEMO_BOARD = { name: "Ananya Krishnan", email: "ananya@example.com" } as const;
+
 export const DEMO_CRITERIA = [
   { label: "Choreography", maxPoints: 30, weightBp: 10_000, sortOrder: 0 },
   { label: "Execution", maxPoints: 30, weightBp: 10_000, sortOrder: 1 },
@@ -38,6 +51,7 @@ const DEMO_ORG_SLUG = "maryland-mayuri";
 export type SeededDemo = {
   compId: string;
   compName: string;
+  boardName: string;
   boardToken: string;
   judges: { name: string; token: string }[];
 };
@@ -53,7 +67,6 @@ export const seedDemo = async (): Promise<SeededDemo> => {
     .returning();
   if (!org) throw new Error("failed to seed org");
 
-  const boardToken = createToken();
   const [comp] = await db
     .insert(comps)
     .values({
@@ -63,10 +76,24 @@ export const seedDemo = async (): Promise<SeededDemo> => {
       compDate: "2027-02-20",
       venue: "Ritchie Coliseum",
       status: "live",
-      boardTokenHash: boardToken.tokenHash,
     })
     .returning();
   if (!comp) throw new Error("failed to seed comp");
+
+  const [boardPerson] = await db
+    .insert(people)
+    .values({ orgId: org.id, name: DEMO_BOARD.name, email: DEMO_BOARD.email })
+    .returning();
+  if (!boardPerson) throw new Error("failed to seed board member");
+
+  await db.insert(compRoles).values({ compId: comp.id, personId: boardPerson.id, role: "board" });
+
+  const boardToken = createToken();
+  await db.insert(boardAssignments).values({
+    compId: comp.id,
+    personId: boardPerson.id,
+    tokenHash: boardToken.tokenHash,
+  });
 
   await db.insert(teams).values(
     DEMO_TEAMS.map((team, i) => ({
@@ -116,6 +143,7 @@ export const seedDemo = async (): Promise<SeededDemo> => {
   return {
     compId: comp.id,
     compName: comp.name,
+    boardName: boardPerson.name,
     boardToken: boardToken.token,
     judges: judgeTokens.map(({ person, token }) => ({ name: person.name, token: token.token })),
   };

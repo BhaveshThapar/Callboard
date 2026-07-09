@@ -1,9 +1,17 @@
 import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { comps, judgeAssignments, people, teams } from "@/db/schema";
+import { boardAssignments, comps, judgeAssignments, people, teams } from "@/db/schema";
 import { hashToken } from "./token";
 
-export type BoardActor = { kind: "board"; compId: string; compName: string };
+/** `personId` is not optional: an unattributed lock is the thing PRD B6 forbids. */
+export type BoardActor = {
+  kind: "board";
+  compId: string;
+  compName: string;
+  personId: string;
+  personName: string;
+  boardAssignmentId: string;
+};
 export type JudgeActor = {
   kind: "judge";
   compId: string;
@@ -21,13 +29,31 @@ export type BoardTeamView = JudgeTeamView & { name: string; school: string | nul
 const SCOREABLE = ["accepted", "competing"] as const;
 
 export const resolveBoardActor = async (token: string): Promise<BoardActor | null> => {
-  const [comp] = await db
-    .select({ id: comps.id, name: comps.name })
-    .from(comps)
-    .where(eq(comps.boardTokenHash, hashToken(token)))
+  const [row] = await db
+    .select({
+      assignmentId: boardAssignments.id,
+      compId: comps.id,
+      compName: comps.name,
+      personId: people.id,
+      personName: people.name,
+    })
+    .from(boardAssignments)
+    .innerJoin(comps, eq(comps.id, boardAssignments.compId))
+    .innerJoin(people, eq(people.id, boardAssignments.personId))
+    .where(
+      and(eq(boardAssignments.tokenHash, hashToken(token)), isNull(boardAssignments.revokedAt)),
+    )
     .limit(1);
 
-  return comp ? { kind: "board", compId: comp.id, compName: comp.name } : null;
+  if (!row) return null;
+  return {
+    kind: "board",
+    compId: row.compId,
+    compName: row.compName,
+    personId: row.personId,
+    personName: row.personName,
+    boardAssignmentId: row.assignmentId,
+  };
 };
 
 export const resolveJudgeActor = async (token: string): Promise<JudgeActor | null> => {

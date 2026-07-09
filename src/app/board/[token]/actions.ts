@@ -28,12 +28,14 @@ export const lockAction = async (
 
   try {
     const run = await lockResults(actor.compId, {
+      lockedByPersonId: actor.personId,
       overrideReason: overrideReason || undefined,
     });
 
     await recordAudit({
       compId: actor.compId,
       actorKind: "board",
+      actorPersonId: actor.personId,
       action: existing ? "tab.override" : "tab.lock",
       entity: "tab_run",
       entityId: run.id,
@@ -71,12 +73,13 @@ export const addDeductionAction = async (
 
   const [row] = await db
     .insert(deductions)
-    .values({ compId: actor.compId, teamId, points, reason })
+    .values({ compId: actor.compId, teamId, points, reason, createdByPersonId: actor.personId })
     .returning();
 
   await recordAudit({
     compId: actor.compId,
     actorKind: "board",
+    actorPersonId: actor.personId,
     action: "deduction.add",
     entity: "team",
     entityId: teamId,

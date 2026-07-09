@@ -15,6 +15,13 @@
       "when": 1783600666803,
       "tag": "0001_salty_lady_deathstrike",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783631703113,
+      "tag": "0002_lowly_invaders",
+      "breakpoints": true
     }
   ]
 }
