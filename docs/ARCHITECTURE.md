@@ -46,12 +46,14 @@ Two details make this hold that are easy to get wrong:
 
 There isn't a user table with passwords, and for the scoring demo there does not need to be.
 
-- A **judge** gets a URL containing a 32-byte token. The database stores only its sha256. First load resolves the token to a `judge_assignments` row, which names the comp and the person. Revoking is `update judge_assignments set revoked_at = now()`.
-- A **board** gets one URL per comp, using the identical primitive against `comps.board_token_hash`. It authorizes the tab view, deductions, and the lock.
+- A **judge** gets a URL containing a 32-byte token. The database stores only its sha256. First load resolves the token to a `judge_assignments` row, which names the comp and the person. Revoking is a board action, not a SQL statement someone runs by hand.
+- A **board member** gets a URL of their own, using the identical primitive against `board_assignments`. It authorizes the tab view, deductions, the lock, and corrections.
 
-This satisfies the hard requirement in PRD §8.2 B2: score from any browser on a phone, no app install. It also means a judge link can be texted, and a leaked link can be killed in one statement.
+Board links are **per person, not per comp**. PRD B6 promises a *logged, attributed* override, and a link shared by the whole board can only ever name the board. `BoardActor.personId` is non-nullable, so an unattributed lock is unrepresentable rather than merely discouraged — the same trick `JudgeTeamView` uses to make a leaked team name unrepresentable. See [ADR 0007](decisions/0007-board-links-are-per-person.md).
 
-Real board accounts arrive with Module A, when there is something worth protecting beyond a single comp's scores.
+This satisfies the hard requirement in PRD §8.2 B2: score from any browser on a phone, no app install. It also means a link can be texted, and a leaked link can be killed from the board screen.
+
+Real board accounts — email, password, sessions — arrive with Module A, when there is something worth protecting beyond a single comp's scores.
 
 ## Writes
 

@@ -77,6 +77,14 @@ The board displays this live: **✓ Snapshot reproduces**. If it ever reads ✗,
 
 Locking closes scoring. A correction after the lock does not edit anything — it inserts a new `tab_runs` row with `supersedes_id` and a required, attributed `override_reason`.
 
+Because scores are immutable after the lock, a correction changes the result the only way it can: it records an attributed `deductions` row and re-tabulates. The prior run keeps its own frozen `inputs`, which still hold the deductions as they stood when *it* was locked, and still reproduce. A partial unique index on `supersedes_id` prevents two runs from superseding the same parent, so the chain cannot fork.
+
+## What is not in the snapshot
+
+`judge_notes` — a judge's written feedback for one team — never enters `TabulationInput`, and nothing under `src/lib/tabulation/` knows the table exists. A note carries no number and moves no placement, so a locked result must reproduce from the scores alone.
+
+The feedback export therefore reads frozen and live data together: scores, criteria, and placements from `tab_runs`; notes from `judge_notes`. That is safe because notes are refused after the lock, exactly as scores are, so the two are fixed at the same moment.
+
 ## Rounding
 
 Never mid-pipeline. Aggregates are carried at full double precision through normalization, ranking, and into the stored snapshot. Rounding happens once, in the UI: three decimals for `raw` and `zscore`, two for mean rank.
