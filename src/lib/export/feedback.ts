@@ -57,10 +57,14 @@ export const toFeedbackCsv = (input: FeedbackInput): string => {
     for (const judgeId of judgeIds) {
       const key = noteKey(judgeId, placement.teamId);
       const byCriterion = byTeamJudge.get(key);
-      if (!byCriterion) continue;
+      const note = input.notes.get(key);
 
-      const values = input.criteria.map((c) => byCriterion.get(c.id));
-      const total = values.reduce((sum: number, v) => sum + (v ?? 0), 0);
+      // A judge who scored nothing for this team gets no row -- unless they left a note, which the
+      // team is still owed. Scores and notes are independent forms, so that pairing is reachable.
+      if (!byCriterion && note === undefined) continue;
+
+      const values = input.criteria.map((c) => byCriterion?.get(c.id));
+      const scored = values.some((v) => v !== undefined);
 
       rows.push([
         String(placement.place),
@@ -68,9 +72,9 @@ export const toFeedbackCsv = (input: FeedbackInput): string => {
         team?.bidCode ?? "",
         input.judges.get(judgeId) ?? judgeId,
         ...values.map((v) => (v === undefined ? "" : String(v))),
-        String(total),
+        scored ? String(values.reduce((sum: number, v) => sum + (v ?? 0), 0)) : "",
         placement.deductionPoints > 0 ? `-${placement.deductionPoints}` : "0",
-        input.notes.get(key) ?? "",
+        note ?? "",
       ]);
     }
   }

@@ -1,8 +1,5 @@
-import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
-import { db } from "@/db";
-import { judgeAssignments, people } from "@/db/schema";
-import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import { listJudgesForBoard, listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
 import { notesForBoard } from "@/lib/comp/feedback";
 import { latestLockedRun } from "@/lib/comp/tab";
 import { toFeedbackCsv } from "@/lib/export/feedback";
@@ -30,11 +27,8 @@ export async function GET(
 
   const [teams, roster, notes] = await Promise.all([
     listTeamsForBoard(actor),
-    db
-      .select({ assignmentId: judgeAssignments.id, name: people.name })
-      .from(judgeAssignments)
-      .innerJoin(people, eq(people.id, judgeAssignments.personId))
-      .where(eq(judgeAssignments.compId, actor.compId)),
+    // Revoked judges included: their scores still counted, so their feedback still ships.
+    listJudgesForBoard(actor),
     notesForBoard(actor),
   ]);
 
