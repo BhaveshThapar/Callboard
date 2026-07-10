@@ -1,0 +1,34 @@
+{
+  "org": { "name": "Example Dance Org", "slug": "example-dance-org" },
+  "comp": {
+    "name": "Example Comp 2027",
+    "slug": "example-comp-2027",
+    "compDate": "2027-03-06",
+    "venue": "Some Auditorium",
+    "status": "live"
+  },
+  "rubric": {
+    "name": "Bhangra 2027",
+    "normalization": "rank",
+    "tiebreakers": [{ "kind": "criterion", "criterion": "Execution" }, { "kind": "head_to_head" }],
+    "criteria": [
+      { "label": "Choreography", "maxPoints": 25 },
+      { "label": "Execution", "maxPoints": 25 },
+      { "label": "Energy", "maxPoints": 25, "weightBp": 15000 },
+      { "label": "Costume", "maxPoints": 10, "weightBp": 5000 }
+    ]
+  },
+  "teams": [
+    { "bidCode": "A-101", "name": "Example Team One", "school": "State University" },
+    { "bidCode": "B-202", "name": "Example Team Two", "school": "City College" },
+    { "bidCode": "C-303", "name": "Example Team Three", "school": "Tech Institute" }
+  ],
+  "judges": [
+    { "name": "First Judge", "email": "first@example.com" },
+    { "name": "Second Judge", "email": "second@example.com" }
+  ],
+  "board": [
+    { "name": "Tab Chair", "email": "tab@example.com" },
+    { "name": "Comp Director", "email": "director@example.com" }
+  ]
+}

@@ -1,0 +1,175 @@
+import type { CompStatus } from "@/db/schema/orgs";
+import type { NormalizationMethod } from "@/lib/tabulation/types";
+
+/**
+ * A comp described as data, so a board's own rubric can be stood up without a setup UI.
+ * This file never touches the database: it is a parser, and it unit-tests without DATABASE_URL.
+ *
+ * A config tiebreaker names a criterion by label, not by id, because ids do not exist until the
+ * criteria are inserted. `seedFromConfig` resolves the label. That is the one place the config
+ * shape and the runtime `Tiebreaker` shape legitimately differ.
+ */
+export type ConfigTiebreaker =
+  | { kind: "criterion"; criterion: string }
+  | { kind: "head_to_head" }
+  | { kind: "highest_single_judge" };
+
+export type CompConfig = {
+  org: { name: string; slug: string };
+  comp: {
+    name: string;
+    slug: string;
+    compDate?: string;
+    venue?: string;
+    status: CompStatus;
+  };
+  rubric: {
+    name: string;
+    normalization: NormalizationMethod;
+    tiebreakers: ConfigTiebreaker[];
+    criteria: { label: string; maxPoints: number; weightBp: number; sortOrder: number }[];
+  };
+  teams: {
+    name: string;
+    school?: string;
+    bidCode: string;
+    division?: string;
+    rosterSize?: number;
+    performanceOrder?: number;
+  }[];
+  judges: { name: string; email?: string; division?: string }[];
+  board: { name: string; email?: string }[];
+};
+
+const NORMALIZATIONS = ["raw", "zscore", "rank"] as const;
+const TIEBREAKER_KINDS = ["criterion", "head_to_head", "highest_single_judge"] as const;
+const COMP_STATUSES = ["draft", "open", "live", "complete"] as const;
+
+const fail = (path: string, expected: string): never => {
+  throw new Error(`${path}: expected ${expected}`);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const record = (value: unknown, path: string): Record<string, unknown> =>
+  isRecord(value) ? value : fail(path, "an object");
+
+const array = (value: unknown, path: string): unknown[] =>
+  Array.isArray(value) ? value : fail(path, "an array");
+
+const str = (value: unknown, path: string): string =>
+  typeof value === "string" && value.trim() !== "" ? value : fail(path, "a non-empty string");
+
+const optStr = (value: unknown, path: string): string | undefined =>
+  value === undefined || value === null ? undefined : str(value, path);
+
+const int = (value: unknown, path: string): number =>
+  typeof value === "number" && Number.isInteger(value) ? value : fail(path, "a whole number");
+
+const optInt = (value: unknown, path: string): number | undefined =>
+  value === undefined || value === null ? undefined : int(value, path);
+
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[], path: string): T =>
+  typeof value === "string" && (allowed as readonly string[]).includes(value)
+    ? (value as T)
+    : fail(path, `one of ${allowed.join(", ")}`);
+
+const tiebreaker = (value: unknown, path: string): ConfigTiebreaker => {
+  const raw = record(value, path);
+  const kind = oneOf(raw.kind, TIEBREAKER_KINDS, `${path}.kind`);
+  if (kind === "criterion") {
+    return { kind, criterion: str(raw.criterion, `${path}.criterion`) };
+  }
+  return { kind };
+};
+
+export const parseCompConfig = (raw: unknown): CompConfig => {
+  const root = record(raw, "config");
+
+  const org = record(root.org, "org");
+  const comp = record(root.comp, "comp");
+  const rubric = record(root.rubric, "rubric");
+
+  const criteria = array(rubric.criteria, "rubric.criteria").map((entry, i) => {
+    const c = record(entry, `rubric.criteria[${i}]`);
+    const maxPoints = int(c.maxPoints, `rubric.criteria[${i}].maxPoints`);
+    if (maxPoints <= 0) fail(`rubric.criteria[${i}].maxPoints`, "a value above zero");
+
+    const weightBp = optInt(c.weightBp, `rubric.criteria[${i}].weightBp`) ?? 10_000;
+    if (weightBp < 0) fail(`rubric.criteria[${i}].weightBp`, "a value of zero or more");
+
+    return {
+      label: str(c.label, `rubric.criteria[${i}].label`),
+      maxPoints,
+      weightBp,
+      sortOrder: optInt(c.sortOrder, `rubric.criteria[${i}].sortOrder`) ?? i,
+    };
+  });
+  if (criteria.length === 0) fail("rubric.criteria", "at least one criterion");
+
+  const labels = new Set(criteria.map((c) => c.label));
+  if (labels.size !== criteria.length) fail("rubric.criteria", "criterion labels to be unique");
+
+  const tiebreakers = array(rubric.tiebreakers ?? [], "rubric.tiebreakers").map((entry, i) =>
+    tiebreaker(entry, `rubric.tiebreakers[${i}]`),
+  );
+  for (const [i, t] of tiebreakers.entries()) {
+    if (t.kind === "criterion" && !labels.has(t.criterion)) {
+      fail(`rubric.tiebreakers[${i}].criterion`, `a criterion label that exists (${t.criterion})`);
+    }
+  }
+
+  const teams = array(root.teams, "teams").map((entry, i) => {
+    const t = record(entry, `teams[${i}]`);
+    return {
+      name: str(t.name, `teams[${i}].name`),
+      school: optStr(t.school, `teams[${i}].school`),
+      bidCode: str(t.bidCode, `teams[${i}].bidCode`),
+      division: optStr(t.division, `teams[${i}].division`),
+      rosterSize: optInt(t.rosterSize, `teams[${i}].rosterSize`),
+      performanceOrder: optInt(t.performanceOrder, `teams[${i}].performanceOrder`) ?? i + 1,
+    };
+  });
+  if (teams.length === 0) fail("teams", "at least one team");
+
+  const bidCodes = new Set(teams.map((t) => t.bidCode));
+  if (bidCodes.size !== teams.length) fail("teams", "bid codes to be unique");
+
+  const judges = array(root.judges, "judges").map((entry, i) => {
+    const j = record(entry, `judges[${i}]`);
+    return {
+      name: str(j.name, `judges[${i}].name`),
+      email: optStr(j.email, `judges[${i}].email`),
+      division: optStr(j.division, `judges[${i}].division`),
+    };
+  });
+  if (judges.length === 0) fail("judges", "at least one judge");
+
+  const board = array(root.board, "board").map((entry, i) => {
+    const b = record(entry, `board[${i}]`);
+    return { name: str(b.name, `board[${i}].name`), email: optStr(b.email, `board[${i}].email`) };
+  });
+  // Without a board member there is nobody to attribute a lock to, and no board link to hand out.
+  if (board.length === 0) fail("board", "at least one board member");
+
+  return {
+    org: { name: str(org.name, "org.name"), slug: str(org.slug, "org.slug") },
+    comp: {
+      name: str(comp.name, "comp.name"),
+      slug: str(comp.slug, "comp.slug"),
+      compDate: optStr(comp.compDate, "comp.compDate"),
+      venue: optStr(comp.venue, "comp.venue"),
+      status: comp.status === undefined ? "live" : oneOf(comp.status, COMP_STATUSES, "comp.status"),
+    },
+    rubric: {
+      name: str(rubric.name, "rubric.name"),
+      normalization: oneOf(rubric.normalization, NORMALIZATIONS, "rubric.normalization"),
+      tiebreakers,
+      criteria,
+    },
+    teams,
+    judges,
+    board,
+  };
+};

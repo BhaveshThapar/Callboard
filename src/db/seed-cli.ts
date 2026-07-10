@@ -1,30 +1,43 @@
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { config } from "dotenv";
 
 config({ path: ".env.local", quiet: true });
 
 // Imported after dotenv, because `./index` reads DATABASE_URL when it loads.
-const { seedDemo, DEMO_TEAMS, DEMO_JUDGES } = await import("./seed");
+const { seedDemo, seedFromConfig, DEMO_CONFIG } = await import("./seed");
+const { parseCompConfig } = await import("./config");
 
-const jsonFlag = process.argv.indexOf("--json");
-const jsonPath = jsonFlag === -1 ? null : process.argv[jsonFlag + 1];
+const flag = (name: string): string | undefined => {
+  const i = process.argv.indexOf(name);
+  return i === -1 ? undefined : process.argv[i + 1];
+};
 
-const demo = await seedDemo();
+const jsonPath = flag("--json");
+const configPath = flag("--config");
+
+const compConfig = configPath
+  ? parseCompConfig(JSON.parse(readFileSync(configPath, "utf8")))
+  : DEMO_CONFIG;
+
+const seeded = configPath ? await seedFromConfig(compConfig) : await seedDemo();
 
 if (jsonPath) {
-  writeFileSync(jsonPath, JSON.stringify(demo, null, 2));
+  writeFileSync(jsonPath, JSON.stringify(seeded, null, 2));
 } else {
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3000";
+  const pad = Math.max(...[...seeded.board, ...seeded.judges].map((p) => p.name.length));
+
   console.log(
     [
       "",
-      `Seeded ${demo.compName}: ${DEMO_TEAMS.length} teams, ${DEMO_JUDGES.length} judges, zscore + head-to-head tiebreak.`,
+      `Seeded ${seeded.compName}: ${compConfig.teams.length} teams, ${seeded.judges.length} judges, ` +
+        `${compConfig.rubric.normalization} normalization.`,
       "",
       "Board (open on a laptop):",
-      `  ${demo.boardName.padEnd(16)} ${baseUrl}/board/${demo.boardToken}`,
+      ...seeded.board.map((b) => `  ${b.name.padEnd(pad)}  ${baseUrl}/board/${b.token}`),
       "",
       "Judges (one per phone):",
-      ...demo.judges.map((j) => `  ${j.name.padEnd(16)} ${baseUrl}/judge/${j.token}`),
+      ...seeded.judges.map((j) => `  ${j.name.padEnd(pad)}  ${baseUrl}/judge/${j.token}`),
       "",
       "These raw tokens are shown once. Only their hashes are stored.",
       "",
