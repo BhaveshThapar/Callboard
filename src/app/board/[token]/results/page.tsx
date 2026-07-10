@@ -1,0 +1,87 @@
+import { notFound } from "next/navigation";
+import Link from "next/link";
+import { eyebrowClass } from "@/components/styles";
+import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import { latestLockedRun } from "@/lib/comp/tab";
+import { PrintButton } from "./PrintButton";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * PRD B8, the emcee's sheet. Read off a screen or off paper, which is why it prints. Every number
+ * comes from the frozen snapshot, so what is read aloud is what was locked -- removing the
+ * hand-retype step that the placements currently pass through.
+ */
+export default async function ResultsPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) notFound();
+
+  const locked = await latestLockedRun(actor.compId);
+  if (!locked) notFound();
+
+  const teams = await listTeamsForBoard(actor);
+  const byId = new Map(teams.map((t) => [t.id, t]));
+  const placements = [...locked.results.placements].sort((a, b) => a.place - b.place);
+
+  return (
+    <main className="mx-auto max-w-2xl px-6 py-10 print:max-w-none print:px-0 print:py-0">
+      <header className="flex items-start justify-between gap-6">
+        <div>
+          <p className={eyebrowClass}>{actor.compName}</p>
+          <h1 className="mt-1 text-title font-bold text-heading">Final placements</h1>
+          <p className="mt-1 text-caption text-muted">
+            Locked {locked.lockedAt.toLocaleString()}
+            {locked.overrideReason && ` · corrected: ${locked.overrideReason}`}
+          </p>
+        </div>
+        <div className="flex shrink-0 gap-2 print:hidden">
+          <PrintButton />
+        </div>
+      </header>
+
+      <ol className="mt-8 space-y-1">
+        {placements.map((placement) => {
+          const team = byId.get(placement.teamId);
+          return (
+            <li
+              key={placement.teamId}
+              className="flex items-baseline gap-4 border-b border-border-soft py-3 last:border-0"
+            >
+              <span className="tabular w-8 shrink-0 text-title font-bold text-heading">
+                {placement.place}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="text-card font-semibold text-heading">
+                  {team?.name ?? placement.teamId}
+                </span>
+                {team?.school && (
+                  <span className="ml-2 text-caption text-muted">{team.school}</span>
+                )}
+              </span>
+              {placement.deductionPoints > 0 && (
+                <span className="tabular shrink-0 text-caption font-semibold text-secondary">
+                  −{placement.deductionPoints}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+
+      {locked.results.unresolvedTies.length > 0 && (
+        <p className="mt-6 text-body text-danger">
+          Unresolved tie — do not announce until it is settled by hand.
+        </p>
+      )}
+
+      <footer className="mt-10 flex items-center justify-between gap-4 text-micro text-subtle">
+        <span>Reproduced from the locked snapshot. Callboard.</span>
+        <Link href={`/board/${token}`} className="underline print:hidden">
+          Back to the board
+        </Link>
+      </footer>
+    </main>
+  );
+}

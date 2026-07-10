@@ -5,6 +5,7 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { Wordmark } from "@/components/Wordmark";
 import { AlertIcon, CheckCircleIcon, ShieldIcon, UsersIcon } from "@/components/icons";
 import {
+  buttonClass,
   cardClass,
   cx,
   eyebrowClass,
@@ -376,6 +377,19 @@ export function LiveBoard({
                   ? "Re-running the tabulation against the stored snapshot reproduces these exact placements."
                   : "The stored snapshot does not reproduce. Do not announce these results."}
               </p>
+
+              <div className="mt-4 flex flex-wrap gap-3 border-t border-border-soft pt-4">
+                <a
+                  href={`/board/${token}/results`}
+                  data-testid="emcee-link"
+                  className={buttonClass}
+                >
+                  Emcee sheet
+                </a>
+                <a href={`/board/${token}/feedback`} data-testid="feedback-link" className={buttonClass}>
+                  Download feedback CSV
+                </a>
+              </div>
             </div>
 
             <form
