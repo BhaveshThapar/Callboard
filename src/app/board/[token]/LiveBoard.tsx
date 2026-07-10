@@ -392,7 +392,10 @@ export function LiveBoard({
               </div>
             </div>
 
+            {/* Keyed on the run: a successful correction remounts the form and clears the
+                deduction fields, so a second click cannot re-apply a penalty that already landed. */}
             <form
+              key={snapshot.lockedRunNumber}
               action={overrideFormAction}
               className={cx(cardClass, "border-danger/30 bg-danger-light/40")}
             >

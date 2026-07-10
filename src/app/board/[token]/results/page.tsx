@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { eyebrowClass } from "@/components/styles";
 import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
-import { latestLockedRun } from "@/lib/comp/tab";
+import { latestLockedRun, reproduce } from "@/lib/comp/tab";
 import { PrintButton } from "./PrintButton";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +25,29 @@ export default async function ResultsPage({ params }: { params: Promise<{ token:
   const byId = new Map(teams.map((t) => [t.id, t]));
   const placements = [...locked.results.placements].sort((a, b) => a.place - b.place);
 
+  // The board screen refuses to announce a snapshot that does not reproduce. This is the page
+  // someone actually reads placements off, so it must refuse at least as loudly -- and it must
+  // never carry the footer claiming otherwise. The banner prints, because the sheet gets printed.
+  const { matches } = reproduce(locked);
+
   return (
     <main className="mx-auto max-w-2xl px-6 py-10 print:max-w-none print:px-0 print:py-0">
+      {!matches && (
+        <div
+          role="alert"
+          data-testid="reproduction-failure"
+          className="mb-8 rounded-card border-2 border-danger bg-danger-light p-4"
+        >
+          <p className="text-card font-bold text-danger">
+            This snapshot does not reproduce. Do not announce these placements.
+          </p>
+          <p className="mt-1 text-caption text-danger">
+            Re-running the tabulation against the frozen inputs did not return the stored result.
+            The record cannot be trusted until this is understood.
+          </p>
+        </div>
+      )}
+
       <header className="flex items-start justify-between gap-6">
         <div>
           <p className={eyebrowClass}>{actor.compName}</p>
@@ -77,7 +98,11 @@ export default async function ResultsPage({ params }: { params: Promise<{ token:
       )}
 
       <footer className="mt-10 flex items-center justify-between gap-4 text-micro text-subtle">
-        <span>Reproduced from the locked snapshot. Callboard.</span>
+        <span>
+          {matches
+            ? "Reproduced from the locked snapshot. Callboard."
+            : "Read from a locked snapshot that does not reproduce. Callboard."}
+        </span>
         <Link href={`/board/${token}`} className="underline print:hidden">
           Back to the board
         </Link>

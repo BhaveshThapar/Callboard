@@ -68,9 +68,23 @@ describe("toFeedbackCsv", () => {
     expect(rows[1]).toContain(",0,");
   });
 
-  it("omits a judge who did not score a team, rather than emitting a blank row", () => {
+  it("omits a judge who neither scored nor wrote to a team", () => {
     const rows = lines(toFeedbackCsv(base())).slice(1);
     expect(rows.filter((r) => r.includes("BU Dheem"))).toHaveLength(1);
+  });
+
+  it("still ships a note from a judge who scored nothing for that team", () => {
+    // Scores and notes are independent forms, so a judge can write feedback without scoring.
+    const input = base();
+    input.notes = new Map([[noteKey("j2", "t2"), "Did not finish scoring, but: lovely musicality."]]);
+
+    const rows = lines(toFeedbackCsv(input)).slice(1);
+    const row = rows.find((r) => r.includes("BU Dheem") && r.includes("Arjun Mehta"));
+
+    expect(row).toBeDefined();
+    expect(row).toContain("lovely musicality");
+    // No scores, so the criterion cells and the total are blank rather than a misleading zero.
+    expect(row).toContain("2,BU Dheem,B-207,Arjun Mehta,,,,-2,");
   });
 
   it("quotes a note containing a comma", () => {

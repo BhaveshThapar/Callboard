@@ -82,22 +82,14 @@ export const overrideAction = async (
     if (!reason) return { status: "error", message: "A deduction needs a reason." };
   }
 
+  let deductionId: string | undefined;
   try {
     if (wantsDeduction) {
       const [row] = await db
         .insert(deductions)
         .values({ compId: actor.compId, teamId, points, reason, createdByPersonId: actor.personId })
         .returning();
-
-      await recordAudit({
-        compId: actor.compId,
-        actorKind: "board",
-        actorPersonId: actor.personId,
-        action: "deduction.add",
-        entity: "team",
-        entityId: teamId,
-        after: { points, reason, deductionId: row?.id, correctsRunId: existing.id },
-      });
+      deductionId = row?.id;
     }
 
     const run = await lockResults(actor.compId, {
@@ -105,6 +97,18 @@ export const overrideAction = async (
       overrideReason,
     });
     const runNumber = await runCount(actor.compId);
+
+    if (deductionId) {
+      await recordAudit({
+        compId: actor.compId,
+        actorKind: "board",
+        actorPersonId: actor.personId,
+        action: "deduction.add",
+        entity: "team",
+        entityId: teamId,
+        after: { points, reason, deductionId, correctsRunId: existing.id },
+      });
+    }
 
     await recordAudit({
       compId: actor.compId,
@@ -120,6 +124,23 @@ export const overrideAction = async (
     revalidatePath(`/board/${token}`);
     return { status: "ok", message: `Run ${runNumber} supersedes run ${runNumber - 1}.` };
   } catch (error) {
+    // The deduction is already written and there is no transaction to roll back. Left alone it
+    // would be folded silently into whatever locks next -- a penalty the board was told had
+    // failed. So withdraw it, unless a concurrent correction has already locked and frozen it into
+    // a snapshot, where it must stand rather than be erased from a result that counted it.
+    if (deductionId) {
+      const current = await latestLockedRun(actor.compId);
+      if (current && current.id !== existing.id) {
+        revalidatePath(`/board/${token}`);
+        return {
+          status: "error",
+          message:
+            "Another board member locked a correction first, and it counted your deduction. Reload before correcting again.",
+        };
+      }
+      await db.delete(deductions).where(eq(deductions.id, deductionId));
+    }
+
     return {
       status: "error",
       message: error instanceof Error ? error.message : "Correction failed.",

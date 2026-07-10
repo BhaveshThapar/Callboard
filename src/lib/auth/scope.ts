@@ -25,6 +25,7 @@ export type Actor = BoardActor | JudgeActor;
 /** Teams a judge is allowed to see. Note the absence of `name`: blindness is enforced by the type. */
 export type JudgeTeamView = { id: string; bidCode: string; performanceOrder: number | null };
 export type BoardTeamView = JudgeTeamView & { name: string; school: string | null };
+export type BoardJudgeView = { assignmentId: string; name: string; revokedAt: Date | null };
 
 const SCOREABLE = ["accepted", "competing"] as const;
 
@@ -109,3 +110,16 @@ export const listTeamsForBoard = (actor: BoardActor): Promise<BoardTeamView[]> =
     .from(teams)
     .where(and(eq(teams.compId, actor.compId), inArray(teams.status, [...SCOREABLE])))
     .orderBy(teams.performanceOrder, teams.bidCode);
+
+/** Every judge of the board's comp, revoked ones included — the caller decides what to do with them. */
+export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]> =>
+  db
+    .select({
+      assignmentId: judgeAssignments.id,
+      name: people.name,
+      revokedAt: judgeAssignments.revokedAt,
+    })
+    .from(judgeAssignments)
+    .innerJoin(people, eq(people.id, judgeAssignments.personId))
+    .where(eq(judgeAssignments.compId, actor.compId))
+    .orderBy(people.name);

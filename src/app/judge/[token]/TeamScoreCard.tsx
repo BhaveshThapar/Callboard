@@ -142,7 +142,13 @@ export function TeamScoreCard({
         />
         <div className="mt-2 flex items-center justify-between gap-3">
           {/* aria-live, not role="status": the page's one status region is the lock banner. */}
-          <span className="text-caption text-subtle" aria-live="polite">
+          <span
+            aria-live="polite"
+            className={cx(
+              "text-caption",
+              noteState.status === "error" ? "font-medium text-danger" : "text-subtle",
+            )}
+          >
             {noteState.status === "saved" ? "Note saved" : noteState.message}
           </span>
           <button type="submit" disabled={locked || notePending} className={buttonClass}>

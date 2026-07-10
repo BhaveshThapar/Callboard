@@ -93,6 +93,10 @@ test("a judge's note reaches the feedback export, and the emcee gets a printable
   await expect(boardPage.locator("ol li")).toHaveCount(TEAM_COUNT);
   await expect(boardPage.getByRole("button", { name: "Print or save as PDF" })).toBeVisible();
 
+  // The sheet the emcee reads from checks reproduction itself, and only then claims it.
+  await expect(boardPage.getByTestId("reproduction-failure")).toHaveCount(0);
+  await expect(boardPage.getByText("Reproduced from the locked snapshot.")).toBeVisible();
+
   // The CSV downloads, carries the note, and escapes it.
   const response = await boardPage.request.get(`/board/${demo.boardToken}/feedback`);
   expect(response.status()).toBe(200);
