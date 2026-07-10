@@ -2,6 +2,14 @@ import { defineConfig, devices } from "@playwright/test";
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
+/**
+ * Read before anything loads `.env.local`, so this is true only when the shell named a database.
+ * An already-running dev server was started against whatever database *it* was given; reusing it
+ * would seed one database and assert against another, and every spec would fail for the wrong
+ * reason. Refusing to reuse turns that into a port-in-use error, which says what is wrong.
+ */
+const databaseNamedByShell = !!process.env.DATABASE_URL;
+
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/guard.ts",
@@ -29,7 +37,7 @@ export default defineConfig({
     : {
         command: "bun run dev",
         url: "http://localhost:3000",
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: !process.env.CI && !databaseNamedByShell,
         timeout: 120_000,
       },
 });
