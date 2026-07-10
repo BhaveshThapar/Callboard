@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { LockIcon } from "@/components/icons";
 import { eyebrowClass } from "@/components/styles";
 import { listTeamsForJudge, resolveJudgeActor } from "@/lib/auth/scope";
+import { notesForJudge } from "@/lib/comp/feedback";
 import { getRubric, judgeScores, latestLockedRun } from "@/lib/comp/tab";
 import { TeamScoreCard } from "./TeamScoreCard";
 
@@ -13,10 +14,11 @@ export default async function JudgePage({ params }: { params: Promise<{ token: s
   const actor = await resolveJudgeActor(token);
   if (!actor) notFound();
 
-  const [teams, rubric, existing, locked] = await Promise.all([
+  const [teams, rubric, existing, notes, locked] = await Promise.all([
     listTeamsForJudge(actor),
     getRubric(actor.compId),
     judgeScores(actor.judgeAssignmentId),
+    notesForJudge(actor.judgeAssignmentId),
     latestLockedRun(actor.compId),
   ]);
 
@@ -53,6 +55,7 @@ export default async function JudgePage({ params }: { params: Promise<{ token: s
               performanceOrder={team.performanceOrder}
               criteria={rubric.criteria}
               initialValues={Object.fromEntries(existing.get(team.id) ?? [])}
+              initialNote={notes.get(team.id) ?? ""}
               locked={locked !== null}
               index={index}
             />

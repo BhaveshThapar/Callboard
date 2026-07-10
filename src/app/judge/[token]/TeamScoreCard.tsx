@@ -1,9 +1,17 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { cardClass, cx, eyebrowClass, pillClass, primaryButtonClass } from "@/components/styles";
+import {
+  buttonClass,
+  cardClass,
+  cx,
+  eyebrowClass,
+  inputClass,
+  pillClass,
+  primaryButtonClass,
+} from "@/components/styles";
 import type { Criterion } from "@/lib/tabulation/types";
-import { submitScores } from "./actions";
+import { submitNote, submitScores } from "./actions";
 import { IDLE } from "./state";
 
 type Props = {
@@ -13,6 +21,7 @@ type Props = {
   performanceOrder: number | null;
   criteria: Criterion[];
   initialValues: Record<string, number>;
+  initialNote: string;
   locked: boolean;
   index: number;
 };
@@ -24,10 +33,12 @@ export function TeamScoreCard({
   performanceOrder,
   criteria,
   initialValues,
+  initialNote,
   locked,
   index,
 }: Props) {
   const [state, formAction, pending] = useActionState(submitScores, IDLE);
+  const [noteState, noteFormAction, notePending] = useActionState(submitNote, IDLE);
   const [values, setValues] = useState<Record<string, string>>(() =>
     Object.fromEntries(criteria.map((c) => [c.id, initialValues[c.id]?.toString() ?? ""])),
   );
@@ -39,72 +50,106 @@ export function TeamScoreCard({
   const scored = alreadyScored || state.status === "saved";
 
   return (
-    <form
-      action={formAction}
-      data-testid={`team-card-${bidCode}`}
+    <section
       className={cx(cardClass, "animate-fade-in-up")}
       style={{ animationDelay: `${index * 0.05}s` }}
     >
-      <input type="hidden" name="token" value={token} />
-      <input type="hidden" name="teamId" value={teamId} />
+      {/* The note is a sibling form, not a nested one: HTML has no nested forms. */}
+      <form action={formAction} data-testid={`team-card-${bidCode}`}>
+        <input type="hidden" name="token" value={token} />
+        <input type="hidden" name="teamId" value={teamId} />
 
-      <div className="flex items-baseline justify-between">
-        <div>
-          <span className={eyebrowClass}>
-            {performanceOrder !== null ? `Performance ${performanceOrder}` : "Team"}
-          </span>
-          <h2 className="tabular mt-0.5 text-title font-bold text-heading">{bidCode}</h2>
-        </div>
-        {scored && (
-          <span className={cx(pillClass, "bg-primary-light text-primary")}>Scored</span>
-        )}
-      </div>
-
-      <div className="mt-5 space-y-3">
-        {criteria.map((criterion) => (
-          <label key={criterion.id} className="flex items-center justify-between gap-4">
-            <span className="text-body font-medium text-heading">
-              {criterion.label}
-              <span className="ml-1.5 text-caption font-normal text-subtle">
-                / {criterion.maxPoints}
-              </span>
+        <div className="flex items-baseline justify-between">
+          <div>
+            <span className={eyebrowClass}>
+              {performanceOrder !== null ? `Performance ${performanceOrder}` : "Team"}
             </span>
-            <input
-              name={`criterion:${criterion.id}`}
-              type="number"
-              inputMode="numeric"
-              min={0}
-              max={criterion.maxPoints}
-              step={1}
-              required
-              disabled={locked}
-              value={values[criterion.id] ?? ""}
-              onChange={(e) => setValues((v) => ({ ...v, [criterion.id]: e.target.value }))}
-              aria-label={criterion.label}
-              className="tabular w-20 rounded-md border border-border bg-surface px-3 py-2 text-right text-lg font-semibold text-heading focus:border-primary focus:outline-none disabled:bg-app disabled:text-subtle"
-            />
-          </label>
-        ))}
-      </div>
+            <h2 className="tabular mt-0.5 text-title font-bold text-heading">{bidCode}</h2>
+          </div>
+          {scored && <span className={cx(pillClass, "bg-primary-light text-primary")}>Scored</span>}
+        </div>
 
-      <div className="mt-5 flex items-center justify-between border-t border-border-soft pt-4">
-        <span className="tabular text-body text-muted">
-          <span className="font-semibold text-heading">{total}</span> / {maxTotal}
-        </span>
-        <button
-          type="submit"
-          disabled={locked || pending || !complete}
-          className={primaryButtonClass}
-        >
-          {pending ? "Saving…" : alreadyScored ? "Update" : "Submit"}
-        </button>
-      </div>
+        <div className="mt-5 space-y-3">
+          {criteria.map((criterion) => (
+            <label key={criterion.id} className="flex items-center justify-between gap-4">
+              <span className="text-body font-medium text-heading">
+                {criterion.label}
+                <span className="ml-1.5 text-caption font-normal text-subtle">
+                  / {criterion.maxPoints}
+                </span>
+              </span>
+              <input
+                name={`criterion:${criterion.id}`}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={criterion.maxPoints}
+                step={1}
+                required
+                disabled={locked}
+                value={values[criterion.id] ?? ""}
+                onChange={(e) => setValues((v) => ({ ...v, [criterion.id]: e.target.value }))}
+                aria-label={criterion.label}
+                className="tabular w-20 rounded-md border border-border bg-surface px-3 py-2 text-right text-lg font-semibold text-heading focus:border-primary focus:outline-none disabled:bg-app disabled:text-subtle"
+              />
+            </label>
+          ))}
+        </div>
 
-      {state.status === "error" && (
-        <p role="alert" className="mt-3 text-body text-danger">
-          {state.message}
+        <div className="mt-5 flex items-center justify-between border-t border-border-soft pt-4">
+          <span className="tabular text-body text-muted">
+            <span className="font-semibold text-heading">{total}</span> / {maxTotal}
+          </span>
+          <button
+            type="submit"
+            disabled={locked || pending || !complete}
+            className={primaryButtonClass}
+          >
+            {pending ? "Saving…" : alreadyScored ? "Update" : "Submit"}
+          </button>
+        </div>
+
+        {state.status === "error" && (
+          <p role="alert" className="mt-3 text-body text-danger">
+            {state.message}
+          </p>
+        )}
+      </form>
+
+      <form
+        action={noteFormAction}
+        data-testid={`team-note-${bidCode}`}
+        className="mt-5 border-t border-border-soft pt-4"
+      >
+        <input type="hidden" name="token" value={token} />
+        <input type="hidden" name="teamId" value={teamId} />
+
+        <label htmlFor={`note-${teamId}`} className="text-body font-medium text-heading">
+          Notes
+        </label>
+        <p className="mt-0.5 text-caption text-muted">
+          Sent to the team with their results. Not scored.
         </p>
-      )}
-    </form>
+        <textarea
+          id={`note-${teamId}`}
+          name="note"
+          rows={2}
+          defaultValue={initialNote}
+          disabled={locked}
+          aria-label="Notes"
+          placeholder="What should this team work on?"
+          className={cx(inputClass, "mt-2 resize-y disabled:bg-app disabled:text-subtle")}
+        />
+        <div className="mt-2 flex items-center justify-between gap-3">
+          {/* aria-live, not role="status": the page's one status region is the lock banner. */}
+          <span className="text-caption text-subtle" aria-live="polite">
+            {noteState.status === "saved" ? "Note saved" : noteState.message}
+          </span>
+          <button type="submit" disabled={locked || notePending} className={buttonClass}>
+            {notePending ? "Saving…" : "Save note"}
+          </button>
+        </div>
+      </form>
+    </section>
   );
 }

@@ -59,6 +59,31 @@ export const scores = pgTable(
   ],
 );
 
+/**
+ * A judge's written feedback for one team. Deliberately not a column on `scores`: it is one note
+ * per team, not one per criterion, and it must never reach `TabulationInput`. Notes carry no
+ * number, change no placement, and are excluded from the frozen `tab_runs` snapshot -- a locked
+ * result must reproduce from the scores alone.
+ */
+export const judgeNotes = pgTable(
+  "judge_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    compId: uuid("comp_id")
+      .notNull()
+      .references(() => comps.id, { onDelete: "cascade" }),
+    judgeAssignmentId: uuid("judge_assignment_id")
+      .notNull()
+      .references(() => judgeAssignments.id, { onDelete: "cascade" }),
+    teamId: uuid("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    note: text("note").notNull(),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [unique("judge_notes_judge_team_unique").on(t.judgeAssignmentId, t.teamId)],
+);
+
 /** Objective penalties, recorded against the team rather than against any one judge. */
 export const deductions = pgTable(
   "deductions",
