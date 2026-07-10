@@ -22,6 +22,10 @@ Three Neon branches, and the demo runs on exactly one of them.
 
 `bun run db:seed` with no override hits `dev`, which is not what a prospect is looking at. Seeding the demo means naming production explicitly, below. The split exists because seeding deletes the demo org and everything cascading from it — before the branches were separated, a merged pull request could 404 three judges' phones mid-call.
 
+## After deploying, reseed once
+
+Migration `0002` drops `comps.board_token_hash`, so **any comp seeded before it has no board link** — the judges' links still work, the board's does not. There is nothing to migrate: a board link is now a person, and the old token named nobody. Reseeding mints one. This is a one-time cost of [ADR-0007](decisions/0007-board-links-are-per-person.md), and reseeding before a call is the normal flow anyway.
+
 ## Before the call
 
 ```bash
@@ -34,7 +38,7 @@ A leading environment variable wins over `.env.local`, so nothing needs editing.
 
 ```
 Board (open on a laptop):
-  https://.../board/<token>
+  Ananya Krishnan  https://.../board/<token>
 
 Judges (one per phone):
   Priya Raghavan   https://.../judge/<token>
@@ -44,7 +48,21 @@ Judges (one per phone):
 
 The raw tokens are shown exactly once. Only their sha256 is stored. Text the judge links; open the board link on the laptop you are screen-sharing.
 
+The board link carries a name because it belongs to a person, not to the comp. That is what lets a lock and a correction be attributed to a human (PRD B6, [ADR-0007](decisions/0007-board-links-are-per-person.md)). Add board members in `comp-config.json` and each gets their own link.
+
 Reseeding at any point gives you fresh links and a clean comp.
+
+## Running it with their rubric
+
+If a board asks *"can we try it with ours?"* — say yes on the call, and do it afterward. Copy `comp-config.example.json`, fill in their criteria, weights, normalization, tiebreakers, teams, bid codes, and judges, then:
+
+```bash
+DATABASE_URL='<neon main pooled>' bunx tsx src/db/seed-cli.ts --config their-comp.json
+```
+
+It seeds its own org and cascades independently, so it cannot disturb the Mayuri demo. All three normalizations (`raw`, `zscore`, `rank`) and all three tiebreakers (`criterion`, `head_to_head`, `highest_single_judge`) are supported.
+
+This is a founder-run script, not a setup screen, and that is deliberate (PRD §12: white-glove founding support). Setup UI waits for deposits.
 
 ## The five minutes
 
@@ -60,17 +78,31 @@ Reseeding at any point gives you fresh links and a clean comp.
 
 **6. Point at "✓ Snapshot reproduces."** This is the whole pitch. The lock froze the scores, the rubric, and the results into one row. That green check is the app re-running the tabulation against the frozen inputs, right now, and getting the same answer. It will get the same answer next February.
 
-**7. Scroll to the audit trail.** Every score, deduction, and lock, timestamped and attributed. Then ask the question that closes:
+**7. Scroll to the audit trail.** Every score, deduction, and lock — timestamped, and attributed to a name. Not "board." *Ananya Krishnan.* The board link belongs to a person, so the record knows which human did each thing.
+
+**8. Let them ask "but what if the math was wrong?"** They will. This is the question the whole product answers, so do not rush it.
+
+Fill in the correction box: `Time penalty for NCSU was missed during scoring`, deduct `2` from NCSU, re-lock. Then say what just happened, slowly:
+
+- The placements moved. A correction that cannot change anything proves nothing.
+- **Nothing was edited.** The first run is still in the database, with its own frozen inputs, still reproducing. Run 2 supersedes run 1; it does not replace it. Scores are immutable after a lock — a correction is a new deduction and a new tabulation, never a rewritten score.
+- The new run carries a name and a written reason, and the audit trail shows `tab.override`.
+
+Paper cannot do this. A spreadsheet cannot do this, because a spreadsheet's history is whoever last hit save.
+
+**9. Now ask the question that closes:**
 
 > If a team's captain emails you tomorrow asking to see the math, what do you send them today?
 
-The honest answer is that the score sheets are in a folder in someone's apartment, if they weren't recycled.
+The honest answer is that the score sheets are in a folder in someone's apartment, if they weren't recycled. Then answer it yourself: click **Emcee sheet** (print it, or save it as a PDF) and **Download feedback CSV** — every judge's score on every criterion, plus what each judge wrote to that team, read straight from the frozen snapshot.
+
+**Aside, if a judge's link comes up.** Any judge can be revoked from the board screen mid-comp. The link stops opening; their scores stand and still count. Revoking is not a retraction.
 
 ## What to say when they push back
 
 **"Paper works fine."** It does, until it doesn't. This is insurance sold before the fire. Do not argue that the forms are nicer — ask whether they have ever had a team question a placement, and watch what happens in the room. Rank the pains: money is a last-month pain, scoring is a someday pain.
 
-**"You're a student. Will this exist next year?"** Data exports from day one. Worst case they end up back in Sheets, with better Sheets. Founding customers get the founder on-call for tab day.
+**"You're a student. Will this exist next year?"** Data exports from day one — not a promise, a button: show them the feedback CSV you just downloaded. Worst case they end up back in Sheets, with better Sheets. Founding customers get the founder on-call for tab day.
 
 **"Our league might build this."** Good — introduce me. If Origins or NDDL wants an official tabulation layer, that is the best outcome on the board, not the worst.
 

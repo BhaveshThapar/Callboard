@@ -14,17 +14,19 @@ Two groups of tables follow. The first group exists in Postgres. The second grou
 
 Persists across years. This is the institutional memory that PRD §2.3 says evaporates every May when the board turns over.
 
-**`comps`** — `id`, `org_id`, `name`, `slug`, `comp_date`, `venue`, `status`, `board_token_hash` (unique), `created_at`
+**`comps`** — `id`, `org_id`, `name`, `slug`, `comp_date`, `venue`, `status`, `created_at`
 
 `status` ∈ `draft | open | live | complete`, enforced by a check constraint. Unique on `(org_id, slug)`.
-
-`board_token_hash` is the sha256 of the board's access token, the same primitive judges use. One link per comp authorizes the tab view, deductions, and the lock.
 
 **`people`** — `id`, `org_id`, `name`, `email`, `phone`, `created_at`. Unique on `(org_id, email)`.
 
 **`comp_roles`** — `id`, `comp_id`, `person_id`, `role`
 
 `role` ∈ `board | liaison | judge | captain | attendee`. Unique on `(comp_id, person_id, role)`, so a person can be a board member *and* a liaison at the same comp — which is the normal case, not an edge case.
+
+**`board_assignments`** — `id`, `comp_id`, `person_id`, `token_hash` (unique), `revoked_at`, `created_at`
+
+The board's access token, the same primitive judges use, and deliberately **one per board member rather than one per comp**. A lock and an override must name the human who authorized them (PRD B6); a link shared by the whole board can only name the board. Revoking works exactly as it does for a judge.
 
 ### Teams
 
@@ -52,17 +54,29 @@ The raw token exists only in the URL handed to the judge. Revoking is a write, n
 
 Unique on `(judge_assignment_id, team_id, criterion_id)`, so a resubmission upserts rather than duplicating. Refused entirely once a `tab_runs` row exists.
 
+**`judge_notes`** — `id`, `comp_id`, `judge_assignment_id`, `team_id`, `note`, `submitted_at`
+
+A judge's written feedback for one team, unique on `(judge_assignment_id, team_id)`. A table rather than a column on `scores`, because a note is one per *team* and a score is one per *criterion*.
+
+Notes never reach `TabulationInput` and nothing under `src/lib/tabulation/` knows they exist. A note carries no number and moves no placement, so it stays out of the frozen snapshot — a locked result must reproduce from the scores alone. The feedback export is therefore the one place frozen and live data are read together, which is safe because notes close when scoring closes.
+
 **`deductions`** — `id`, `comp_id`, `team_id`, `points`, `reason`, `created_by_person_id`, `created_at`
 
 Recorded against the team, not against a judge: a time penalty is an objective fact about the performance, not one judge's opinion. `reason` is `not null` on purpose.
 
-**`tab_runs`** — `id`, `comp_id`, `rubric_id`, `inputs`, `config`, `results`, `locked_at`, `locked_by_person_id`, `supersedes_id`, `override_reason`
+Deductions are also the only lever a **correction** has. Scores are immutable after a lock, so a post-lock correction is expressed as an attributed deduction plus a re-tabulation.
+
+**`tab_runs`** — `id`, `seq`, `comp_id`, `rubric_id`, `inputs`, `config`, `results`, `locked_at`, `locked_by_person_id`, `supersedes_id`, `override_reason`
 
 The locked snapshot. `inputs` and `config` are the frozen arguments to `tabulate()`; `results` is what it returned. Re-running the function against `inputs` must reproduce `results` exactly — that is the whole of the dispute-proofing claim.
 
 These three columns are **`json`, not `jsonb`**. `jsonb` reorders object keys and collapses duplicates, so it cannot promise a snapshot comes back as the bytes that went in.
 
 A correction never mutates. It inserts a new row with `supersedes_id` set and an `override_reason` written by a human.
+
+`seq` is a generated identity, and it is what orders the runs. `locked_at` cannot: it defaults to `now()`, the transaction timestamp, so two runs can share one. `id` cannot either — it is a random v4. `seq` is never shown to a board, because it does not reset when a comp is reseeded; the board is told a per-comp run number instead.
+
+A partial unique index on `supersedes_id` (where it is not null) means **two runs can never supersede the same parent**. A forked chain has two heads and no fact of the matter about which result stands, and a double-submitted correction is the realistic way that happens. The database refuses it rather than the application.
 
 **`audit_log`** — `id`, `comp_id`, `actor_kind`, `actor_person_id`, `action`, `entity`, `entity_id`, `before`, `after`, `at`
 

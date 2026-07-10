@@ -21,16 +21,18 @@ The selling window is **August**, before the fall crush. Boards for spring 2027 
 
 **Shipped: the scoring demo.** PRD §8.4 — "one weekend of build: fake teams, three judges on phones, live tabulation on screen. Everything else waits for deposits."
 
-- Per-comp rubric configuration, stored as data (B1)
+- Per-comp rubric configuration, stored as data (B1) — authored via `comp-config.json`, seeded by the founder. Not a rubric builder; that waits for deposits.
 - Judges score from any phone browser, no install (B2)
 - Raw / z-score / rank normalization (B3)
 - Deduction entry (B4)
 - Live tabulation with configurable tiebreak logic (B5)
 - Locked audit trail; nothing editable post-lock without an attributed override (B6)
 - Blind judging via bid codes (B7)
-- A placement table the emcee can read from (B8)
+- A placement table the emcee can read from, plus per-team feedback export (B8)
 
 Meets the §8.3 acceptance test, encoded in `e2e/scoring.spec.ts`: 8 teams, 3 judges, phones, locked auditable placements, reproducible.
+
+**B6 and B8 were only half true until July 2026**, and the gap was in the code rather than the design. The override wrote `supersedes_id` and `override_reason` but no form ever reached it; `locked_by_person_id`, `deductions.created_by_person_id`, and `audit_log.actor_person_id` were null in every row, because a board token authorized a comp and not a person. Judge links were unrevocable in practice. There was no export of any kind, and `scores` had no text column, so judge feedback was not half-built — it was unrepresentable. All four are closed: board links are per person ([ADR-0007](decisions/0007-board-links-are-per-person.md)), a correction applies an attributed deduction and supersedes the prior run, judges can be revoked from the board screen, and `judge_notes` feeds an emcee sheet and a feedback CSV. Covered by `e2e/override.spec.ts`, `e2e/revoke.spec.ts`, and `e2e/feedback.spec.ts`.
 
 ## v1 — "the part that bleeds money" (on ≥3 deposits)
 

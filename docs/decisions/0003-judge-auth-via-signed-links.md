@@ -1,6 +1,6 @@
 # ADR-0003 — Judges authenticate by signed link, never by account
 
-**Status:** accepted · July 9, 2026
+**Status:** accepted · July 9, 2026 · the board-link half superseded by [ADR-0007](0007-board-links-are-per-person.md)
 
 ## Context
 
