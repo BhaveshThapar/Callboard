@@ -28,12 +28,19 @@ jobs:
         run: bun run test
 
   # The acceptance test in PRD §8.3 needs a real Postgres and a real browser.
-  # Runs only when a database is available to the workflow.
+  #
+  # It reads its own secret. `bun run e2e` reseeds, which deletes the demo org and everything
+  # cascading from it, so the deployed demo's connection string must never be reachable from
+  # this job. `e2e/guard.ts` refuses that database besides.
   acceptance:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' }}
+    # One CI database, so one run at a time. Queue rather than cancel: a half-migrated
+    # database is worse than a slow pipeline.
+    concurrency:
+      group: acceptance-database
+      cancel-in-progress: false
     env:
-      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      DATABASE_URL: ${{ secrets.CI_DATABASE_URL }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -42,7 +49,9 @@ jobs:
 
       - run: bun install --frozen-lockfile
       - if: ${{ env.DATABASE_URL == '' }}
-        run: echo "No DATABASE_URL secret set; skipping acceptance test." && exit 0
+        run: |
+          echo "::error::CI_DATABASE_URL is not set, so the PRD §8.3 acceptance test cannot run. A green check here would be a lie."
+          exit 1
 
       - run: bunx playwright install --with-deps chromium
       - run: bun run db:migrate

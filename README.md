@@ -35,7 +35,7 @@ To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 | `bun run dev` | Next dev server |
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run lint` | ESLint |
-| `bun test` | Vitest unit tests |
+| `bun run test` | Vitest unit tests (not `bun test` — that runs Bun's own runner over `e2e/`) |
 | `bun run e2e` | Playwright acceptance test |
 | `bun run db:generate` | Generate a migration from schema changes |
 | `bun run db:migrate` | Apply migrations |

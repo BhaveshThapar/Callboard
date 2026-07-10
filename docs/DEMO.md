@@ -22,6 +22,8 @@ Three Neon branches, and the demo runs on exactly one of them.
 
 `bun run db:seed` with no override hits `dev`, which is not what a prospect is looking at. Seeding the demo means naming production explicitly, below. The split exists because seeding deletes the demo org and everything cascading from it — before the branches were separated, a merged pull request could 404 three judges' phones mid-call.
 
+That split is now enforced rather than agreed to: `e2e/guard.ts` refuses to run the suite against the compute backing `main`, whoever points `DATABASE_URL` there, and CI reads its own `CI_DATABASE_URL` secret so the demo's connection string is never in its environment.
+
 ## After deploying, reseed once
 
 Migration `0002` drops `comps.board_token_hash`, so **any comp seeded before it has no board link** — the judges' links still work, the board's does not. There is nothing to migrate: a board link is now a person, and the old token named nobody. Reseeding mints one. This is a one-time cost of [ADR-0007](decisions/0007-board-links-are-per-person.md), and reseeding before a call is the normal flow anyway.
