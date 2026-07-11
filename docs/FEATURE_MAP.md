@@ -12,7 +12,7 @@ This map **sequences; it does not authorize.** The PRD argues against building (
 | **Designed** | specced in `docs/`, not built |
 | **Won't build** | the tarpit — stays in the tools that already do it |
 
-Counts: **8 live** (Module B) · **14 designed** (Module A) · **6 designed** (the Gita) · the rest below.
+Counts: **9 live** (Module B) · **14 designed** (Module A) · **6 designed** (the Gita) · the rest below.
 
 ---
 
@@ -28,8 +28,9 @@ Module B (Tabulation), PRD §8.3. Judges score from any phone; the math runs its
 | **B4** | Deduction entry | Time penalties applied to every judge's per-team total *before* normalization — the only well-defined choice when the aggregate is standard deviations. | `deductions` |
 | **B5** | Live tabulation + tiebreaks | Standings update every 2s. Ties broken by an ordered list (criterion, head-to-head Copeland, highest single judge); a surviving tie is surfaced, never silently picked. | `rank.ts` |
 | **B6** | Locked, attributed audit trail | Locking freezes inputs, rubric, results into one row. A correction supersedes — never edits — and every lock and override carries a person's name. Closed July 2026. | ADR-0007, `tab_runs` |
-| **B7** | Blind judging by bid code | A judge's projection of a team never selects its name — blindness is a property of the return type, a compile error to leak. | `scope.ts` |
-| **B8** | Emcee sheet + feedback export | A printable placement sheet the emcee reads from directly, plus a per-team feedback CSV read from the frozen snapshot. | `judge_notes`, `export/` |
+| **B7** | Blind judging, both directions | A judge's projection of a team never selects its name; the board's projection of a judge *beside a score* never selects theirs. Blindness is a property of the return type both ways — a compile error to leak. Closed July 2026. | ADR-0008, `scope.ts` |
+| **B8** | Emcee sheet + per-team feedback | A printable placement sheet the emcee reads from directly. Each team's feedback file carries its placement, its deduction and the reason, and each judge's note under `Judge N` — and **no scores**. One file per team, so a forward cannot leak a rival's notes. | ADR-0008, `export/feedback.ts` |
+| **B9** | Board score breakdown | The board's own audit export: every judge's score on every criterion, from the frozen snapshot, under `Judge 1 / Judge 2`. Lets a board spot a rogue judge without learning which of its judges it was. | `export/scores.ts` |
 
 ---
 

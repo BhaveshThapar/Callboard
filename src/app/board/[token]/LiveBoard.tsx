@@ -386,10 +386,15 @@ export function LiveBoard({
                 >
                   Emcee sheet
                 </a>
-                <a href={`/board/${token}/feedback`} data-testid="feedback-link" className={buttonClass}>
-                  Download feedback CSV
+                <a href={`/board/${token}/scores`} data-testid="scores-link" className={buttonClass}>
+                  Download score breakdown
                 </a>
               </div>
+              <p className="mt-3 text-caption text-muted">
+                The breakdown is yours: every judge&rsquo;s score on every criterion, as Judge 1,
+                Judge 2, Judge 3. It does not say which of your judges each one is, and it is not the
+                file you send out. Each team&rsquo;s own feedback downloads from the emcee sheet.
+              </p>
             </div>
 
             {/* Keyed on the run: a successful correction remounts the form and clears the

@@ -110,7 +110,7 @@ These stay in the tools that already do them well. Saying no here is what makes 
 
 - There is a single canonical **comp record**: People, Teams, Money, Schedule, Assignments.
 - **Committees are readers/writers** of that record, not separate modules. Registration writes roster rows; Finance writes paid/owed against the same rows; Logistics writes the schedule that references the same teams.
-- **Role-filtered views** expose slices: board sees everything; a team sees its own schedule and balance; a liaison sees assignments; a judge sees a scoring queue; an attendee sees public info.
+- **Role-filtered views** expose slices: a team sees its own schedule and balance; a liaison sees assignments; a judge sees a scoring queue; an attendee sees public info. The board sees the whole record with two deliberate exceptions — it cannot see which *named* judge entered a given score, and no team ever sees a score at all (B7, [ADR-0008](decisions/0008-judge-scores-are-de-identified.md)).
 - A **comms engine** sits on top and reads the same record: dues reminders fire off payment status, schedule pushes fire off the Gita, "you're up in 20" fires off show order. This is the keystone that fixes the stale-Gita problem — one edit re-times the cascade and re-pushes, instead of a human re-deriving by mouth.
 
 **Build the intersection, not the union.** Horizontal across all comps works *because* only the shared spine is built. Every comp has Registration, Finance, Logistics, Comms — identical across them. All the variance lives in the tarpit (each org's merch, videos, mixer theme), which isn't built. The moat is the specificity of "competition weekend," not breadth.
@@ -199,8 +199,8 @@ The record is comp-scoped and multi-tenant (many orgs, many comps per org, isola
 - B4. **Deduction entry** — time penalties and other deductions.
 - B5. **Live tabulation** with configurable **tie-break logic**.
 - B6. **Locked audit trail** — every score timestamped; nothing editable after lock without a logged, attributed override. This is the dispute-proofing that paper cannot provide.
-- B7. **Blind judging support** — bid codes / anonymized team identifiers (the circuit already does this; Origins uses it).
-- B8. **Results output** — a clean placement result the emcee can read from directly (removing the hand-retype step), plus per-team feedback export.
+- B7. **Blind judging, both directions.** A judge sees bid codes, never team names (the circuit already does this; Origins uses it). And the board sees `Judge 1 / Judge 2` beside a score, never the judge's name — a judge who can be named next to a number scores the number they can defend afterward, and alumni judge these comps. The board still sees its roster by name, to send links and chase the slow: it sees *who* judged and *whether* they submitted, never *what a named judge entered*. Both directions are enforced by the absence of a `name` field on the projection, so leaking one is a compile error rather than a review someone has to pass. ([ADR-0008](decisions/0008-judge-scores-are-de-identified.md))
+- B8. **Results output** — a clean placement result the emcee can read from directly (removing the hand-retype step), plus a per-team feedback export. **The team's export carries no scores**: its placement, its deduction and the reason recorded for it, and each judge's written note under a label. Publishing the numbers invites a team to litigate a 27-vs-28 on Execution, an argument no board can win. The board proves the placement from the locked snapshot instead — which is a stronger answer than the score sheet, not a weaker one. The board's own per-judge breakdown is a separate, board-only export.
 
 **v1 acceptance test**: a board can run scoring for 8 teams and 3 judges, on phones, and produce locked, auditable placements in under ~5 minutes, with results reproducible the next day.
 

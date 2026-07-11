@@ -86,6 +86,15 @@ export default async function ResultsPage({ params }: { params: Promise<{ token:
                   −{placement.deductionPoints}
                 </span>
               )}
+              {team && (
+                <a
+                  href={`/board/${token}/feedback?team=${encodeURIComponent(team.bidCode)}`}
+                  data-testid={`feedback-link-${team.bidCode}`}
+                  className="shrink-0 text-caption text-muted underline print:hidden"
+                >
+                  Feedback
+                </a>
+              )}
             </li>
           );
         })}
@@ -96,6 +105,12 @@ export default async function ResultsPage({ params }: { params: Promise<{ token:
           Unresolved tie — do not announce until it is settled by hand.
         </p>
       )}
+
+      <p className="mt-6 text-caption text-muted print:hidden">
+        Each team&rsquo;s feedback file carries its placement, its deduction and the reason for it,
+        and what each judge wrote — with no scores, and no judge named. One file per team, so
+        forwarding one cannot send a team its rivals&rsquo; notes.
+      </p>
 
       <footer className="mt-10 flex items-center justify-between gap-4 text-micro text-subtle">
         <span>

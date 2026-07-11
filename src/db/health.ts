@@ -14,6 +14,8 @@ export type Observed = {
   boardViewLoaded: boolean;
   judges: number;
   judgeViewLoaded: boolean;
+  /** Distinct `Judge N` labels the board's de-identified projection resolves. */
+  judgeLabels: number;
   teams: number;
 };
 
@@ -39,6 +41,15 @@ export const summarizeHealth = (
     problems.push(`only ${observed.judges} of ${expected.judges} judges resolve — ${RESEED}`);
   } else if (!observed.judgeViewLoaded) {
     problems.push(`judge view failed to load — ${RESEED}`);
+  }
+
+  // A judge with no label has no de-identified name for the board's export to use. Every board
+  // surface that carries a score takes the label, so this is the demo failing closed rather than
+  // falling back to a name -- but it fails closed mid-call, which is what the preflight is for.
+  if (observed.judgeLabels < expected.judges) {
+    problems.push(
+      `only ${observed.judgeLabels} of ${expected.judges} judges have a Judge N label — ${RESEED}`,
+    );
   }
 
   if (observed.teams < expected.teams) {

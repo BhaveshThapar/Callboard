@@ -77,7 +77,7 @@ test("a judge's note reaches the feedback export, and the emcee gets a printable
   const boardPage = await board.newPage();
 
   // Before the lock there is nothing to export: the snapshot the export reads does not exist.
-  const early = await boardPage.goto(`/board/${demo.boardToken}/feedback`);
+  const early = await boardPage.goto(`/board/${demo.boardToken}/feedback?team=A-114`);
   expect(early?.status()).toBe(409);
   const earlyResults = await boardPage.goto(`/board/${demo.boardToken}/results`);
   expect(earlyResults?.status()).toBe(404);
@@ -97,23 +97,51 @@ test("a judge's note reaches the feedback export, and the emcee gets a printable
   await expect(boardPage.getByTestId("reproduction-failure")).toHaveCount(0);
   await expect(boardPage.getByText("Reproduced from the locked snapshot.")).toBeVisible();
 
-  // The CSV downloads, carries the note, and escapes it.
-  const response = await boardPage.request.get(`/board/${demo.boardToken}/feedback`);
+  // Feedback is per team, and only per team: there is no whole-comp file to forward by accident.
+  await expect(boardPage.getByTestId("feedback-link-A-114")).toBeVisible();
+  const unfiltered = await boardPage.request.get(`/board/${demo.boardToken}/feedback`);
+  expect(unfiltered.status()).toBe(400);
+
+  // The team's file carries the note, escapes it, and names no judge.
+  const response = await boardPage.request.get(`/board/${demo.boardToken}/feedback?team=A-114`);
   expect(response.status()).toBe(200);
   expect(response.headers()["content-type"]).toContain("text/csv");
   expect(response.headers()["content-disposition"]).toContain("attachment");
 
   const csv = await response.text();
-  const rows = csv.split("\r\n");
-  expect(rows[0]).toBe(
-    "Place,Team,Bid code,Judge,Choreography,Execution,Musicality,Stage Presence,Judge total,Team deduction,Note",
+  expect(csv.split("\r\n")[0]).toBe(
+    "Place,Team,Bid code,Team deduction,Deduction reason,Judge,Note",
   );
   expect(csv).toContain("NCSU Nazaare");
-  expect(csv).toContain(judge.name);
+  expect(csv).toContain("Judge 1");
   // The comma inside the note must not have split the row, and the quotes must be doubled.
   expect(csv).toContain(
     '"Tight formations, but the third transition drags. Judge said ""watch it""."',
   );
+
+  // This team's rows and no other team's. Only one judge scored, so A-114 has exactly one row --
+  // the other two judges neither scored it nor wrote to it, and a blank row would say nothing.
+  const teamRows = csv.split("\r\n").slice(1);
+  expect(teamRows).toHaveLength(1);
+  expect(teamRows[0]).toContain("A-114");
+
+  // The two things a team must never receive: a judge's name, and a number.
+  for (const j of demo.judges) expect(csv).not.toContain(j.name);
+  for (const criterion of CRITERIA) expect(csv).not.toContain(criterion.label);
+  // A-114 led, so it was scored exactly maxPoints on each criterion. None of those may appear.
+  for (const criterion of CRITERIA) expect(csv).not.toContain(String(criterion.maxPoints));
+
+  // The board's own breakdown does carry the numbers -- under a label, never under a name.
+  const audit = await boardPage.request.get(`/board/${demo.boardToken}/scores`);
+  expect(audit.status()).toBe(200);
+  const auditCsv = await audit.text();
+  expect(auditCsv.split("\r\n")[0]).toBe(
+    "Place,Team,Bid code,Judge,Choreography,Execution,Musicality,Stage Presence,Judge total,Team deduction",
+  );
+  expect(auditCsv).toContain("Judge 1");
+  expect(auditCsv).toContain(`,${CRITERIA[0]!.maxPoints},`);
+  expect(auditCsv.split("\r\n")).toHaveLength(TEAM_COUNT + 1);
+  for (const j of demo.judges) expect(auditCsv).not.toContain(j.name);
 
   await board.close();
 });

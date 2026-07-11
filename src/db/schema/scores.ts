@@ -19,20 +19,35 @@ import { teams } from "./teams";
 /**
  * A judge's claim on a comp. The raw token lives only in the URL we hand them;
  * we store its sha256. Revoke by setting `revokedAt`. No password, no app install.
+ *
+ * `labelSeq` is the only name the board ever sees next to a score: "Judge 2". It is persisted
+ * rather than derived, because both obvious derivations leak or drift. Numbering by judge name
+ * is invertible -- a board that recruited three judges can sort them alphabetically in its head --
+ * and numbering by a sort over assignment ids silently renumbers the whole panel the moment a
+ * replacement judge is added mid-comp, which would make "Judge 2" mean a different person than it
+ * meant in yesterday's sheet.
  */
-export const judgeAssignments = pgTable("judge_assignments", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  compId: uuid("comp_id")
-    .notNull()
-    .references(() => comps.id, { onDelete: "cascade" }),
-  personId: uuid("person_id")
-    .notNull()
-    .references(() => people.id, { onDelete: "cascade" }),
-  division: text("division"),
-  tokenHash: text("token_hash").notNull().unique(),
-  revokedAt: timestamp("revoked_at", { withTimezone: true }),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const judgeAssignments = pgTable(
+  "judge_assignments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    compId: uuid("comp_id")
+      .notNull()
+      .references(() => comps.id, { onDelete: "cascade" }),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => people.id, { onDelete: "cascade" }),
+    labelSeq: integer("label_seq").notNull(),
+    division: text("division"),
+    tokenHash: text("token_hash").notNull().unique(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("judge_assignments_comp_label_seq_unique").on(t.compId, t.labelSeq),
+    check("judge_assignments_label_seq_check", sql`${t.labelSeq} > 0`),
+  ],
+);
 
 export const scores = pgTable(
   "scores",

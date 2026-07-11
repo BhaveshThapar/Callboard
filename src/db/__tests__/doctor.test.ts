@@ -9,6 +9,7 @@ const healthy: Observed = {
   boardViewLoaded: true,
   judges: 3,
   judgeViewLoaded: true,
+  judgeLabels: 3,
   teams: 8,
 };
 
@@ -54,6 +55,13 @@ describe("summarizeHealth", () => {
     expect(health.problems[0]).toMatch(/reseed/);
   });
 
+  it("fails when a judge has no de-identified label (the board export would name them)", () => {
+    const health = summarizeHealth({ ...healthy, judgeLabels: 0 }, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems[0]).toMatch(/0 of 3 judges have a Judge N label/);
+  });
+
   it("reports the comp as unseeded before any other problem", () => {
     const health = summarizeHealth(
       {
@@ -63,6 +71,7 @@ describe("summarizeHealth", () => {
         boardViewLoaded: false,
         judges: 0,
         judgeViewLoaded: false,
+        judgeLabels: 0,
         teams: 0,
       },
       expected,

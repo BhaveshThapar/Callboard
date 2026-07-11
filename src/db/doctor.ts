@@ -1,5 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 import type { BoardActor, JudgeActor } from "@/lib/auth/scope";
+import { listJudgeLabelsForBoard } from "@/lib/auth/scope";
 import { boardSnapshot } from "@/lib/comp/board";
 import { judgeSnapshot } from "@/lib/comp/judge";
 import type { CompConfig } from "./config";
@@ -31,6 +32,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
         boardViewLoaded: false,
         judges: 0,
         judgeViewLoaded: false,
+        judgeLabels: 0,
         teams: 0,
       },
       { judges: config.judges.length, teams: config.teams.length },
@@ -46,6 +48,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
     .where(and(eq(boardAssignments.compId, comp.id), isNull(boardAssignments.revokedAt)));
 
   let boardViewLoaded = false;
+  let judgeLabels = 0;
   const first = board[0];
   if (first) {
     const actor: BoardActor = {
@@ -61,6 +64,16 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
       boardViewLoaded = true;
     } catch {
       boardViewLoaded = false;
+    }
+
+    // The projection every board-facing export of a score goes through. It reads `label_seq`, which
+    // `boardSnapshot` does not touch — so a comp seeded before that column existed still renders a
+    // board view and still fails at the export, which is exactly the drift this preflight is for.
+    try {
+      const labels = await listJudgeLabelsForBoard(actor);
+      judgeLabels = new Set(labels.map((l) => l.label)).size;
+    } catch {
+      judgeLabels = 0;
     }
   }
 
@@ -102,6 +115,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
       boardViewLoaded,
       judges: judges.length,
       judgeViewLoaded,
+      judgeLabels,
       teams: roster.length,
     },
     { judges: config.judges.length, teams: config.teams.length },
