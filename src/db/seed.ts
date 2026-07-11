@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, count, eq, inArray, isNull } from "drizzle-orm";
 import { createToken } from "@/lib/auth/token";
 import type { Tiebreaker } from "@/lib/tabulation/types";
 import type { CompConfig } from "./config";
@@ -22,6 +22,38 @@ import {
  */
 
 export { DEMO_CONFIG } from "./seed-config";
+
+/**
+ * How many live board and judge links `seedFromConfig(config)` would destroy. It deletes the org by
+ * slug and lets the cascade run, so every unrevoked link under that slug dies and comes back with a
+ * new token -- silently, since the old ones simply stop resolving.
+ *
+ * Zero means the seed *creates* rather than replaces. That distinction is the whole guard: seeding a
+ * prospect's comp into the deployed demo is safe and is the documented workflow (docs/DEMO.md),
+ * while reseeding one whose links are already on someone's phone is the thing that 404s mid-call.
+ */
+export const liveLinksAtRisk = async (config: CompConfig): Promise<number> => {
+  const existing = await db
+    .select({ id: comps.id })
+    .from(comps)
+    .innerJoin(orgs, eq(orgs.id, comps.orgId))
+    .where(eq(orgs.slug, config.org.slug));
+
+  if (existing.length === 0) return 0;
+  const compIds = existing.map((c) => c.id);
+
+  const [board] = await db
+    .select({ n: count() })
+    .from(boardAssignments)
+    .where(and(inArray(boardAssignments.compId, compIds), isNull(boardAssignments.revokedAt)));
+
+  const [judge] = await db
+    .select({ n: count() })
+    .from(judgeAssignments)
+    .where(and(inArray(judgeAssignments.compId, compIds), isNull(judgeAssignments.revokedAt)));
+
+  return (board?.n ?? 0) + (judge?.n ?? 0);
+};
 
 export type SeededComp = {
   compId: string;
