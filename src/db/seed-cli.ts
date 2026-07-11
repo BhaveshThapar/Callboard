@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { config } from "dotenv";
+import { isProtectedDatabase, protectedComputeId } from "./protected";
 
 config({ path: ".env.local", quiet: true });
 
 // Imported after dotenv, because `./index` reads DATABASE_URL when it loads.
-const { seedDemo, seedFromConfig, DEMO_CONFIG } = await import("./seed");
+const { seedDemo, seedFromConfig, liveLinksAtRisk, DEMO_CONFIG } = await import("./seed");
 const { parseCompConfig } = await import("./config");
 const { checkDemoHealth } = await import("./doctor");
 
@@ -19,6 +20,34 @@ const configPath = flag("--config");
 const compConfig = configPath
   ? parseCompConfig(JSON.parse(readFileSync(configPath, "utf8")))
   : DEMO_CONFIG;
+
+// On the deployed demo, refuse to reseed an org whose links are already in someone's hands. Seeding
+// deletes by org slug and reissues every token, so the links a prospect is holding stop resolving --
+// and they find out by opening one mid-call, which is the failure `db:doctor` can only diagnose
+// after the fact. `e2e/guard.ts` refuses this database outright because every spec reseeds; here the
+// test is narrower, because seeding a *new* comp into the deployed demo is the documented way to
+// show a board its own competition (docs/DEMO.md), and that destroys nothing.
+if (isProtectedDatabase(process.env.DATABASE_URL) && !process.argv.includes("--force")) {
+  const atRisk = await liveLinksAtRisk(compConfig);
+  if (atRisk > 0) {
+    console.error(
+      [
+        "",
+        `✗ Refusing to reseed "${compConfig.org.slug}" on Neon compute ${protectedComputeId()}.`,
+        "",
+        `  That is the deployed demo, and this seed would revoke ${atRisk} live board/judge link(s):`,
+        "  it deletes the org by slug and reissues every token, so any link already handed out",
+        "  stops resolving, and whoever opens one gets a 404 mid-call.",
+        "",
+        "  Seeding a *new* comp here is fine — this only fires because that org already exists.",
+        "  For local work, point DATABASE_URL at `dev` or `ci`. docs/DEMO.md has the table.",
+        "  To rebuild it anyway and hand out fresh links, pass --force.",
+        "",
+      ].join("\n"),
+    );
+    process.exit(1);
+  }
+}
 
 const seeded = configPath ? await seedFromConfig(compConfig) : await seedDemo();
 
