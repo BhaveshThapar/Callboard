@@ -66,13 +66,15 @@ Reseeding at any point gives you fresh links and a clean comp.
 
 ## Running it with their rubric
 
-If a board asks *"can we try it with ours?"* — say yes on the call, and do it afterward. Copy `comp-config.example.json`, fill in their criteria, weights, normalization, tiebreakers, teams, bid codes, and judges, then:
+If a board asks *"can we try it with ours?"* — say yes on the call, and do it afterward. **Do not treat this as a favour: it is the ask.** Send them [INTAKE.md](INTAKE.md), which is written to be forwarded to a treasurer, and what comes back is Part 1 of the three things a founding partner owes you. Copy `comp-config.example.json`, fill in their criteria, weights, normalization, tiebreakers, teams, bid codes, and judges, then:
 
 ```bash
 DATABASE_URL='<neon main pooled>' bunx tsx src/db/seed-cli.ts --config their-comp.json
 ```
 
 It seeds its own org and cascades independently, so it cannot disturb the Mayuri demo. All three normalizations (`raw`, `zscore`, `rank`) and all three tiebreakers (`criterion`, `head_to_head`, `highest_single_judge`) are supported.
+
+**Seeding it a second time will refuse, and should.** Once their links are out, a reseed deletes the org by slug and reissues every token — so the link on their treasurer's phone quietly stops resolving. The first seed creates and is safe; a reseed destroys and is not. If you really do need to rebuild it, `--force` and then hand out the new links yourself.
 
 This is a founder-run script, not a setup screen, and that is deliberate (PRD §12: white-glove founding support). Setup UI waits for three signed founding partners.
 
@@ -170,7 +172,7 @@ Say it plainly, and then stop talking:
 Then hold the silence. If they hesitate:
 
 - **They risk nothing.** No money, no lock-in, and the scoring is theirs regardless — the thing they just watched work is never held hostage.
-- **The data is the deal.** Say why you need it out loud: *"I'd rather build this against your actual $2,160 lump than a made-up one."* It is true, it is flattering, and it is the request that separates a real board from a polite one.
+- **The data is the deal.** Say why you need it out loud: *"I'd rather build this against your actual $2,160 lump than a made-up one."* It is true, it is flattering, and it is the request that separates a real board from a polite one. Then send [INTAKE.md](INTAKE.md) before you hang up, so the ask survives the call — it is written for them, not for you, and it makes the first half cheap to say yes to: send the rubric and the roster, and see your own comp on the next call.
 - **The deadline is real, and it is not a sales tactic:** fewer than three founding partners and this becomes a hobby build for two comps. That is written down in the PRD, and it is why yes has to happen before September.
 
 **Name the price even though you are waiving it.** Always "$300, free for you," never "it's free." A price that exists and is forgiven is a business; a price that does not exist is a favour, and a favour from a student reads as a class project — which is the credibility objection you actually have (PRD §12).

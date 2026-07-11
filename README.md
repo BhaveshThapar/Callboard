@@ -10,7 +10,7 @@ Read [`docs/PRD.md`](docs/PRD.md) for the full product argument and the evidence
 
 **A judge-scoring demo, and nothing else.** This is deliberate.
 
-The PRD gates the real build on three paid deposits by Sept 15, 2026 (§13). Until that gate clears, the only thing worth building is the sales instrument: three judges scoring eight teams from their phones, live tabulation on screen, locked and auditable placements in under five minutes. That is what this repo contains.
+The PRD gates the real build on **three founding partners** by Sept 15, 2026 (§13). The founding season is free, so the costly signal is not a deposit: a partner is a named person and comp date, their real data in hand, and a written $300 line in the budget they hand their successors. Until that gate clears, the only thing worth building is the sales instrument: three judges scoring eight teams from their phones, live tabulation on screen, locked and auditable placements in under five minutes. That is what this repo contains.
 
 Registration, payments, Stripe Connect, the Gita, and the comms engine are **designed** in `docs/` and **not built**. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -52,7 +52,8 @@ To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 | [TABULATION.md](docs/TABULATION.md) | Normalization, deductions, tiebreaks, locking |
 | [PAYMENTS.md](docs/PAYMENTS.md) | Stripe Connect design. Not implemented. |
 | [ROADMAP.md](docs/ROADMAP.md) | Phasing, and the go/no-go gates |
-| [PIPELINE.md](docs/PIPELINE.md) | The gate, counted: conversations, deposits, league check |
+| [PIPELINE.md](docs/PIPELINE.md) | The gate, counted: conversations, founding partners, league check |
+| [INTAKE.md](docs/INTAKE.md) | What to ask a founding partner for, and what it buys them |
 | [FEATURE_MAP.md](docs/FEATURE_MAP.md) | Every feature, its status, and the gate that sequences it |
 | [DEMO.md](docs/DEMO.md) | Running the sales demo |
 | [decisions/](docs/decisions/) | ADRs — why the load-bearing choices were made |
