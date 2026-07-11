@@ -52,6 +52,7 @@ To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 | [TABULATION.md](docs/TABULATION.md) | Normalization, deductions, tiebreaks, locking |
 | [PAYMENTS.md](docs/PAYMENTS.md) | Stripe Connect design. Not implemented. |
 | [ROADMAP.md](docs/ROADMAP.md) | Phasing, and the go/no-go gates |
+| [FEATURE_MAP.md](docs/FEATURE_MAP.md) | Every feature, its status, and the gate that sequences it |
 | [DEMO.md](docs/DEMO.md) | Running the sales demo |
 | [decisions/](docs/decisions/) | ADRs — why the load-bearing choices were made |
 
