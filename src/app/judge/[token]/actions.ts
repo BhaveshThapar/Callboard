@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { judgeNotes, scores } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import { resolveJudgeActor } from "@/lib/auth/scope";
+import { listTeamsForJudge, resolveJudgeActor } from "@/lib/auth/scope";
 import { getRubric, latestLockedRun } from "@/lib/comp/tab";
 import type { SubmitState } from "./state";
 
@@ -21,6 +21,14 @@ export const submitScores = async (
 
   if (await latestLockedRun(actor.compId)) {
     return { status: "error", message: "Results are locked. Scores can no longer be changed." };
+  }
+
+  // `teamId` arrives from the form, so it is the judge's claim and not a fact. A score row carries a
+  // bare team FK, so the database would accept one naming another comp's team -- and the tabulator
+  // would rank it here. Check it against the same scoped read the judge's own team list came from.
+  const scoreable = await listTeamsForJudge(actor);
+  if (!scoreable.some((team) => team.id === teamId)) {
+    return { status: "error", message: "That team is not competing in this comp." };
   }
 
   const rubric = await getRubric(actor.compId);
@@ -94,6 +102,11 @@ export const submitNote = async (
   }
   if (!teamId) return { status: "error", message: "Missing team." };
   if (!note) return { status: "error", message: "Write something, or leave the note empty." };
+
+  const scoreable = await listTeamsForJudge(actor);
+  if (!scoreable.some((team) => team.id === teamId)) {
+    return { status: "error", message: "That team is not competing in this comp." };
+  }
 
   await db
     .insert(judgeNotes)

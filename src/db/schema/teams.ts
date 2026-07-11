@@ -4,6 +4,13 @@ import { comps } from "./orgs";
 
 export type TeamStatus = "applied" | "waitlisted" | "accepted" | "dropped" | "competing";
 
+/**
+ * The statuses that place. One definition, because it decides two different things that must agree:
+ * which teams a judge may score, and which teams the tabulator ranks. When those drifted apart, a
+ * `dropped` team kept the scores it had already been given and went on placing with them.
+ */
+export const SCOREABLE_STATUSES = ["accepted", "competing"] as const;
+
 export const teams = pgTable(
   "teams",
   {
