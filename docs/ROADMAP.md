@@ -17,6 +17,8 @@ Nothing beyond the scoring demo gets built until these clear.
 
 The selling window is **August**, before the fall crush. Boards for spring 2027 are forming now; registration windows open around September.
 
+Progress against the gate is counted in [PIPELINE.md](PIPELINE.md), which also defines what makes a conversation *real* — you demoed, and you asked for the deposit.
+
 ## Where the build actually is
 
 **Shipped: the scoring demo.** PRD §8.4 — "one weekend of build: fake teams, three judges on phones, live tabulation on screen. Everything else waits for deposits."
