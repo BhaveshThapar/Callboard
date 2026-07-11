@@ -1,11 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { deductions, judgeAssignments, rubricCriteria, rubrics, scores, tabRuns, teams } from "@/db/schema";
+import { deductions, judgeAssignments, rubricCriteria, rubrics, scores, SCOREABLE_STATUSES, tabRuns, teams } from "@/db/schema";
 import { tabulate } from "@/lib/tabulation";
 import type { Criterion, Rubric, TabulationInput, TabulationResult } from "@/lib/tabulation/types";
 
-const SCOREABLE = ["accepted", "competing"] as const;
+const SCOREABLE = SCOREABLE_STATUSES;
 
 export const getRubric = async (compId: string): Promise<Rubric> => {
   const [rubric] = await db
@@ -44,6 +44,9 @@ export const buildTabulationInput = async (compId: string): Promise<TabulationIn
       .from(teams)
       .where(and(eq(teams.compId, compId), inArray(teams.status, [...SCOREABLE]))),
     db.select({ id: judgeAssignments.id }).from(judgeAssignments).where(eq(judgeAssignments.compId, compId)),
+    // Joined to `teams` rather than filtered on `scores.comp_id` alone. A score row carries its own
+    // `comp_id` and a bare team FK, so on its own it can name a team that belongs to another comp,
+    // or one this comp has since dropped -- and either would be ranked.
     db
       .select({
         judgeId: scores.judgeAssignmentId,
@@ -52,11 +55,25 @@ export const buildTabulationInput = async (compId: string): Promise<TabulationIn
         rawValue: scores.rawValue,
       })
       .from(scores)
-      .where(eq(scores.compId, compId)),
+      .innerJoin(teams, eq(teams.id, scores.teamId))
+      .where(
+        and(
+          eq(scores.compId, compId),
+          eq(teams.compId, compId),
+          inArray(teams.status, [...SCOREABLE]),
+        ),
+      ),
     db
       .select({ teamId: deductions.teamId, points: deductions.points, reason: deductions.reason })
       .from(deductions)
-      .where(eq(deductions.compId, compId)),
+      .innerJoin(teams, eq(teams.id, deductions.teamId))
+      .where(
+        and(
+          eq(deductions.compId, compId),
+          eq(teams.compId, compId),
+          inArray(teams.status, [...SCOREABLE]),
+        ),
+      ),
   ]);
 
   return {

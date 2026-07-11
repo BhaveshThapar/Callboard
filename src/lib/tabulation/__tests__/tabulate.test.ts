@@ -106,3 +106,53 @@ describe("tabulate", () => {
     expect(placementOf(withGhost, "A").aggregate).toBe(placementOf(run("raw"), "A").aggregate);
   });
 });
+
+/**
+ * `teams` is the roster of record and `scores` is only evidence about it. A team that withdraws
+ * leaves the roster, but the scores it was already given stay in the table -- and every placement is
+ * driven by the scores. A dropped team must not go on placing with them, and must not push the teams
+ * that did compete down a place while it does.
+ *
+ * PRD §14 records this happening: two accepted teams dropped and two waitlisted teams were promoted
+ * between the December acceptances and the February show.
+ */
+describe("a team not on the roster", () => {
+  const withDropped = (method: NormalizationMethod) =>
+    tabulate(
+      {
+        teams: ["A", "B", "C"],
+        judges: ["j1", "j2"],
+        scores: [
+          ...scoresFrom(TABLE),
+          // Scored while it was still competing, then dropped. Its rows outlive its status.
+          ...scoresFrom({ j1: { DROPPED: [60, 40] }, j2: { DROPPED: [60, 40] } }),
+        ],
+        deductions: [{ teamId: "DROPPED", points: 1, reason: "over time" }],
+      },
+      rubric(method),
+    );
+
+  it.each(["raw", "zscore", "rank"] as const)("is not placed under %s", (method) => {
+    expect(orderOf(withDropped(method))).not.toContain("DROPPED");
+  });
+
+  it("does not take first place from the team that earned it", () => {
+    // It outscores everyone: unfiltered, it wins and pushes A down to second.
+    expect(orderOf(withDropped("raw"))).toEqual(orderOf(run("raw")));
+    expect(placementOf(withDropped("raw"), "A").place).toBe(1);
+  });
+
+  it("does not alter the placements of the teams that did compete", () => {
+    for (const method of ["raw", "zscore", "rank"] as const) {
+      for (const teamId of ["A", "B", "C"]) {
+        expect(placementOf(withDropped(method), teamId).aggregate).toBe(
+          placementOf(run(method), teamId).aggregate,
+        );
+      }
+    }
+  });
+
+  it("is not reported as unscored either — it is simply not in the comp", () => {
+    expect(withDropped("raw").unscored).toEqual([]);
+  });
+});

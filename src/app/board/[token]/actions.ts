@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { deductions, judgeAssignments } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import { resolveBoardActor } from "@/lib/auth/scope";
+import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
@@ -80,6 +80,13 @@ export const overrideAction = async (
       return { status: "error", message: "Deduction must be a whole number above zero." };
     }
     if (!reason) return { status: "error", message: "A deduction needs a reason." };
+
+    // Same reason the judge's score path checks it: `teamId` comes off the form, and a deduction row
+    // carries a bare team FK that the database would happily point at another comp's team.
+    const scoreable = await listTeamsForBoard(actor);
+    if (!scoreable.some((team) => team.id === teamId)) {
+      return { status: "error", message: "That team is not competing in this comp." };
+    }
   }
 
   let deductionId: string | undefined;
