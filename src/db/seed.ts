@@ -105,9 +105,10 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
     division: config.judges[i]?.division ?? null,
   }));
   await db.insert(judgeAssignments).values(
-    judgeTokens.map(({ person, token, division }) => ({
+    judgeTokens.map(({ person, token, division }, i) => ({
       compId: comp.id,
       personId: person.id,
+      labelSeq: i + 1,
       division,
       tokenHash: token.tokenHash,
     })),

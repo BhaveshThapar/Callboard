@@ -1,14 +1,26 @@
 import { toCsv } from "./csv";
 
-export type FeedbackInput = {
+/**
+ * What a team receives. Note what is absent: there is no score anywhere in this type. A team is
+ * told where it placed, what it was docked and why, and what each judge wrote — and nothing else.
+ *
+ * Publishing the numbers invites a team to litigate a 27-vs-28 on Execution, which is an argument
+ * no board can win and no rubric can settle. The board can still prove the placement is right, from
+ * the locked snapshot; that is a different question from handing over the score sheet.
+ *
+ * `scoredBy` carries which (judge, team) pairs were scored but not what was scored, so this builder
+ * cannot emit a raw value even by mistake: it never holds one.
+ */
+export type TeamFeedbackInput = {
   /** From the frozen `tab_runs.results`. */
   placements: readonly { teamId: string; place: number; deductionPoints: number }[];
-  /** From the frozen `tab_runs.config`, in rubric order. */
-  criteria: readonly { id: string; label: string }[];
-  /** From the frozen `tab_runs.inputs`. `judgeId` is a judge_assignment id. */
-  scores: readonly { judgeId: string; teamId: string; criterionId: string; rawValue: number }[];
+  /** From the frozen `tab_runs.inputs`. teamId -> every reason recorded against it. */
+  deductionReasons: ReadonlyMap<string, readonly string[]>;
   teams: ReadonlyMap<string, { name: string; bidCode: string }>;
+  /** judge_assignment id -> "Judge 2", in panel order. Never a name. */
   judges: ReadonlyMap<string, string>;
+  /** `judgeId:teamId` keys the judge scored. Membership only — deliberately carries no values. */
+  scoredBy: ReadonlySet<string>;
   /** Keyed `judgeId:teamId`. Read live, because notes are deliberately not in the snapshot. */
   notes: ReadonlyMap<string, string>;
 };
@@ -16,64 +28,41 @@ export type FeedbackInput = {
 export const noteKey = (judgeId: string, teamId: string): string => `${judgeId}:${teamId}`;
 
 /**
- * One row per (team, judge): what that judge gave, criterion by criterion, and what they wrote.
- * Ordered by placement, then by judge name, so a team reading its own rows sees them in a stable
- * order rather than in whatever order Postgres returned.
+ * One row per (team, judge): what that judge wrote. Judges appear in panel order — the insertion
+ * order of `judges`, which is `label_seq` — and not sorted by label text, which would file Judge 10
+ * ahead of Judge 2.
  *
- * Everything scored comes from the frozen snapshot. Only the note is read live -- it is not in the
- * snapshot by design -- and notes are refused after the lock, so both are fixed at the same moment.
+ * A judge who neither scored nor wrote gets no row. One who scored but wrote nothing gets a row
+ * with an empty note, so a team can see that all three judges did judge it.
  */
-export const toFeedbackCsv = (input: FeedbackInput): string => {
+export const toTeamFeedbackCsv = (input: TeamFeedbackInput): string => {
   const headers = [
     "Place",
     "Team",
     "Bid code",
-    "Judge",
-    ...input.criteria.map((c) => c.label),
-    "Judge total",
     "Team deduction",
+    "Deduction reason",
+    "Judge",
     "Note",
   ];
-
-  const byTeamJudge = new Map<string, Map<string, number>>();
-  for (const score of input.scores) {
-    const key = noteKey(score.judgeId, score.teamId);
-    let byCriterion = byTeamJudge.get(key);
-    if (!byCriterion) {
-      byCriterion = new Map();
-      byTeamJudge.set(key, byCriterion);
-    }
-    byCriterion.set(score.criterionId, score.rawValue);
-  }
-
-  const judgeIds = [...input.judges.keys()].sort((a, b) =>
-    (input.judges.get(a) ?? "").localeCompare(input.judges.get(b) ?? ""),
-  );
 
   const rows: string[][] = [];
   for (const placement of [...input.placements].sort((a, b) => a.place - b.place)) {
     const team = input.teams.get(placement.teamId);
+    const reasons = input.deductionReasons.get(placement.teamId) ?? [];
 
-    for (const judgeId of judgeIds) {
+    for (const [judgeId, label] of input.judges) {
       const key = noteKey(judgeId, placement.teamId);
-      const byCriterion = byTeamJudge.get(key);
       const note = input.notes.get(key);
-
-      // A judge who scored nothing for this team gets no row -- unless they left a note, which the
-      // team is still owed. Scores and notes are independent forms, so that pairing is reachable.
-      if (!byCriterion && note === undefined) continue;
-
-      const values = input.criteria.map((c) => byCriterion?.get(c.id));
-      const scored = values.some((v) => v !== undefined);
+      if (!input.scoredBy.has(key) && note === undefined) continue;
 
       rows.push([
         String(placement.place),
         team?.name ?? placement.teamId,
         team?.bidCode ?? "",
-        input.judges.get(judgeId) ?? judgeId,
-        ...values.map((v) => (v === undefined ? "" : String(v))),
-        scored ? String(values.reduce((sum: number, v) => sum + (v ?? 0), 0)) : "",
         placement.deductionPoints > 0 ? `-${placement.deductionPoints}` : "0",
+        reasons.join("; "),
+        label,
         note ?? "",
       ]);
     }

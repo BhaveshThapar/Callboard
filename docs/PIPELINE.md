@@ -10,6 +10,8 @@ The [PRD §13](PRD.md) gate decides whether Callboard is a business or a hobby b
 | Paid deposits, refundable until January | **3** | Sept 15, 2026 |
 | League check (Origins / NDDL) | complete | Sept 15, 2026 |
 
+**The deposit is $100**, against a $300 founding-season price, fully refundable until January. The number needed to exist before it could be asked for: for two calls it did not, and on both the ask never came. The script is in [DEMO.md](DEMO.md#the-ask).
+
 **≥3 deposits** → build Sept–Dec, ship for the Jan–Mar 2027 season.
 **<3 after 10 real conversations** → hobby build for Mayuri and Minza only, and stop calling it a business.
 
@@ -42,11 +44,18 @@ Names and circuits only — no contact details, so this file stays committable.
 
 | Board | Circuit | First contact | Stage | Deposit |
 |---|---|---|---|---|
-| *(fill in)* | — | Jul 10, 2026 | demoed | **not yet asked** |
+| *(fill in)* | — | Jul 10, 2026 | demoed | **not asked — scores 0** |
+| *(fill in)* | — | Jul 11, 2026 | demoed | **not asked — scores 0** |
 
-Row 1 is the board that saw the deployed demo on July 10, liked it, and asked to see it "finished." Read: they want the money product — registration and payments, Module A. That is the PRD's own thesis coming back out of a prospect's mouth (§2.3 ranks payments as *the* pain and scoring as a *someday* pain), which makes it good signal.
+Row 1 saw the deployed demo on July 10, liked it, and asked to see it "finished." Read: they want the money product — registration and payments, Module A.
 
-**It is a deposit-ask trigger, not a build trigger.** The next move on this board is [PAYMENTS.md](PAYMENTS.md) — the treasurer-checkable argument, already written — followed by the ask. [DEMO.md](DEMO.md) step 9 already scripts it. Building Module A to earn the deposit spends exactly what the deposit is supposed to fund, and burns the August window doing it.
+Row 2 saw it on July 11, said it was "really good," and named one condition: the board must not be able to see what individual judges put. They also offered that hospitality — room management — was something worth building for them.
+
+Both boards named a feature and neither was asked for a deposit. **Two demos, two wishlists, zero asks.** That is the exact failure this page warns about three paragraphs up, and the fix is the asking, not the product. There is now an ask script in [DEMO.md](DEMO.md#the-ask) and a deposit number, both of which were missing while those calls happened.
+
+**What the feature requests actually are.** Payments coming out of a prospect's mouth unprompted is the PRD's own thesis handed back (§2.3 ranks payments as *the* pain, scoring as a *someday* pain). Rooming is the same signal wearing a different hat: it sits directly on top of registration and payments, since you cannot assign rooms to teams you have no paid roster for. Both are **deposit-ask triggers, not build triggers.** Building Module A to earn a deposit spends exactly what the deposit is meant to fund, and burns the August window doing it. The move on both boards is [PAYMENTS.md](PAYMENTS.md) — the treasurer-checkable argument, already written — followed by the ask.
+
+**Row 2's condition was real, and it has been fixed** ([ADR-0008](decisions/0008-judge-scores-are-de-identified.md)): the board now sees `Judge 1 / Judge 2 / Judge 3` beside every score and never a name, and teams get written feedback with no scores at all. That is a callback and the strongest reopen available — *the thing you asked for is live, here's the link* — and it must end in the ask.
 
 ## Stages
 
