@@ -125,7 +125,7 @@ These stay in the tools that already do them well. Saying no here is what makes 
 
 ### 7.1 v1 — "the part that bleeds money" (build first)
 
-Two modules on one record. This is the minimum that is worth $300 to a board.
+Two modules on one record. This is the minimum that is worth $300 to a board — the price the founding season waives and the second season charges (§11).
 
 **Module A — Registration + Payments** (the spine; the treasurer's pain)
 **Module B — Tabulation** (the trust product; the demo)
@@ -206,7 +206,7 @@ The record is comp-scoped and multi-tenant (many orgs, many comps per org, isola
 
 ### 8.4 The one thing to build before selling
 
-A **judge-scoring demo** — one weekend of build: fake teams, three "judges" on phones, live tabulation on screen. Everything else waits for deposits. The demo is the sales instrument; it makes the audit-trail pitch tangible.
+A **judge-scoring demo** — one weekend of build: fake teams, three "judges" on phones, live tabulation on screen. Everything else waits for three signed founding partners (§13). The demo is the sales instrument; it makes the audit-trail pitch tangible.
 
 ---
 
@@ -236,10 +236,12 @@ The Gita is a *compiler*: show order in, full schedule derived. The missing prod
 
 **The flat fee carries the revenue; the platform fee must not stack a blunt 2% on top of processing.** Once payments are done right (ACH-first + nonprofit rate), Stripe's own cut on an ~$11.5k season is ~$60–80 — so a blanket 2% platform fee (~$230) would be *larger than Stripe's* and would read to a treasurer as a ~4%+ blended rake. That loses deals. The fee is restructured accordingly.
 
-- **Pricing**: **$300 flat per comp** for the founding season (the primary revenue line). Platform fee on payments is **modest and card-volume-only** (ACH is left at cost, since ACH is where the big lumps go) — or folded into a slightly higher flat fee. Target blended platform take **well under 1%** of processed volume, so the treasurer's total-cost math stays obviously worth it. Founding customers get white-glove tab-day support (founder on-call for the first three) and locked pricing.
+- **Pricing**: **the founding season (Jan–Mar 2027) is free.** $0, for the first three founding partners, including Module A. From the **2027–28 season onward: $300 flat per comp** (the primary revenue line), locked for founding partners. Platform fee on payments is **modest and card-volume-only** (ACH is left at cost, since ACH is where the big lumps go) — or folded into a slightly higher flat fee. Target blended platform take **well under 1%** of processed volume, so the treasurer's total-cost math stays obviously worth it. Founding partners get white-glove tab-day support (founder on-call for the first three) and locked pricing.
+- **What free buys, and what it costs.** It buys a season of real usage on real money, a case study, and a reference customer in each circuit — and it removes the last friction from a buyer with ~$0 discretionary budget. It costs the only *costly* signal the model had. Three deposits were never revenue ($300 total, against a $8–12k/year ceiling); they were the one falsifiable answer to "will a broke student board actually move money for this," collected *before* the Sept–Dec build. Free defers that answer to Gate 2 in April 2027 (§13), by which point Module A exists. The financial difference is trivial. The informational difference is total, and it is the real price being paid here.
+- **Year-one revenue is $0.** The Sept–Dec 2026 build is therefore unfunded and unvalidated by money — which was nearly true before, since $900 of deposits funded nothing either. What changes is that nothing now forces a board to prove it was serious with anything but its time, which is why §13's founding-partner signature demands their data and a budget line instead.
 - **Fee incidence**: processing (Stripe) is borne by the comp by default but can be passed to teams via surcharge (A5c). The comp can therefore net exactly what it charges — the honest answer to "won't we get less money."
 - **Worked example (Mayuri 2026, ~$11.5k in team payments)**: ACH-first → Stripe ~$60–80; Callboard flat $300; card-only platform fee on the small card residue → a few dollars. The comp's *incremental* cost vs. today's "free" Venmo is the flat $300 plus <$100 of processing it can pass through — against elimination of a ~$5k reconciliation gap and personal-account freeze risk.
-- **Per-comp revenue to Callboard**: ~$300–350 all-in at founding pricing.
+- **Per-comp revenue to Callboard**: **$0 in the founding season**; ~$300–350 all-in from 2027–28. The ceiling below shifts a year to the right.
 - **Ceiling (honest)**: 20–25 comps across circuits ≈ **$8–12k/year** at founding flat pricing (lower than the earlier 2%-inflated estimate — that number was wrong). Studio-world pricing ($299–$1,499+/event) shows real headroom to raise the flat fee once the product is indispensable and multi-day/multi-circuit; student pricing is the near-term reality. This remains a side business, not a venture-scale outcome — and that framing is intentional and gated (§13).
 - **Retention driver**: switching cost is *the whole weekend's brain lives here*, plus year-over-year memory that survives board turnover.
 
@@ -254,6 +256,8 @@ The Gita is a *compiler*: show order in, full schedule derived. The missing prod
 | **GroupMe incumbent** | Comms/announcements have a deeply entrenched free tool. | Don't sell comms standalone; deliver it as the automatic output of the record (reminders/pushes boards can't easily replicate manually). |
 | **Student-vendor credibility** | "Will this exist next year? You're a student." | White-glove founding support (founder on-site/on-call); data exportable from day one (worst case: back to Sheets, with better Sheets). |
 | **Annual turnover** | The buyer disappears every May. | Reframe as the *retention* moat: the system is the institutional memory the outgoing board can't hand off otherwise. |
+| **Free-to-paid across a turnover** | **The central risk of the free founding season (§11).** The board that gets it free *graduates before the first invoice*. The 2027–28 board never chose Callboard, never felt the $5k reconciliation gap, has no budget line for it, and is asked to start paying for something that has always been free. Free-first-year works when the buyer persists and gets habituated; here the buyer literally leaves. This is the worst market in which to try it. | The founding-partner signature (§13) requires a **written $300 line in the budget the outgoing board hands its successor** — so the incoming board inherits a line item, not a surprise. Plus the switching cost: by then the whole weekend's brain lives here, and the alternative is rebuilding the spreadsheet from nothing. Gate 2 measures whether either worked, and kills the project if not. |
+| **Free reads as a class project** | Sharpens the student-vendor risk above rather than softening it: an invoice reads as a vendor who will exist in March; free software from a student reads as coursework that ends at graduation. | Say "free for founding partners, $300 after" — a *waived* price, never *no* price. The number is always named. A price that exists and is forgiven is a business; a price that does not exist is a favour. |
 | **Scope creep to an ERP** | Eleven committees tempt eleven modules — the everything-app failure mode. | Hard spine/adjacent/tarpit discipline; v1 is exactly two modules; the org chart is the vision slide, not the build list. |
 | **Reconciliation trust** | If the ledger is wrong, the product's core promise fails. | Card-fee-aware, rail-aware reconciliation as a first-class requirement (A6/A8); the $2,837-vs-$8k gap is the exact failure being eliminated. |
 
@@ -268,11 +272,25 @@ The Gita is a *compiler*: show order in, full schedule derived. The missing prod
 - Next-day reproducibility of results: **100%** (from "in a folder, maybe recycled").
 - Setup-to-live for a new board: target **≤ one weekend**.
 
-**Venture (the presell gates — go/no-go)**
-- **10** board conversations across **3+** circuits by **Sept 15, 2026**.
-- **3** paid, refundable-until-January deposits.
+**Venture (the go/no-go gates)**
+
+The first season is **free** (§11). That is a decision about pricing, not about rigor: it removes the deposit, which was the costly signal, so it must be replaced by another one — and it moves the moment of truth from September 2026 to April 2027, which must be written down rather than quietly forgotten.
+
+**Gate 1 — the founding-partner gate. By Sept 15, 2026.**
+- **10** board conversations across **3+** circuits.
+- **3** signed founding partners. A signature is not a "yes" — it is all three of:
+  1. A **named person** (treasurer or president, not "the board") and a **named comp date**.
+  2. Their **real data**, handed over: roster, fee schedule, last season's payment records. This is the deposit's replacement. It costs a board actual hours, it requires internal buy-in, and a treasurer who will not go dig it out was never going to run their comp on this. It is also the data the build needs anyway.
+  3. A **written $300 line in the 2027–28 budget** they hand to the board that succeeds them.
 - League check (Origins/NDDL) complete.
-- ≥3 deposits → build Sept–Dec, ship for Jan season. <3 after 10 real conversations → hobby build for Mayuri/Minza only; stop counting it as a business.
+- ≥3 → build Sept–Dec, ship free for the Jan–Mar 2027 season. <3 after 10 real conversations → hobby build for Mayuri/Minza only; stop counting it as a business.
+
+**Gate 2 — the conversion gate. By April 30, 2027.**
+- **≥2 of 3** founding partners pay $300 for the 2027–28 season.
+
+This gate is the price of going free, and it is not optional. A board that has run its whole comp on Callboard for free — felt the reconciliation gap close, watched the placements lock — and still will not pay $300 is telling you the product is not worth $300 to the people best positioned to know. No further building changes that answer; it only raises the cost of hearing it. **<2 of 3 → the free year was the experiment and it failed. Stop.**
+
+Note what free costs: the deposit would have answered the willingness-to-pay question in September, for $300 of signal, before the build. Gate 2 answers the same question in April, after Module A exists. The question does not go away. It gets more expensive.
 
 ---
 

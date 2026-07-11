@@ -71,6 +71,6 @@ The audit trail is not instrumentation. It is the product. Paper clipboards in a
 
 ## What is deliberately absent
 
-No Stripe. No registration workflow. No Gita. No comms engine. No row-level security. Each is designed — see [DATA_MODEL.md](DATA_MODEL.md), [PAYMENTS.md](PAYMENTS.md), and [ROADMAP.md](ROADMAP.md) — and each waits behind the deposit gate in PRD §13.
+No Stripe. No registration workflow. No Gita. No comms engine. No row-level security. Each is designed — see [DATA_MODEL.md](DATA_MODEL.md), [PAYMENTS.md](PAYMENTS.md), and [ROADMAP.md](ROADMAP.md) — and each waits behind the founding-partner gate in PRD §13.
 
 Multi-tenancy today is app-layer: every table carries `comp_id`, and reads go through `src/lib/auth/scope.ts`. Postgres RLS is the eventual hardening, recorded in [ADR-0006](decisions/0006-tenancy-app-layer-scoping-rls-later.md), not a thing to build before the first customer.

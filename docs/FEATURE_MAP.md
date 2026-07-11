@@ -2,7 +2,7 @@
 
 Every feature Callboard will ever have, on one page, mapped to the gate that decides when it gets built. Each ID traces to [`PRD.md`](PRD.md) (A1–A11 §8.2, B1–B8 §8.3, G1–G6 §9); tables to [`DATA_MODEL.md`](DATA_MODEL.md); rationale to [`decisions/`](decisions/).
 
-This map **sequences; it does not authorize.** The PRD argues against building (§13). Nothing below the gate starts before three deposits land — building it to win a deposit spends what the deposit funds. This is the build order for the moment the gate clears, not a to-do list that ignores it.
+This map **sequences; it does not authorize.** The PRD argues against building (§13). Nothing below the gate starts before three founding partners sign — building it to win a signature spends the whole selling window on boards that have committed nothing. This is the build order for the moment the gate clears, not a to-do list that ignores it.
 
 **Status**
 
@@ -34,17 +34,21 @@ Module B (Tabulation), PRD §8.3. Judges score from any phone; the math runs its
 
 ---
 
-## ▓▓▓ The deposit gate · PRD §13 ▓▓▓
+## ▓▓▓ The founding-partner gate · PRD §13 ▓▓▓
 
-**Nothing below this line is built until the gate clears.** The selling window is **August**; boards for spring 2027 are forming now. The build window is **Sept–Dec 2026**, and it only opens on paid validation. Deposits are refundable until January — which is what makes yes cheap.
+**Nothing below this line is built until the gate clears.** The selling window is **August**; boards for spring 2027 are forming now. The build window is **Sept–Dec 2026**, and it only opens on three signatures.
+
+The founding season is **free** ($0; $300 from 2027–28), so a "yes" costs a board nothing and is worth nothing. A signature is a named person, a comp date, **their roster / fee schedule / last season's payment records**, and a **written $300 line in the budget they hand their successors**. Those are the things a board can only give if it means it.
 
 | Target | | By |
 |---|---|---|
 | Board conversations, across 3+ circuits | **10** | Sept 15, 2026 |
-| Paid deposits, refundable until January | **3** | Sept 15, 2026 |
+| Signed founding partners | **3** | Sept 15, 2026 |
 | League check (Origins / NDDL) | complete | Sept 15, 2026 |
 
-≥3 deposits → build Sept–Dec, ship for the Jan–Mar 2027 season. <3 after 10 real conversations → hobby build for Mayuri and Minza only.
+≥3 → build Sept–Dec, ship free for the Jan–Mar 2027 season. <3 after 10 real conversations → hobby build for Mayuri and Minza only.
+
+**Gate 2 · April 30, 2027** — ≥2 of 3 founding partners pay for 2027–28, or the free year was a failed experiment and this stops.
 
 ---
 

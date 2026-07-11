@@ -20,7 +20,7 @@ Run `typecheck`, `lint`, and `test` before calling any change done.
 
 ## Scope discipline
 
-The PRD gates the real v1 on three paid deposits (§13). Right now the repo contains **only** the judge-scoring demo (Module B). Do not build registration, payments, Stripe, the Gita, or the comms engine without being asked — they are designed in `docs/` and deliberately unimplemented. If a change starts pulling one of them in, stop and say so.
+The PRD gates the real v1 on three signed founding partners (§13) — the founding season is free, so the signature, not a deposit, is the costly signal. Right now the repo contains **only** the judge-scoring demo (Module B). Do not build registration, payments, Stripe, the Gita, or the comms engine without being asked — they are designed in `docs/` and deliberately unimplemented. If a change starts pulling one of them in, stop and say so.
 
 ## Invariants
 

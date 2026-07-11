@@ -1,29 +1,33 @@
 # Roadmap
 
-The PRD gates this build on paid validation. That gate is the most important thing on this page, and it comes first.
+The PRD gates this build on validation. That gate is the most important thing on this page, and it comes first.
 
-## The gate (PRD §13)
+## The gates (PRD §13)
 
-Nothing beyond the scoring demo gets built until these clear.
+The founding season is **free** — $0 for the first three boards, $300 from 2027–28 (§11). Free removes the deposit, so Gate 1 asks for the things a board can only give if it means it, and Gate 2 finally asks the money question that free postponed.
+
+**Gate 1 — founding partners · Sept 15, 2026.** Nothing beyond the scoring demo gets built until this clears.
 
 | | Target | By |
 |---|---|---|
 | Board conversations across 3+ circuits | **10** | Sept 15, 2026 |
-| Paid deposits, refundable until January | **3** | Sept 15, 2026 |
+| **Signed founding partners** — named person + comp date, their roster/fee schedule/payment records, and a written $300 line in the 2027–28 budget | **3** | Sept 15, 2026 |
 | League check (Origins / NDDL) | complete | Sept 15, 2026 |
 
-**≥3 deposits** → build Sept–Dec, ship for the Jan–Mar 2027 season.
-**<3 deposits after 10 real conversations** → hobby build for Mayuri and Minza only, and stop calling it a business.
+**≥3** → build Sept–Dec, ship free for the Jan–Mar 2027 season.
+**<3 after 10 real conversations** → hobby build for Mayuri and Minza only, and stop calling it a business.
+
+**Gate 2 — conversion · April 30, 2027.** ≥2 of 3 founding partners pay $300 for the 2027–28 season. **<2 → the free year was the experiment, and it failed. Stop.** This is the gate free created: the willingness-to-pay question did not disappear, it moved from September to April, and it now gets answered *after* Module A is built rather than before.
 
 The selling window is **August**, before the fall crush. Boards for spring 2027 are forming now; registration windows open around September.
 
-Progress against the gate is counted in [PIPELINE.md](PIPELINE.md), which also defines what makes a conversation *real* — you demoed, and you asked for the deposit.
+Progress is counted in [PIPELINE.md](PIPELINE.md), which also defines what makes a conversation *real* — you demoed, and you asked them to sign.
 
 ## Where the build actually is
 
-**Shipped: the scoring demo.** PRD §8.4 — "one weekend of build: fake teams, three judges on phones, live tabulation on screen. Everything else waits for deposits."
+**Shipped: the scoring demo.** PRD §8.4 — "one weekend of build: fake teams, three judges on phones, live tabulation on screen. Everything else waits for three signed founding partners."
 
-- Per-comp rubric configuration, stored as data (B1) — authored via `comp-config.json`, seeded by the founder. Not a rubric builder; that waits for deposits.
+- Per-comp rubric configuration, stored as data (B1) — authored via `comp-config.json`, seeded by the founder. Not a rubric builder; that waits for the gate.
 - Judges score from any phone browser, no install (B2)
 - Raw / z-score / rank normalization (B3)
 - Deduction entry (B4)
@@ -36,7 +40,7 @@ Meets the §8.3 acceptance test, encoded in `e2e/scoring.spec.ts`: 8 teams, 3 ju
 
 **B6 and B8 were only half true until July 2026**, and the gap was in the code rather than the design. The override wrote `supersedes_id` and `override_reason` but no form ever reached it; `locked_by_person_id`, `deductions.created_by_person_id`, and `audit_log.actor_person_id` were null in every row, because a board token authorized a comp and not a person. Judge links were unrevocable in practice. There was no export of any kind, and `scores` had no text column, so judge feedback was not half-built — it was unrepresentable. All four are closed: board links are per person ([ADR-0007](decisions/0007-board-links-are-per-person.md)), a correction applies an attributed deduction and supersedes the prior run, judges can be revoked from the board screen, and `judge_notes` feeds an emcee sheet and a feedback CSV. Covered by `e2e/override.spec.ts`, `e2e/revoke.spec.ts`, and `e2e/feedback.spec.ts`.
 
-## v1 — "the part that bleeds money" (on ≥3 deposits)
+## v1 — "the part that bleeds money" (on ≥3 signed founding partners)
 
 Ship target: live for the **January–March 2027** season.
 
