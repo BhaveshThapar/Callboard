@@ -58,6 +58,8 @@ Judges (one per phone):
 
 The raw tokens are shown exactly once. Only their sha256 is stored. Text the judge links; open the board link on the laptop you are screen-sharing.
 
+The seed proves each of these links resolves against the live schema before printing them, so a clean `db:seed` is itself the health check — a seed that cannot mint a working board *or* judge link fails loudly instead of handing you a dead one. If you forget the `NEXT_PUBLIC_BASE_URL` above, the links fall back to `localhost` and the seed prints a `⚠` saying so — localhost links open on your laptop and 404 on a phone. Run `db:doctor` any time afterward to re-confirm without reseeding.
+
 The board link carries a name because it belongs to a person, not to the comp. That is what lets a lock and a correction be attributed to a human (PRD B6, [ADR-0007](decisions/0007-board-links-are-per-person.md)). Add board members in `comp-config.json` and each gets their own link.
 
 Reseeding at any point gives you fresh links and a clean comp.

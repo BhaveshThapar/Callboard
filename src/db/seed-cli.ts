@@ -54,4 +54,17 @@ if (jsonPath) {
       "",
     ].join("\n"),
   );
+
+  // The health check is DB-only and cannot see this: localhost links resolve on your machine and
+  // dead-404 on a prospect's phone. Warn loudly, but don't fail — local dev seeding is meant to use it.
+  if (/\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/.test(baseUrl)) {
+    console.error(
+      [
+        "",
+        `⚠ These links point at ${baseUrl} — they only work on this machine.`,
+        "  Set NEXT_PUBLIC_BASE_URL to the demo's public URL before handing links to a phone.",
+        "",
+      ].join("\n"),
+    );
+  }
 }
