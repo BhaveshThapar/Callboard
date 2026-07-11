@@ -32,4 +32,4 @@ Formatting for display is the only place a fractional dollar exists, and it happ
 
 The money tables are specified in [DATA_MODEL.md](../DATA_MODEL.md) and absent from Postgres. PRD §8.1 says the model is defined now — it is, in prose and in a schema sketch. Migrating tables that no code reads would be dead code with a migration attached.
 
-They land with Module A, behind the deposit gate in PRD §13. The decision recorded here is what Module A is required to build.
+They land with Module A, behind the founding-partner gate in PRD §13. The decision recorded here is what Module A is required to build.

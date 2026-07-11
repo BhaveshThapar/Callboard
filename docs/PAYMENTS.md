@@ -41,7 +41,9 @@ Once payments are done right, Stripe's own cut on an ~$11.5k season is ~$60–80
 
 So: **$300 flat per comp** carries the revenue. The platform fee on payments is modest and **card-volume-only**, leaving ACH at cost, because ACH is where the big lumps go. Target blended platform take well under 1% of processed volume.
 
-The comp's incremental cost against today's "free" Venmo is the flat $300 plus under $100 of processing it can pass through — against elimination of a ~$5,000 reconciliation gap and the risk of a personal Venmo account being frozen.
+**For founding partners the first season is free.** $0 for the Jan–Mar 2027 season, Module A included; $300 flat from 2027–28, locked. The price is named and then waived — it is not that there is no price (PRD §11).
+
+So the comp's incremental cost against today's "free" Venmo, in the founding season, is **under $100 of processing it can pass through to teams anyway** — against elimination of a ~$5,000 reconciliation gap and the risk of a personal Venmo account being frozen. From the second season, add the flat $300.
 
 ## The ledger
 

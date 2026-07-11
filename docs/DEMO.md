@@ -74,7 +74,7 @@ DATABASE_URL='<neon main pooled>' bunx tsx src/db/seed-cli.ts --config their-com
 
 It seeds its own org and cascades independently, so it cannot disturb the Mayuri demo. All three normalizations (`raw`, `zscore`, `rank`) and all three tiebreakers (`criterion`, `head_to_head`, `highest_single_judge`) are supported.
 
-This is a founder-run script, not a setup screen, and that is deliberate (PRD §12: white-glove founding support). Setup UI waits for deposits.
+This is a founder-run script, not a setup screen, and that is deliberate (PRD §12: white-glove founding support). Setup UI waits for three signed founding partners.
 
 ## Before you open the laptop
 
@@ -145,9 +145,11 @@ The proof lives in the lock: the snapshot re-runs and returns the same placement
 
 **"Our league might build this."** Good — introduce me. If Origins or NDDL wants an official tabulation layer, that is the best outcome on the board, not the worst.
 
-**"What about payments?"** Not an objection — it is the buying signal, and it is the pain. Point at [PAYMENTS.md](PAYMENTS.md), which costs nothing to show and demonstrates that the hard part — gross vs. net, unbundling a lump payment, ACH-first routing — has already been thought through. Then ask for the deposit that unlocks it.
+**"What about payments?"** Not an objection — it is the buying signal, and it is the pain. Point at [PAYMENTS.md](PAYMENTS.md), which costs nothing to show and demonstrates that the hard part — gross vs. net, unbundling a lump payment, ACH-first routing — has already been thought through. Then ask them to sign.
 
-**"Could you also do hospitality / rooming?"** Not built, and not next. Say why, because the why *is* the close: you cannot assign rooms to teams you do not have a paid roster for. Rooming sits directly on top of registration and payments — the system already bills per room (`per_room_cents`, a `hotel` charge) and there is nothing underneath it. So: **the deposit builds the thing that makes room management possible.** Write the ask down as evidence in [PIPELINE.md](PIPELINE.md); do not write it into the build.
+**"Could you also do hospitality / rooming?"** Not built, and not next. Say why, because the why *is* the close: you cannot assign rooms to teams you do not have a paid roster for. Rooming sits directly on top of registration and payments — the system already bills per room (`per_room_cents`, a `hotel` charge) and there is nothing underneath it. So: **signing is what builds the thing that makes room management possible.** Write the request down as evidence in [PIPELINE.md](PIPELINE.md); do not write it into the build.
+
+Free sharpens this trap rather than dulling it. With no price to haggle over, "build me X and we'll use it" becomes the only thing a board has left to offer — and it is not an offer. Trade the feature for the signature, never for the roadmap.
 
 Anything else they ask for goes the same way. A board naming a feature is a board telling you it wants to buy — route it to the ask, not to the backlog.
 
@@ -155,17 +157,25 @@ Anything else they ask for goes the same way. A board naming a feature is a boar
 
 **Do not end a call without this.** [PIPELINE.md](PIPELINE.md) counts a conversation only if you demoed *and* you asked; a demo with no ask scores **0**, and two of those have already happened. The thing to fix when they pile up is the asking, not the product.
 
+The founding season is free, so the ask is not for money. **It is for the three things that prove they mean it** — and getting all three is the entire job of the call. Free makes "yes" worthless; these are what replace it.
+
 Say it plainly, and then stop talking:
 
-> Founding price is $300 flat for the season. What I'm asking for today is a **$100 deposit, fully refundable until January** — it comes straight back if you change your mind, or if I don't ship. It's not for the scoring; that's built, and you'll have it. It's to build the registration and payments side for your spring comp, and I'm only building it for the boards that put money down by September 15.
+> It's **$300 a season, and I'm waiving it for your first year** — the spring comp runs free, registration and payments included. I'm doing that for three boards, and I pick them by September 15.
+>
+> What I need from you isn't money. It's three things: **you** — one person, not "the board" — **your comp date**, **your roster and fee schedule and last season's payment records**, so I can build against your real numbers instead of my guesses. And **a $300 line in next year's budget**, so whoever takes over from you in May inherits a line item instead of a surprise.
+>
+> That's it. If the reconciliation doesn't work, you've lost nothing.
 
-Three things that make this cheap to say yes to, if they hesitate — say them, then stop talking again:
+Then hold the silence. If they hesitate:
 
-- **It's refundable until January.** They risk nothing but the deposit's float.
-- **They keep the scoring demo regardless.** The thing they just watched work is not held hostage.
-- **The deadline is real, and it is not a sales tactic:** fewer than three deposits and this becomes a hobby build for two comps. That is written down in the PRD, and it is why yes has to happen before September.
+- **They risk nothing.** No money, no lock-in, and the scoring is theirs regardless — the thing they just watched work is never held hostage.
+- **The data is the deal.** Say why you need it out loud: *"I'd rather build this against your actual $2,160 lump than a made-up one."* It is true, it is flattering, and it is the request that separates a real board from a polite one.
+- **The deadline is real, and it is not a sales tactic:** fewer than three founding partners and this becomes a hobby build for two comps. That is written down in the PRD, and it is why yes has to happen before September.
 
-A board that will not put down a *fully refundable* $100 after all that is the cheapest no you will ever get, and it is worth more than a maybe. Write it in the table and move on.
+**Name the price even though you are waiving it.** Always "$300, free for you," never "it's free." A price that exists and is forgiven is a business; a price that does not exist is a favour, and a favour from a student reads as a class project — which is the credibility objection you actually have (PRD §12).
+
+A board that will take it for free but will not send you a roster or write one line in a budget is the cheapest no you will ever get, and it is worth more than a maybe. Write it in the table and move on.
 
 ## Afterward
 
