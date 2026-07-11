@@ -278,10 +278,12 @@ The first season is **free** (§11). That is a decision about pricing, not about
 
 **Gate 1 — the founding-partner gate. By Sept 15, 2026.**
 - **10** board conversations across **3+** circuits.
-- **3** signed founding partners. A signature is not a "yes" — it is all three of:
+- **3** signed founding partners. A signature is not a "yes" — and there is **no document to sign**. It is all three of:
   1. A **named person** (treasurer or president, not "the board") and a **named comp date**.
-  2. Their **real data**, handed over: roster, fee schedule, last season's payment records. This is the deposit's replacement. It costs a board actual hours, it requires internal buy-in, and a treasurer who will not go dig it out was never going to run their comp on this. It is also the data the build needs anyway.
+  2. Their **real data**, handed over: roster, fee schedule, last season's payment records. This is the deposit's replacement. It costs a board actual hours, it requires internal buy-in, and a treasurer who will not go dig it out was never going to run their comp on this. It is also the data the build needs anyway. [INTAKE.md](INTAKE.md) is the request, written to be forwarded to a treasurer — it separates what seeds their comp today from what Module A gets built against, and says plainly that the second half has no code reading it yet.
   3. A **written $300 line in the 2027–28 budget** they hand to the board that succeeds them.
+
+  The signature is those three artifacts, not a countersigned page: things you can hold, checked against your inbox rather than your memory of the call. A contract from a student vendor buys nothing a broke board would honour anyway, and drafting one is a way to feel productive without making the ask.
 - League check (Origins/NDDL) complete.
 - ≥3 → build Sept–Dec, ship free for the Jan–Mar 2027 season. <3 after 10 real conversations → hobby build for Mayuri/Minza only; stop counting it as a business.
 

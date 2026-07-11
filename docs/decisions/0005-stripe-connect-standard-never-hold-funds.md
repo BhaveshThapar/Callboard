@@ -36,4 +36,4 @@ So the **$300 flat fee per comp carries the revenue**, and the platform fee on p
 
 No Stripe code exists in this repo. The full spec is [PAYMENTS.md](../PAYMENTS.md); the ledger it writes to is [ADR-0002](0002-money-as-cents-and-allocations.md).
 
-It is built when three deposits land (PRD §13), and not before.
+It is built when three founding partners commit (PRD §13), and not before. The founding season is free, so what lands is not money: a named person and comp date, their roster and fee schedule and last season's payment records, and a written $300 line in the 2027–28 budget. The first paid dollar arrives at Gate 2, in April 2027 — *after* this is built, which is the price of going free.
