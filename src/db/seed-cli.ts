@@ -6,6 +6,7 @@ config({ path: ".env.local", quiet: true });
 // Imported after dotenv, because `./index` reads DATABASE_URL when it loads.
 const { seedDemo, seedFromConfig, DEMO_CONFIG } = await import("./seed");
 const { parseCompConfig } = await import("./config");
+const { checkDemoHealth } = await import("./doctor");
 
 const flag = (name: string): string | undefined => {
   const i = process.argv.indexOf(name);
@@ -20,6 +21,16 @@ const compConfig = configPath
   : DEMO_CONFIG;
 
 const seeded = configPath ? await seedFromConfig(compConfig) : await seedDemo();
+
+// Prove the links resolve against this database's live schema before handing any of them out.
+// A seed that cannot pass its own health check would otherwise print a board link that 404s mid-call.
+const health = await checkDemoHealth(compConfig);
+if (!health.ok) {
+  console.error(
+    ["", "✗ Seed did not verify:", ...health.problems.map((p) => `  - ${p}`), ""].join("\n"),
+  );
+  process.exit(1);
+}
 
 if (jsonPath) {
   writeFileSync(jsonPath, JSON.stringify(seeded, null, 2));

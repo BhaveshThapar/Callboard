@@ -28,6 +28,14 @@ That split is now enforced rather than agreed to: `e2e/guard.ts` refuses to run 
 
 Migration `0002` drops `comps.board_token_hash`, so **any comp seeded before it has no board link** — the judges' links still work, the board's does not. There is nothing to migrate: a board link is now a person, and the old token named nobody. Reseeding mints one. This is a one-time cost of [ADR-0007](decisions/0007-board-links-are-per-person.md), and reseeding before a call is the normal flow anyway.
 
+To catch exactly this without wiping anything, run the read-only preflight against the deployed demo:
+
+```bash
+DATABASE_URL='<neon main pooled>' bun run db:doctor
+```
+
+It confirms a board link *and* a judge link resolve and that both the board and the judge views render — the judge view reads `judge_notes`, a table the board view never touches, so a drift there would 500 every phone while the board stayed up. Then it prints `✓ Demo healthy` or a `✗` naming what to reseed, exiting non-zero on failure. It only reads, so — unlike `db:seed` and `bun run e2e`, which the guard refuses against `main` — it is safe to point at the live demo.
+
 ## Before the call
 
 ```bash
