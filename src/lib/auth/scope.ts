@@ -1,6 +1,6 @@
 import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
-import { boardAssignments, comps, judgeAssignments, people, teams } from "@/db/schema";
+import { boardAssignments, comps, judgeAssignments, people, SCOREABLE_STATUSES, teams } from "@/db/schema";
 import type { JudgeLabelView } from "./labels";
 import { judgeLabel } from "./labels";
 import { hashToken } from "./token";
@@ -37,7 +37,7 @@ export type BoardJudgeView = { assignmentId: string; name: string; revokedAt: Da
 
 export type { JudgeLabelView } from "./labels";
 
-const SCOREABLE = ["accepted", "competing"] as const;
+const SCOREABLE = SCOREABLE_STATUSES;
 
 export const resolveBoardActor = async (token: string): Promise<BoardActor | null> => {
   const [row] = await db
