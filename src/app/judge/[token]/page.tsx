@@ -1,9 +1,8 @@
 import { notFound } from "next/navigation";
 import { LockIcon } from "@/components/icons";
 import { eyebrowClass } from "@/components/styles";
-import { listTeamsForJudge, resolveJudgeActor } from "@/lib/auth/scope";
-import { notesForJudge } from "@/lib/comp/feedback";
-import { getRubric, judgeScores, latestLockedRun } from "@/lib/comp/tab";
+import { resolveJudgeActor } from "@/lib/auth/scope";
+import { judgeSnapshot } from "@/lib/comp/judge";
 import { TeamScoreCard } from "./TeamScoreCard";
 
 export const dynamic = "force-dynamic";
@@ -14,13 +13,7 @@ export default async function JudgePage({ params }: { params: Promise<{ token: s
   const actor = await resolveJudgeActor(token);
   if (!actor) notFound();
 
-  const [teams, rubric, existing, notes, locked] = await Promise.all([
-    listTeamsForJudge(actor),
-    getRubric(actor.compId),
-    judgeScores(actor.judgeAssignmentId),
-    notesForJudge(actor.judgeAssignmentId),
-    latestLockedRun(actor.compId),
-  ]);
+  const { teams, rubric, scores, notes, locked } = await judgeSnapshot(actor);
 
   return (
     <div className="judge-shell bg-app">
@@ -54,7 +47,7 @@ export default async function JudgePage({ params }: { params: Promise<{ token: s
               bidCode={team.bidCode}
               performanceOrder={team.performanceOrder}
               criteria={rubric.criteria}
-              initialValues={Object.fromEntries(existing.get(team.id) ?? [])}
+              initialValues={Object.fromEntries(scores.get(team.id) ?? [])}
               initialNote={notes.get(team.id) ?? ""}
               locked={locked !== null}
               index={index}
