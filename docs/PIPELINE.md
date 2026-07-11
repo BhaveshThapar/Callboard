@@ -41,13 +41,17 @@ The selling window is **August**, before the fall crush. Boards for spring 2027 
 
 PRD §13 says *ten real conversations*, and the adjective is load-bearing. A number you can inflate is a number that will lie to you in September, when it is too late to do anything about it.
 
-**A conversation counts only if you demoed and you asked them to sign.** Not "they seemed interested." Not a coffee chat, not a DM thread, not a board that said they'd love to see it sometime. Demoed, and asked. A conversation where the ask never came is a **0** — and if several of those pile up, the thing to fix is the asking, not the product.
+**A conversation counts only if you demoed and you made the ask.** Not "they seemed interested." Not a coffee chat, not a DM thread, not a board that said they'd love to see it sometime. Demoed, and asked — for the three things below, by name, out loud, before the call ended. A conversation where the ask never came is a **0** — and if several of those pile up, the thing to fix is the asking, not the product.
 
 **A signature counts only if all three of these landed.** Free makes "yes" the cheapest word in the language, so the yes is worth nothing on its own and none of these may be waived:
 
 1. **A named person and a named comp date.** A treasurer or president, not "the board."
-2. **Their real data**, in your hands: roster, fee schedule, last season's payment records. This replaces the deposit. It costs a board real hours and real internal buy-in, and a treasurer who will not go dig it out was never going to run their comp on this. You need it to build anyway.
+2. **Their real data**, in your hands: roster, fee schedule, last season's payment records. This replaces the deposit. It costs a board real hours and real internal buy-in, and a treasurer who will not go dig it out was never going to run their comp on this. You need it to build anyway. [INTAKE.md](INTAKE.md) is what you send them, and it is written to be forwarded.
 3. **A written $300 line in the 2027–28 budget** they hand to their successors — the board that will actually be asked to pay.
+
+**There is no document to sign, and there will not be one.** A contract from a student vendor buys nothing a broke board would honour anyway, and drafting one is a way to feel productive without making the ask. The signature *is* the three artifacts — things you can hold, not things they say. So `signed` is checked against your inbox, never against your memory of the call. A verbal yes is not a signature. An email saying yes is not a signature. Enthusiasm is not a signature. Free makes all three of those free to give, which is exactly why none of them counts.
+
+The consequence is that the ask has no paperwork step to hide behind: you ask on the call, and then either the roster arrives or it does not.
 
 A board that will happily take it for free but will not do (2) or (3) is the free-model equivalent of a board that would not put down a refundable deposit. It is a **no**, and it is the cheapest no you will get. Write it down and move on.
 
