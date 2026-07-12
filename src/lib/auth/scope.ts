@@ -122,6 +122,37 @@ export const listTeamsForBoard = (actor: BoardActor): Promise<BoardTeamView[]> =
     .orderBy(teams.performanceOrder, teams.bidCode);
 
 /**
+ * A `teamId` off a form is a claim, not a fact, and every table it lands in — `scores`,
+ * `judge_notes`, `deductions` — holds it as a bare FK. So the database will happily accept a row
+ * naming a team from another comp, or one this comp has since dropped, and nothing downstream will
+ * catch it: `tabulate()` filters those rows out of the arithmetic, which means the write *succeeds*,
+ * the actor is told it worked, and it silently counts for nothing.
+ *
+ * The claim is checked against the same scoped read that produced the form the claim arrived on.
+ * That is what makes it a check and not a second definition of "scoreable" — comp scope and
+ * `SCOREABLE_STATUSES` both come free from `listTeams*`'s own `where`.
+ *
+ * Two functions rather than one over `Actor`, because the return types are the point: a judge
+ * resolves a team to a view with no `name` on it (ADR-0008), and that must stay true of the value
+ * the check hands back.
+ */
+const claimed = <T extends { id: string }>(scoreable: T[], teamId: string): T | null =>
+  scoreable.find((team) => team.id === teamId) ?? null;
+
+/** The refusal, in one place, so all four write paths say the same thing. */
+export const NOT_COMPETING = "That team is not competing in this comp.";
+
+export const resolveTeamForJudge = async (
+  actor: JudgeActor,
+  teamId: string,
+): Promise<JudgeTeamView | null> => claimed(await listTeamsForJudge(actor), teamId);
+
+export const resolveTeamForBoard = async (
+  actor: BoardActor,
+  teamId: string,
+): Promise<BoardTeamView | null> => claimed(await listTeamsForBoard(actor), teamId);
+
+/**
  * Every judge of the board's comp, revoked ones included — the caller decides what to do with them.
  * For the roster sidebar only: pairing this with a score or a note is what `listJudgeLabelsForBoard`
  * exists to prevent.
