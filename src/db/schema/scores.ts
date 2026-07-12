@@ -137,6 +137,20 @@ export const deductions = pgTable(
  * `seq` orders the runs. `lockedAt` cannot: it defaults to `now()`, which is the transaction
  * timestamp, so two runs can share one. `id` cannot either — it is a random v4.
  */
+/**
+ * The two partial unique indexes that hold a comp's run chain to one root and one head. Named once,
+ * here, because three places need to agree on the strings and none of them can derive them: the
+ * schema declares them, the board's lock path reads them off a failed insert's `cause` to tell a
+ * member "somebody else got there first", and `doctor` looks them up in `pg_indexes` to prove the
+ * guarantee is actually live on the database in front of it.
+ */
+export const CHAIN_INDEXES = {
+  root: "tab_runs_root_unique",
+  head: "tab_runs_supersedes_unique",
+} as const;
+
+export const CHAIN_INDEX_NAMES: readonly string[] = Object.values(CHAIN_INDEXES);
+
 export const tabRuns = pgTable(
   "tab_runs",
   {
@@ -170,10 +184,10 @@ export const tabRuns = pgTable(
   // it inserts, but neon-http has no transactions, so the check and the insert cannot be one act.
   // The database is therefore the only thing that can refuse this, and it refuses both ends.
   (t) => [
-    uniqueIndex("tab_runs_supersedes_unique")
+    uniqueIndex(CHAIN_INDEXES.head)
       .on(t.supersedesId)
       .where(sql`${t.supersedesId} is not null`),
-    uniqueIndex("tab_runs_root_unique")
+    uniqueIndex(CHAIN_INDEXES.root)
       .on(t.compId)
       .where(sql`${t.supersedesId} is null`),
   ],
