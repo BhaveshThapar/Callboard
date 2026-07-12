@@ -104,4 +104,58 @@ describe("parseCompConfig", () => {
     (config.teams as { name: unknown }[])[2]!.name = 42;
     expect(() => parseCompConfig(config)).toThrow(/teams\[2\].name: expected a non-empty string/);
   });
+
+  /**
+   * A comp is one division (ADR-0010). Nothing downstream is division-aware, so a config carrying
+   * two of them does not describe two competitions — it describes one wrong one. These are the two
+   * ways a config can declare a second division, and the parser is the only thing that sees both.
+   */
+  describe("divisions", () => {
+    it("rejects a roster split across two divisions", () => {
+      const config = valid();
+      (config.teams as { division: string }[])[0]!.division = "classical";
+      expect(() => parseCompConfig(config)).toThrow(
+        /declares 2 divisions \(classical, fusion\).*separate comps/s,
+      );
+    });
+
+    it("rejects a panel split across two divisions", () => {
+      const config = valid();
+      (config.judges as { division?: string }[])[0]!.division = "classical";
+      expect(() => parseCompConfig(config)).toThrow(/declares 2 divisions \(classical, fusion\)/);
+    });
+
+    it("rejects a judge judging a division the roster does not have", () => {
+      const config = valid();
+      for (const team of config.teams as { division?: string }[]) delete team.division;
+      (config.judges as { division?: string }[])[0]!.division = "classical";
+      (config.judges as { division?: string }[])[1]!.division = "fusion";
+      expect(() => parseCompConfig(config)).toThrow(/declares 2 divisions/);
+    });
+
+    it("accepts one division, which is a label and not a scoping key", () => {
+      expect(parseCompConfig(valid()).teams[0]?.division).toBe("fusion");
+    });
+
+    it("accepts a comp that names no division at all", () => {
+      const config = valid();
+      for (const team of config.teams as { division?: string }[]) delete team.division;
+      expect(parseCompConfig(config).teams[0]?.division).toBeUndefined();
+    });
+
+    it("accepts an unlabelled row beside a labelled one: that is a missing label, not a division", () => {
+      const config = valid();
+      delete (config.teams as { division?: string }[])[0]!.division;
+      expect(() => parseCompConfig(config)).not.toThrow();
+    });
+
+    it("never carries a judge's division through: it is read only to refuse a second one", () => {
+      const config = valid();
+      for (const judge of config.judges as { division?: string }[]) judge.division = "fusion";
+      expect(parseCompConfig(config).judges[0]).toEqual({
+        name: "Priya Raghavan",
+        email: "priya@example.com",
+      });
+    });
+  });
 });

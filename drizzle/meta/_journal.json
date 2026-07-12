@@ -43,6 +43,13 @@
       "when": 1783777184168,
       "tag": "0005_stale_felicia_hardy",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783809249210,
+      "tag": "0006_overjoyed_venus",
+      "breakpoints": true
     }
   ]
 }

@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX "tab_runs_root_unique" ON "tab_runs" USING btree ("comp_id") WHERE "tab_runs"."supersedes_id" is null;--> statement-breakpoint
+ALTER TABLE "judge_assignments" DROP COLUMN "division";
