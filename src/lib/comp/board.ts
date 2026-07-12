@@ -2,7 +2,7 @@ import { count, eq, max } from "drizzle-orm";
 import { db } from "@/db";
 import { scores } from "@/db/schema";
 import type { BoardActor } from "@/lib/auth/scope";
-import { listJudgesForBoard, listTeamsForBoard } from "@/lib/auth/scope";
+import { listBoardForBoard, listJudgesForBoard, listTeamsForBoard } from "@/lib/auth/scope";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
 import type { JudgeProgress } from "./progress";
 import { judgeProgress, progressTotals } from "./progress";
@@ -41,6 +41,8 @@ export type BoardSnapshot = {
   supersedesId: string | null;
   overrideReason: string | null;
   judges: JudgeProgress[];
+  /** Who holds a board link, and whether it still opens. Named: the board sends these itself. */
+  board: { assignmentId: string; name: string; revoked: boolean; isSelf: boolean }[];
   scoresSubmitted: number;
   scoresExpected: number;
   lastScoreAt: string | null;
@@ -61,7 +63,7 @@ export type BoardSnapshot = {
  * never from a fresh computation.
  */
 export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> => {
-  const [teams, rubric, locked, progress, roster, perJudge, runs] = await Promise.all([
+  const [teams, rubric, locked, progress, roster, boardRoster, perJudge, runs] = await Promise.all([
     listTeamsForBoard(actor),
     getRubric(actor.compId),
     latestLockedRun(actor.compId),
@@ -70,6 +72,7 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
       .from(scores)
       .where(eq(scores.compId, actor.compId)),
     listJudgesForBoard(actor),
+    listBoardForBoard(actor),
     db
       .select({ judgeAssignmentId: scores.judgeAssignmentId, submitted: count() })
       .from(scores)
@@ -114,6 +117,12 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
     supersedesId: locked?.supersedesId ?? null,
     overrideReason: locked?.overrideReason ?? null,
     judges,
+    board: boardRoster.map((member) => ({
+      assignmentId: member.assignmentId,
+      name: member.name,
+      revoked: member.revokedAt !== null,
+      isSelf: member.personId === actor.personId,
+    })),
     scoresSubmitted: totals.submitted,
     scoresExpected: totals.expected,
     lastScoreAt: row?.lastAt ? new Date(row.lastAt).toISOString() : null,

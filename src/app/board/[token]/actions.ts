@@ -3,9 +3,14 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { CHAIN_INDEX_NAMES, deductions, judgeAssignments } from "@/db/schema";
+import { boardAssignments, CHAIN_INDEX_NAMES, deductions, judgeAssignments } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import { NOT_COMPETING, resolveBoardActor, resolveTeamForBoard } from "@/lib/auth/scope";
+import {
+  listBoardForBoard,
+  NOT_COMPETING,
+  resolveBoardActor,
+  resolveTeamForBoard,
+} from "@/lib/auth/scope";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
@@ -241,6 +246,87 @@ export const revokeJudgeAction = async (
 
   revalidatePath(`/board/${token}`);
   return { status: "ok", message: "That scoring link no longer opens." };
+};
+
+/**
+ * Kills a board member's link. `board_assignments.revoked_at` has been read by `resolveBoardActor`
+ * since ADR-0007 and written by nothing, so a leaked board link could lock, override and deduct
+ * under a named person's attribution and could not be killed from the product — only from the
+ * database. ADR-0007 said board links got revocation "for free" when it made them per person; that
+ * was true of the read path and false of the write path.
+ *
+ * Two things differ from `revokeJudgeAction`, and both are the point.
+ *
+ * It stays available **after the lock**, where judge revocation does not. A judge whose link is
+ * dead after the lock can do nothing anyway — scoring is closed. A board link is the opposite: it
+ * can still override a locked result, so the moment a leaked one matters most is precisely the
+ * moment the judge rule would have stopped you killing it.
+ *
+ * And it refuses to revoke the **last** live link. Nothing in this product mints one (ADR-0011), so
+ * a board that revokes its way to zero cannot get back in — it would be locked out of its own comp,
+ * mid-night, with no instrument to recover and a seed the only way back, which would destroy the
+ * scores. The guard is a check-then-write like every other, and it can race; the cost of losing
+ * that race is one revocation too many, which is why the refusal is here and not merely in the UI.
+ */
+export const revokeBoardAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+  if (!assignmentId) return { status: "error", message: "Pick a board member." };
+
+  const live = (await listBoardForBoard(actor)).filter((member) => member.revokedAt === null);
+  if (!live.some((member) => member.assignmentId === assignmentId)) {
+    return { status: "error", message: "That board link is already revoked." };
+  }
+  if (live.length <= 1) {
+    return {
+      status: "error",
+      message: "This is the last working board link. Revoking it would lock the board out for good.",
+    };
+  }
+
+  const [row] = await db
+    .update(boardAssignments)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(boardAssignments.id, assignmentId),
+        eq(boardAssignments.compId, actor.compId),
+        isNull(boardAssignments.revokedAt),
+      ),
+    )
+    .returning({ id: boardAssignments.id, personId: boardAssignments.personId });
+
+  if (!row) return { status: "error", message: "That board link is already revoked." };
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "board.revoke",
+    entity: "board_assignment",
+    entityId: row.id,
+    after: { revokedPersonId: row.personId },
+  });
+
+  // Revoking your own link -- the thing you do the moment you realise it leaked -- must still tell
+  // you it worked. Revalidating would re-render the page through `resolveBoardActor`, which now
+  // resolves the dead token to nothing, and the board member would get a bare 404 instead of an
+  // answer. So the page is left standing, stale, holding the one sentence it needs to show.
+  if (row.personId === actor.personId) {
+    return {
+      status: "ok",
+      message: "Your own board link no longer opens. Close this tab; reloading it will 404.",
+    };
+  }
+
+  revalidatePath(`/board/${token}`);
+  return { status: "ok", message: "That board link no longer opens." };
 };
 
 export const addDeductionAction = async (
