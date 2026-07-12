@@ -35,9 +35,9 @@ export const DEMO_CONFIG: CompConfig = {
     { bidCode: "H-860", name: "UVA Aayaam", school: "Virginia" },
   ].map((team, i) => ({ ...team, division: "fusion", rosterSize: 16, performanceOrder: i + 1 })),
   judges: [
-    { name: "Priya Raghavan", email: "priya@example.com", division: "fusion" },
-    { name: "Arjun Mehta", email: "arjun@example.com", division: "fusion" },
-    { name: "Sonia Desai", email: "sonia@example.com", division: "fusion" },
+    { name: "Priya Raghavan", email: "priya@example.com" },
+    { name: "Arjun Mehta", email: "arjun@example.com" },
+    { name: "Sonia Desai", email: "sonia@example.com" },
   ],
   board: [{ name: "Ananya Krishnan", email: "ananya@example.com" }],
 };

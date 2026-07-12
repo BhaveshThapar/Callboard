@@ -26,6 +26,11 @@ import { teams } from "./teams";
  * and numbering by a sort over assignment ids silently renumbers the whole panel the moment a
  * replacement judge is added mid-comp, which would make "Judge 2" mean a different person than it
  * meant in yesterday's sheet.
+ *
+ * There is deliberately no `division`. A comp is one division (ADR-0010), so a judge's division is
+ * the comp's. The column that used to be here read like an authorization key -- "which teams may
+ * this judge see" -- and authorized nothing: `listTeamsForJudge` scopes by comp and status, and
+ * always did. Do not add it back without also making the judge's window honor it.
  */
 export const judgeAssignments = pgTable(
   "judge_assignments",
@@ -38,7 +43,6 @@ export const judgeAssignments = pgTable(
       .notNull()
       .references(() => people.id, { onDelete: "cascade" }),
     labelSeq: integer("label_seq").notNull(),
-    division: text("division"),
     tokenHash: text("token_hash").notNull().unique(),
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -156,12 +160,21 @@ export const tabRuns = pgTable(
     }),
     overrideReason: text("override_reason"),
   },
-  // Two runs superseding the same parent would fork the chain, leaving the audit trail with two
-  // heads and no fact of the matter about which result stands. A double-submitted override is the
-  // realistic way that happens, so the database refuses it rather than the application.
+  // A comp's runs are one chain: one root, and one head. Fork it and the audit trail holds two
+  // fully-formed, attributed, reproducible results with no fact of the matter about which one
+  // stands -- and `latestLockedRun` will pick one by `seq` and show it as if there were no other.
+  //
+  // The chain forks two ways, and both are the same accident: two people submitting at once. Two
+  // runs superseding the same parent fork it at the head. Two *first* locks fork it at the root --
+  // both read no previous run, both insert with a null `supersedes_id`. `lockResults` checks before
+  // it inserts, but neon-http has no transactions, so the check and the insert cannot be one act.
+  // The database is therefore the only thing that can refuse this, and it refuses both ends.
   (t) => [
     uniqueIndex("tab_runs_supersedes_unique")
       .on(t.supersedesId)
       .where(sql`${t.supersedesId} is not null`),
+    uniqueIndex("tab_runs_root_unique")
+      .on(t.compId)
+      .where(sql`${t.supersedesId} is null`),
   ],
 );

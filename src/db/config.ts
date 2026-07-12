@@ -37,7 +37,7 @@ export type CompConfig = {
     rosterSize?: number;
     performanceOrder?: number;
   }[];
-  judges: { name: string; email?: string; division?: string }[];
+  judges: { name: string; email?: string }[];
   board: { name: string; email?: string }[];
 };
 
@@ -82,6 +82,31 @@ const tiebreaker = (value: unknown, path: string): ConfigTiebreaker => {
     return { kind, criterion: str(raw.criterion, `${path}.criterion`) };
   }
   return { kind };
+};
+
+/**
+ * A comp is one division: one rubric, one judge pool, one ranked list.
+ *
+ * Nothing downstream is division-aware, and nothing is meant to be — `listTeamsForJudge` scopes by
+ * comp, `getRubric` returns the comp's single rubric, and `tabulate` returns one ranked list. So a
+ * config carrying two divisions does not produce two competitions. It produces one wrong one: judges
+ * scoring outside their division, every division ranked against the others, and per-division score
+ * sheets collapsed into whichever rubric was inserted first. Divisions are separate comps.
+ *
+ * Refused here, at the only door, because a division that is stored and never read is
+ * indistinguishable from a feature right up until it places a team (ADR-0010).
+ */
+const oneDivision = (rows: { division?: string }[]): void => {
+  // Only *named* divisions count. A row with none is an unlabelled row, not a second division:
+  // there is one comp and one ranked list either way, so it changes no result. Two names do.
+  const named = new Set(rows.flatMap((r) => (r.division === undefined ? [] : [r.division])));
+  if (named.size <= 1) return;
+
+  throw new Error(
+    `config declares ${named.size} divisions (${[...named].sort().join(", ")}). A comp scores one ` +
+      `division — one rubric, one judge pool, one ranked list. Divisions are separate comps: ` +
+      `split this into one config per division. See docs/INTAKE.md`,
+  );
 };
 
 export const parseCompConfig = (raw: unknown): CompConfig => {
@@ -136,6 +161,9 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
   const bidCodes = new Set(teams.map((t) => t.bidCode));
   if (bidCodes.size !== teams.length) fail("teams", "bid codes to be unique");
 
+  // A judge's division is read only to enforce `oneDivision`, and never returned: judges are
+  // assigned to the comp, and the comp is the division. A panel split across two divisions is one
+  // of the two ways a config declares two competitions, so it has to be seen here to be refused.
   const judges = array(root.judges, "judges").map((entry, i) => {
     const j = record(entry, `judges[${i}]`);
     return {
@@ -145,6 +173,8 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     };
   });
   if (judges.length === 0) fail("judges", "at least one judge");
+
+  oneDivision([...teams, ...judges]);
 
   const board = array(root.board, "board").map((entry, i) => {
     const b = record(entry, `board[${i}]`);
@@ -169,7 +199,7 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
       criteria,
     },
     teams,
-    judges,
+    judges: judges.map(({ name, email }) => ({ name, email })),
     board,
   };
 };

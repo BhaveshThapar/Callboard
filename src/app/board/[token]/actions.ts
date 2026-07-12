@@ -9,6 +9,28 @@ import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
+const CHAIN_INDEXES = new Set(["tab_runs_root_unique", "tab_runs_supersedes_unique"]);
+
+/**
+ * The database refusing to fork the run chain — a second root (`tab_runs_root_unique`) or a second
+ * run superseding the same head (`tab_runs_supersedes_unique`).
+ *
+ * Both mean one thing to a board member: somebody else got there first. The `latestLockedRun`
+ * checks below catch the ordinary case, but they structurally cannot catch this one — neon-http has
+ * no transactions, so the check and the insert are two acts, and two people submitting at once can
+ * land between them. Postgres is the only thing that can refuse it.
+ *
+ * The `constraint` lives on the *cause*, not on what is thrown: drizzle wraps the driver error, and
+ * its own message is the failed SQL. Read that message and a board member is shown
+ * `Failed query: insert into "tab_runs" ...` at the moment placements go final.
+ */
+const isChainFork = (error: unknown): boolean => {
+  for (let e: unknown = error; e instanceof Error; e = e.cause) {
+    if ("constraint" in e && CHAIN_INDEXES.has(String(e.constraint))) return true;
+  }
+  return false;
+};
+
 export const lockAction = async (
   _previous: BoardActionState,
   formData: FormData,
@@ -41,6 +63,14 @@ export const lockAction = async (
     revalidatePath(`/board/${token}`);
     return { status: "ok", message: "Results locked." };
   } catch (error) {
+    if (isChainFork(error)) {
+      revalidatePath(`/board/${token}`);
+      return {
+        status: "error",
+        message:
+          "Another board member locked these results first. Correcting them requires a written reason.",
+      };
+    }
     return { status: "error", message: error instanceof Error ? error.message : "Lock failed." };
   }
 };
@@ -146,6 +176,15 @@ export const overrideAction = async (
         };
       }
       await db.delete(deductions).where(eq(deductions.id, deductionId));
+    }
+
+    if (isChainFork(error)) {
+      revalidatePath(`/board/${token}`);
+      return {
+        status: "error",
+        message:
+          "Another board member corrected these results first. Reload before correcting again.",
+      };
     }
 
     return {

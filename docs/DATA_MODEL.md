@@ -46,9 +46,13 @@ The board's access token, the same primitive judges use, and deliberately **one 
 
 `weight_bp` is basis points; `10000` = 1.0×. An integer, so weighting never introduces float drift into the scoring pipeline.
 
-**`judge_assignments`** — `id`, `comp_id`, `person_id`, `division`, `token_hash` (unique), `revoked_at`, `created_at`
+**`judge_assignments`** — `id`, `comp_id`, `person_id`, `label_seq`, `token_hash` (unique), `revoked_at`, `created_at`
 
 The raw token exists only in the URL handed to the judge. Revoking is a write, not a password reset.
+
+`label_seq` is the "Judge 2" the board sees beside a score, persisted rather than derived ([ADR-0008](decisions/0008-judge-scores-are-de-identified.md)).
+
+There is deliberately **no `division`**: a comp is one division ([ADR-0010](decisions/0010-a-comp-is-one-division.md)), so a judge's division is the comp's. The column that used to be here read like an authorization key — *which teams may this judge see* — and authorized nothing, because `listTeamsForJudge` scopes by comp and status and always did.
 
 **`scores`** — `id`, `comp_id`, `judge_assignment_id`, `team_id`, `criterion_id`, `raw_value`, `submitted_at`
 
@@ -71,6 +75,8 @@ Deductions are also the only lever a **correction** has. Scores are immutable af
 The locked snapshot. `inputs` and `config` are the frozen arguments to `tabulate()`; `results` is what it returned. Re-running the function against `inputs` must reproduce `results` exactly — that is the whole of the dispute-proofing claim.
 
 These three columns are **`json`, not `jsonb`**. `jsonb` reorders object keys and collapses duplicates, so it cannot promise a snapshot comes back as the bytes that went in.
+
+A comp's runs are **one chain: one root, one head**, held by two partial unique indexes ([ADR-0010](decisions/0010-a-comp-is-one-division.md)). `tab_runs_root_unique` (`comp_id where supersedes_id is null`) refuses a second first-lock; `tab_runs_supersedes_unique` refuses two runs superseding the same parent. `lockResults` checks before it inserts, but neon-http has no transactions, so the check and the insert are two acts — the database is the only thing that can actually refuse a fork, and a forked chain is two frozen, attributed, reproducible results with nothing to say which one stands.
 
 A correction never mutates. It inserts a new row with `supersedes_id` set and an `override_reason` written by a human.
 

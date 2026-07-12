@@ -28,7 +28,8 @@ Plain answers are fine. Send it in a doc, an email, a spreadsheet, a voice note.
 
 **The teams**
 - Team name, school, and **bid code** — the anonymized code the judges see instead of the name. If you already run blind judging, send your existing codes; if you don't, we make them.
-- Performance order, if you have it. Division, if you run divisions.
+- Performance order, if you have it.
+- **If you run divisions, send each one separately** — its own teams, its own judges, its own score sheet (they are usually different anyway). A division is scored as its own competition, because that is what it is: nobody places a classical team against a fusion team. You get a board screen and a set of judge links per division. Say so up front if you run more than one, since it changes what the score sheet section above is asking for.
 
 **The people**
 - Judges: names (emails if you have them). Each gets a private link, one per phone.

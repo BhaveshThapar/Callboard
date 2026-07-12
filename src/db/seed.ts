@@ -131,17 +131,12 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
     .insert(compRoles)
     .values(judgePeople.map((p) => ({ compId: comp.id, personId: p.id, role: "judge" as const })));
 
-  const judgeTokens = judgePeople.map((person, i) => ({
-    person,
-    token: createToken(),
-    division: config.judges[i]?.division ?? null,
-  }));
+  const judgeTokens = judgePeople.map((person) => ({ person, token: createToken() }));
   await db.insert(judgeAssignments).values(
-    judgeTokens.map(({ person, token, division }, i) => ({
+    judgeTokens.map(({ person, token }, i) => ({
       compId: comp.id,
       personId: person.id,
       labelSeq: i + 1,
-      division,
       tokenHash: token.tokenHash,
     })),
   );
