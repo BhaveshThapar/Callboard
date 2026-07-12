@@ -40,6 +40,8 @@ The PRD gates the real v1 on three signed founding partners (§13) — the found
 
 **A comp's runs are one chain: one root, one head.** `tab_runs_root_unique` and `tab_runs_supersedes_unique` are both partial indexes and both load-bearing — the first refuses a second first-lock, the second a second override. Neither is redundant. `lockResults` checks before it inserts, but neon-http has no transactions, so the check and the insert are two acts and two board members can land between them; the database is the only thing that can actually refuse a fork. If a lock path catches a DB error, read `error.cause.constraint` — drizzle's own `message` is the failed SQL, and a board member must never be shown it.
 
+Because the guarantee lives in the database rather than the code, **the code cannot assume it is there.** `db:doctor` looks both indexes up in `pg_indexes` and reports a comp with two roots by id — that is what makes the preflight mean "this database enforces the invariant", not merely "this demo is seeded". Reseeding is never offered as the remedy for either: it does not create an index, and it does not decide which of two locked results stood. Their names have one definition, `CHAIN_INDEXES` in `src/db/schema/scores.ts`, because the schema, the lock path, and the doctor must agree on the strings and none can derive them. Do not write a second one.
+
 ## Code style
 
 Follows the global CLAUDE.md. Specifically enforced by ESLint here:

@@ -11,6 +11,21 @@ const healthy: Observed = {
   judgeViewLoaded: true,
   judgeLabels: 3,
   teams: 8,
+  forkGuaranteeEnforced: true,
+  forkedComps: [],
+};
+
+const unseeded: Observed = {
+  compFound: false,
+  boardAssignments: 0,
+  boardName: null,
+  boardViewLoaded: false,
+  judges: 0,
+  judgeViewLoaded: false,
+  judgeLabels: 0,
+  teams: 0,
+  forkGuaranteeEnforced: true,
+  forkedComps: [],
 };
 
 const expected = { judges: 3, teams: 8 };
@@ -63,21 +78,52 @@ describe("summarizeHealth", () => {
   });
 
   it("reports the comp as unseeded before any other problem", () => {
+    const health = summarizeHealth(unseeded, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems).toEqual(["comp not seeded — run 'bun run db:seed'"]);
+  });
+
+  it("fails when the chain indexes are missing — the demo can still fork its results", () => {
+    const health = summarizeHealth({ ...healthy, forkGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems[0]).toMatch(/can still fork/);
+    expect(health.problems[0]).toMatch(/0006/);
+    expect(health.problems[0]).toMatch(/db:migrate/);
+    // Reseeding does not create an index. Offering it is the demo lying about its own repair.
+    expect(health.problems[0]).not.toMatch(/db:seed/);
+  });
+
+  it("fails when a comp has already forked, and does not offer to reseed it", () => {
     const health = summarizeHealth(
-      {
-        compFound: false,
-        boardAssignments: 0,
-        boardName: null,
-        boardViewLoaded: false,
-        judges: 0,
-        judgeViewLoaded: false,
-        judgeLabels: 0,
-        teams: 0,
-      },
+      { ...healthy, forkGuaranteeEnforced: false, forkedComps: [{ compId: "abc-123", roots: 2 }] },
       expected,
     );
     expect(health.ok).toBe(false);
     if (health.ok) throw new Error("unreachable");
-    expect(health.problems).toEqual(["comp not seeded — run 'bun run db:seed'"]);
+    const fork = health.problems.find((p) => p.includes("abc-123"));
+    expect(fork).toMatch(/2 locked-result chains, not one/);
+    expect(fork).toMatch(/human must decide/);
+    expect(fork).not.toMatch(/db:seed/);
+  });
+
+  // The whole point of the check. A database missing the indexes is missing them whether or not
+  // anyone has seeded a demo onto it -- and `db:seed`, the only thing the unseeded branch suggests,
+  // will not add them. Swallowing this behind the short-circuit is how it stays invisible.
+  it("reports a missing chain index even when the comp is not seeded", () => {
+    const health = summarizeHealth({ ...unseeded, forkGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems).toHaveLength(2);
+    expect(health.problems[0]).toMatch(/can still fork/);
+    expect(health.problems[1]).toMatch(/comp not seeded/);
+  });
+
+  // A comp that has never been locked has no runs at all, so it groups to nothing and is not a fork.
+  // If this ever fails, every pre-lock demo on earth is being called broken.
+  it("passes a healthy database whose comp has never been locked", () => {
+    const health = summarizeHealth({ ...healthy, forkedComps: [] }, expected);
+    expect(health.ok).toBe(true);
   });
 });

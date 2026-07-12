@@ -3,13 +3,13 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { deductions, judgeAssignments } from "@/db/schema";
+import { CHAIN_INDEX_NAMES, deductions, judgeAssignments } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
-const CHAIN_INDEXES = new Set(["tab_runs_root_unique", "tab_runs_supersedes_unique"]);
+const CHAIN_INDEXES = new Set<string>(CHAIN_INDEX_NAMES);
 
 /**
  * The database refusing to fork the run chain — a second root (`tab_runs_root_unique`) or a second

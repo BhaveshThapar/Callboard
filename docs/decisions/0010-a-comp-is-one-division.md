@@ -47,8 +47,18 @@ A single uniform division stays legal, and the demo still carries one (`"fusion"
 
 A board running divisions now needs one config, one seed, and one board link per division, and cannot see both divisions on one screen. That is a real cost, and it is the honest one: there was never a screen that could show two divisions correctly, only one that showed them wrongly.
 
-**The migration will fail loudly on any comp that has already forked**, because a unique index cannot be built over two existing roots. That is the correct behavior — a comp with two roots needs a human to decide which result stood — but it means the migration is not unconditionally safe to apply to a database that has been running without it.
+**The migration will fail loudly on any comp that has already forked**, because a unique index cannot be built over two existing roots. That is the correct behavior — a comp with two roots needs a human to decide which result stood — but it means the migration is not unconditionally safe to apply to a database that has been running without it. `db:doctor` is the preflight: it reports a forked comp by id, and refuses to offer `db:seed` as the remedy, because reseeding does not create an index and does not decide which result stood.
 
 Drizzle wraps driver errors, so the thrown error's `message` is the failed `INSERT` statement; the constraint name lives on its `cause`. A board member who lost a lock race must be told *"another board member locked these results first"* — the first draft of this fix read the wrong message and would have shown them `Failed query: insert into "tab_runs" ...` at the moment placements went final.
 
 Nothing here enters `TabulationInput`, so no locked snapshot replays differently. `reproducibility.test.ts` is untouched and green.
+
+### What this does not build
+
+The chain is now unforkable, but the board still has no instrument for three things it may need. Each is recorded here rather than built, because none is on the path to the founding-partner gate (PRD §13) and each has a defensible reason to wait. They are written down so that "we decided not to" stays distinguishable from "we forgot".
+
+- **A surviving tie cannot be resolved in the product.** `LiveBoard.tsx` renders a red banner telling the operator to *"resolve it by hand before announcing"* and then hands them nothing to resolve it with. A tie has to survive every configured tiebreaker in order to appear, so this is rare by construction — but when it happens the board is on its own, and the resolution is recorded nowhere. Building it means deciding what a hand-resolution *is* in an append-only model, which is a real design question and not a small one.
+
+- **A deduction cannot be undone.** This one is by invariant, not oversight: scores and locks are append-only, so a mistaken deduction is corrected by another attributed deduction and a re-tabulation, not by deleting a row. The correction is fully expressible today. An "undo" button that mutated history would be the thing the audit trail exists to prevent.
+
+- **A board link cannot be revoked.** This is the only one of the three that is a live hole. `board_assignments.revoked_at` is *read* — by `resolveBoardActor`, by the seeder, by `doctor` — and **written by nothing**. `revokeJudgeAction` exists and is wired into the board screen; there is no board equivalent. A board link that leaks cannot be killed from the product, only from the database. ADR-0007 said board links "get revocation for free" when it made them per-person; that was true of the *read* path and false of the write path, and this is the correction.

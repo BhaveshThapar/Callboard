@@ -17,19 +17,58 @@ export type Observed = {
   /** Distinct `Judge N` labels the board's de-identified projection resolves. */
   judgeLabels: number;
   teams: number;
+  /** Both partial unique indexes on `tab_runs` exist: the chain cannot fork. */
+  forkGuaranteeEnforced: boolean;
+  /** Comps whose run chain does not have exactly one root. Only ever non-empty above. */
+  forkedComps: { compId: string; roots: number }[];
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
+
+/**
+ * Whether the database can still fork a comp's run chain, and whether one already has.
+ *
+ * These are facts about the *database*, not about the demo comp, so they outlive the "comp not
+ * seeded" short-circuit below: a demo nobody has seeded yet on a database missing the indexes is
+ * still a database missing the indexes, and reseeding will not add them.
+ *
+ * The two are one question. Once `tab_runs_root_unique` exists a second root is unrepresentable, so
+ * a forked comp can only be found on a database that never got the migration — which makes this the
+ * preflight for applying it. A comp with no runs at all yields nothing here: an unlocked demo is
+ * healthy, not forked.
+ */
+const chainProblems = (observed: Observed): string[] => {
+  const problems: string[] = [];
+
+  if (!observed.forkGuaranteeEnforced) {
+    problems.push(
+      "a comp's locked results can still fork: the tab_runs chain indexes are missing. " +
+        "This database predates migration 0006 — apply it with 'bun run db:migrate'.",
+    );
+  }
+
+  for (const { compId, roots } of observed.forkedComps) {
+    problems.push(
+      `comp ${compId} has ${roots} locked-result chains, not one. A human must decide which ` +
+        "result stood — migration 0006 cannot be applied until one does.",
+    );
+  }
+
+  return problems;
+};
 
 export const summarizeHealth = (
   observed: Observed,
   expected: { judges: number; teams: number },
 ): DemoHealth => {
   if (!observed.compFound) {
-    return { ok: false, problems: ["comp not seeded — run 'bun run db:seed'"] };
+    return {
+      ok: false,
+      problems: [...chainProblems(observed), "comp not seeded — run 'bun run db:seed'"],
+    };
   }
 
-  const problems: string[] = [];
+  const problems: string[] = chainProblems(observed);
 
   if (observed.boardAssignments === 0) {
     problems.push(`no board link for the demo comp — ${RESEED}`);
