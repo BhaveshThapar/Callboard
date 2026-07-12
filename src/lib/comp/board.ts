@@ -6,7 +6,14 @@ import { listJudgesForBoard, listTeamsForBoard } from "@/lib/auth/scope";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
 import type { JudgeProgress } from "./progress";
 import { judgeProgress, progressTotals } from "./progress";
-import { getRubric, latestLockedRun, liveStandings, reproduce, runCount } from "./tab";
+import {
+  getRubric,
+  latestLockedRun,
+  liveStandings,
+  reproduce,
+  runCount,
+  scoresOutsideChain,
+} from "./tab";
 
 export type StandingRow = {
   place: number;
@@ -40,6 +47,12 @@ export type BoardSnapshot = {
   standings: StandingRow[];
   unscored: string[];
   unresolvedTies: string[][];
+  /**
+   * Scores that landed after the lock and are counted in no result — not in the run showing, and
+   * not in any correction of it, because a correction replays the frozen snapshot. Zero in every
+   * ordinary comp; non-zero means a judge's submission lost the race with the lock button.
+   */
+  scoresOutsideChain: number;
 };
 
 /**
@@ -68,6 +81,7 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
   const results = locked ? locked.results : await liveStandings(actor.compId);
   const verification = locked ? reproduce(locked) : null;
   const lockedRunNumber = locked ? runs : null;
+  const outsideChain = locked ? await scoresOutsideChain(actor.compId, locked) : 0;
 
   const byId = new Map(teams.map((t) => [t.id, t]));
   const label = (teamId: string): string => {
@@ -116,5 +130,6 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
     })),
     unscored: results.unscored.map(label),
     unresolvedTies: results.unresolvedTies.map((group) => group.map(label)),
+    scoresOutsideChain: outsideChain,
   };
 };

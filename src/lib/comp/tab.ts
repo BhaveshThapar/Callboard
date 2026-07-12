@@ -3,7 +3,14 @@ import { and, count, desc, eq, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { deductions, judgeAssignments, rubricCriteria, rubrics, scores, SCOREABLE_STATUSES, tabRuns, teams } from "@/db/schema";
 import { tabulate } from "@/lib/tabulation";
-import type { Criterion, Rubric, TabulationInput, TabulationResult } from "@/lib/tabulation/types";
+import type {
+  Criterion,
+  DeductionInput,
+  Rubric,
+  ScoreInput,
+  TabulationInput,
+  TabulationResult,
+} from "@/lib/tabulation/types";
 
 const SCOREABLE = SCOREABLE_STATUSES;
 
@@ -159,22 +166,52 @@ export const latestLockedRun = async (compId: string): Promise<LockedRun | null>
 };
 
 /**
- * Freezes the current inputs, the rubric, and the computed results into one row.
+ * Freezes the inputs, the rubric, and the computed results into one row.
  * A second lock never mutates the first: it supersedes it and must say why.
+ *
+ * The first lock reads the live tables. **An override does not.** It takes the superseded run's
+ * frozen `inputs` and `config` as its base and appends only the deductions its caller just wrote --
+ * because "scores are immutable after a lock" has to mean the correction cannot see a score the
+ * locked result did not. Re-reading the tables here would let anything written since the lock enter
+ * the corrected result silently: a judge whose submission lost the race with the lock button, a
+ * rubric weight edited afterwards, a team's status changed. Each run would still reproduce from its
+ * own row, so the audit trail could never show it -- both runs verify while describing different
+ * worlds. The board's "no deduction, re-tabulate only" correction is the case that names the bug:
+ * it is supposed to be a no-op.
+ *
+ * The new deductions are passed in rather than diffed out of the table because `DeductionInput`
+ * carries no id and no timestamp, so two identical deductions are indistinguishable in a snapshot.
+ * Appending what the caller wrote sidesteps that, and keeps `TabulationInput` unchanged.
  */
 export const lockResults = async (
   compId: string,
-  options: { lockedByPersonId?: string; overrideReason?: string } = {},
+  options: {
+    lockedByPersonId?: string;
+    overrideReason?: string;
+    addDeductions?: DeductionInput[];
+  } = {},
 ): Promise<LockedRun> => {
-  const [input, rubric, previous] = await Promise.all([
-    buildTabulationInput(compId),
-    getRubric(compId),
-    latestLockedRun(compId),
-  ]);
+  const previous = await latestLockedRun(compId);
 
   if (previous && !options.overrideReason) {
     throw new Error("results are already locked; an override requires a reason");
   }
+
+  const { input, rubric } = previous
+    ? {
+        input: {
+          ...previous.inputs,
+          deductions: [...previous.inputs.deductions, ...(options.addDeductions ?? [])],
+        },
+        rubric: previous.config,
+      }
+    : await (async () => {
+        const [built, loaded] = await Promise.all([
+          buildTabulationInput(compId),
+          getRubric(compId),
+        ]);
+        return { input: built, rubric: loaded };
+      })();
 
   const results = tabulate(input, rubric);
 
@@ -210,4 +247,27 @@ export const lockResults = async (
 export const reproduce = (run: LockedRun): { matches: boolean; recomputed: TabulationResult } => {
   const recomputed = tabulate(run.inputs, run.config);
   return { matches: isDeepStrictEqual(recomputed, run.results), recomputed };
+};
+
+const scoreKey = (score: ScoreInput): string =>
+  `${score.judgeId}:${score.teamId}:${score.criterionId}:${score.rawValue}`;
+
+/**
+ * Scores sitting in the table that no locked run counts, and none ever will.
+ *
+ * `submitScores` refuses to write once a run exists, but that check and that insert are two acts
+ * over a driver with no transactions, so a judge submitting as the lock lands can still get a row
+ * in. Since an override now replays the frozen snapshot instead of re-reading the tables, that row
+ * is not folded into the next correction either -- which is the correct reading of "scores are
+ * immutable after a lock", and precisely why it must not be silent. The board is owed the sentence
+ * "a score arrived that no result counts", not a quietly different set of placements.
+ *
+ * Compared against the snapshot rather than against `locked_at`, because a timestamp would miss the
+ * one case this exists for: a score landing after `buildTabulationInput` has read the table but
+ * before the run row is written carries a `submitted_at` *earlier* than the lock it missed.
+ */
+export const scoresOutsideChain = async (compId: string, head: LockedRun): Promise<number> => {
+  const live = await buildTabulationInput(compId);
+  const counted = new Set(head.inputs.scores.map(scoreKey));
+  return live.scores.filter((score) => !counted.has(scoreKey(score))).length;
 };

@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { CHAIN_INDEX_NAMES, deductions, judgeAssignments } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import { NOT_COMPETING, resolveBoardActor, resolveTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
@@ -111,11 +111,8 @@ export const overrideAction = async (
     }
     if (!reason) return { status: "error", message: "A deduction needs a reason." };
 
-    // Same reason the judge's score path checks it: `teamId` comes off the form, and a deduction row
-    // carries a bare team FK that the database would happily point at another comp's team.
-    const scoreable = await listTeamsForBoard(actor);
-    if (!scoreable.some((team) => team.id === teamId)) {
-      return { status: "error", message: "That team is not competing in this comp." };
+    if (!(await resolveTeamForBoard(actor, teamId))) {
+      return { status: "error", message: NOT_COMPETING };
     }
   }
 
@@ -129,9 +126,13 @@ export const overrideAction = async (
       deductionId = row?.id;
     }
 
+    // The correction's inputs are the superseded run's frozen inputs plus exactly this deduction.
+    // `lockResults` does not re-read the tables for an override, so the deduction has to be handed
+    // to it -- writing the row above is what makes it attributable, not what makes it counted.
     const run = await lockResults(actor.compId, {
       lockedByPersonId: actor.personId,
       overrideReason,
+      addDeductions: wantsDeduction ? [{ teamId, points, reason }] : [],
     });
     const runNumber = await runCount(actor.compId);
 
@@ -262,6 +263,14 @@ export const addDeductionAction = async (
     return { status: "error", message: "Deduction must be a whole number above zero." };
   }
   if (!reason) return { status: "error", message: "A deduction needs a reason." };
+
+  // The pre-lock twin of the check in `overrideAction`, and it was missing here. No forged request
+  // is needed to reach it: a team is dropped, a board member's open tab still lists it in the
+  // dropdown, and they apply a penalty to it. The row would be written and the board told it landed,
+  // while `tabulate()` filtered it straight back out for naming a team not on the roster.
+  if (!(await resolveTeamForBoard(actor, teamId))) {
+    return { status: "error", message: NOT_COMPETING };
+  }
 
   const [row] = await db
     .insert(deductions)
