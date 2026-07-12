@@ -16,7 +16,13 @@ import {
   primaryButtonClass,
 } from "@/components/styles";
 import type { BoardSnapshot } from "@/lib/comp/board";
-import { addDeductionAction, lockAction, overrideAction, revokeJudgeAction } from "./actions";
+import {
+  addDeductionAction,
+  lockAction,
+  overrideAction,
+  revokeBoardAction,
+  revokeJudgeAction,
+} from "./actions";
 import { IDLE } from "./state";
 
 const POLL_MS = 2_000;
@@ -44,6 +50,10 @@ export function LiveBoard({
   const [deductionState, deductionFormAction, deducting] = useActionState(addDeductionAction, IDLE);
   const [overrideState, overrideFormAction, overriding] = useActionState(overrideAction, IDLE);
   const [revokeState, revokeFormAction, revoking] = useActionState(revokeJudgeAction, IDLE);
+  const [revokeBoardState, revokeBoardFormAction, revokingBoard] = useActionState(
+    revokeBoardAction,
+    IDLE,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -64,13 +74,14 @@ export function LiveBoard({
       cancelled = true;
       clearInterval(id);
     };
-  }, [token, lockState, deductionState, overrideState, revokeState]);
+  }, [token, lockState, deductionState, overrideState, revokeState, revokeBoardState]);
 
   const progress =
     snapshot.scoresExpected > 0
       ? Math.round((snapshot.scoresSubmitted / snapshot.scoresExpected) * 100)
       : 0;
   const judgesReporting = snapshot.judges.filter((j) => j.submitted >= j.expected).length;
+  const liveBoardLinks = snapshot.board.filter((m) => !m.revoked).length;
 
   return (
     <div className="mx-auto flex w-full max-w-[1420px] flex-col gap-6 px-4 py-8 lg:flex-row lg:px-6">
@@ -132,6 +143,60 @@ export function LiveBoard({
               )}
             >
               {revokeState.message}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-7">
+          <p className={eyebrowClass}>Board</p>
+          <ul className="mt-3 space-y-2">
+            {snapshot.board.map((member) => (
+              <li key={member.assignmentId} data-board-member={member.name}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-caption font-medium text-heading">
+                    {member.name}
+                    {member.isSelf && (
+                      <span className="ml-1.5 text-micro font-normal text-subtle">you</span>
+                    )}
+                    {member.revoked && (
+                      <span className={cx(pillClass, "ml-1.5 bg-hover text-subtle")}>revoked</span>
+                    )}
+                  </span>
+                </div>
+                {/*
+                  Unlike a judge's, a board link stays revocable after the lock — it is the link
+                  that can still override a locked result, so that is when a leaked one matters most.
+
+                  Hidden when it is the only link left, because revoking it would lock the board out
+                  of its own comp and nothing here mints a replacement (ADR-0011). The server refuses
+                  it regardless; this only avoids offering a button that cannot succeed.
+                */}
+                {!member.revoked && liveBoardLinks > 1 && (
+                  <form action={revokeBoardFormAction} className="mt-1">
+                    <input type="hidden" name="token" value={token} />
+                    <input type="hidden" name="assignmentId" value={member.assignmentId} />
+                    <button
+                      type="submit"
+                      disabled={revokingBoard}
+                      data-testid={`revoke-board-${member.assignmentId}`}
+                      className="text-micro text-subtle underline underline-offset-2 transition-colors hover:text-danger disabled:opacity-40"
+                    >
+                      Revoke link
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+          {revokeBoardState.message && (
+            <p
+              role="status"
+              className={cx(
+                "mt-3 text-micro",
+                revokeBoardState.status === "error" ? "text-danger" : "text-subtle",
+              )}
+            >
+              {revokeBoardState.message}
             </p>
           )}
         </div>
