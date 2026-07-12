@@ -20,7 +20,7 @@ Three Neon branches, and the demo runs on exactly one of them.
 | `ci` | GitHub Actions | every push to `main` |
 | `dev` | your `.env.local` | every local `bun run e2e` |
 
-`bun run db:seed` with no override hits `dev`, which is not what a prospect is looking at. Seeding the demo means naming production explicitly, below. The split exists because seeding deletes the demo org and everything cascading from it — before the branches were separated, a merged pull request could 404 three judges' phones mid-call.
+`bun run db:seed` with no override hits `dev`, which is not what a prospect is looking at. Seeding the demo means naming production explicitly, below. The split exists because seeding deletes the demo comp and everything cascading from it — before the branches were separated, a merged pull request could 404 three judges' phones mid-call.
 
 That split is now enforced rather than agreed to: `e2e/guard.ts` refuses to run the suite against the compute backing `main`, whoever points `DATABASE_URL` there, and CI reads its own `CI_DATABASE_URL` secret so the demo's connection string is never in its environment.
 
@@ -74,7 +74,9 @@ DATABASE_URL='<neon main pooled>' bunx tsx src/db/seed-cli.ts --config their-com
 
 It seeds its own org and cascades independently, so it cannot disturb the Mayuri demo. All three normalizations (`raw`, `zscore`, `rank`) and all three tiebreakers (`criterion`, `head_to_head`, `highest_single_judge`) are supported.
 
-**Seeding it a second time will refuse, and should.** Once their links are out, a reseed deletes the org by slug and reissues every token — so the link on their treasurer's phone quietly stops resolving. The first seed creates and is safe; a reseed destroys and is not. If you really do need to rebuild it, `--force` and then hand out the new links yourself.
+**If they run divisions, give each one its own `comp.slug` under the same `org.slug`.** A comp is one division ([ADR-0010](decisions/0010-a-comp-is-one-division.md)), so two divisions are two comps — two configs, two seeds, a board screen and a judge panel each. Seeding the second does not disturb the first, and the same tab chair can sit on both and get a link per comp ([ADR-0012](decisions/0012-a-seed-replaces-a-comp-not-an-org.md)). What you must not do is reuse the same `comp.slug`, which is a reseed of that comp rather than a second division.
+
+**Seeding the same comp a second time will refuse, and should.** Once their links are out, a reseed replaces that comp and reissues every token — so the link on their treasurer's phone quietly stops resolving. The first seed creates and is safe; a reseed destroys and is not. Only the named comp is at stake: a *different* `comp.slug` under the same org creates, and does not fire the refusal. If you really do need to rebuild the comp, `--force` and then hand out the new links yourself.
 
 This is a founder-run script, not a setup screen, and that is deliberate (PRD §12: white-glove founding support). Setup UI waits for three signed founding partners.
 

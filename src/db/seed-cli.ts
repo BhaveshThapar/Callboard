@@ -40,8 +40,8 @@ try {
   process.exit(1);
 }
 
-// On the deployed demo, refuse to reseed an org whose links are already in someone's hands. Seeding
-// deletes by org slug and reissues every token, so the links a prospect is holding stop resolving --
+// On the deployed demo, refuse to reseed a comp whose links are already in someone's hands. Seeding
+// replaces the comp and reissues every token, so the links a prospect is holding stop resolving --
 // and they find out by opening one mid-call, which is the failure `db:doctor` can only diagnose
 // after the fact. `e2e/guard.ts` refuses this database outright because every spec reseeds; here the
 // test is narrower, because seeding a *new* comp into the deployed demo is the documented way to
@@ -49,18 +49,20 @@ try {
 if (isProtectedDatabase(process.env.DATABASE_URL) && !process.argv.includes("--force")) {
   const atRisk = await liveLinksAtRisk(compConfig);
   if (atRisk > 0) {
+    const slug = `${compConfig.org.slug}/${compConfig.comp.slug}`;
     console.error(
       [
         "",
-        `✗ Refusing to reseed "${compConfig.org.slug}" on Neon compute ${protectedComputeId()}.`,
+        `✗ Refusing to reseed "${slug}" on Neon compute ${protectedComputeId()}.`,
         "",
         `  That is the deployed demo, and this seed would revoke ${atRisk} live board/judge link(s):`,
-        "  it deletes the org by slug and reissues every token, so any link already handed out",
-        "  stops resolving, and whoever opens one gets a 404 mid-call.",
+        "  it replaces that comp and reissues every token, so any link already handed out stops",
+        "  resolving, and whoever opens one gets a 404 mid-call.",
         "",
-        "  Seeding a *new* comp here is fine — this only fires because that org already exists.",
+        "  Only that one comp is at stake. Seeding a *different* comp under the same org -- another",
+        `  division, say -- creates rather than replaces, and does not fire this. Change comp.slug.`,
         "  For local work, point DATABASE_URL at `dev` or `ci`. docs/DEMO.md has the table.",
-        "  To rebuild it anyway and hand out fresh links, pass --force.",
+        "  To rebuild this comp anyway and hand out fresh links, pass --force.",
         "",
       ].join("\n"),
     );
