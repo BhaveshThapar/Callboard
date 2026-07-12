@@ -36,6 +36,10 @@ The PRD gates the real v1 on three signed founding partners (§13) — the found
 
 **Every board action is attributed.** `BoardActor.personId` is non-nullable, because board links are per person (`board_assignments`), not per comp. Do not add an anonymous board path — `tab_runs.locked_by_person_id`, `deductions.created_by_person_id`, and `audit_log.actor_person_id` were all null before it, which made PRD B6's "attributed override" false.
 
+**A comp is one division** ([ADR-0010](docs/decisions/0010-a-comp-is-one-division.md)). One rubric, one judge pool, one ranked list. Nothing downstream is division-aware and nothing should be: a board running two divisions gets two comps, which is what they are. `parseCompConfig` refuses a config declaring a second division — that is the only door, so it is where the refusal lives. `judge_assignments.division` was **dropped**: it read like an authorization key ("which teams may this judge see") and authorized nothing. `teams.division` stays because it only describes. Do not add a division column back without making the judge's window honor it.
+
+**A comp's runs are one chain: one root, one head.** `tab_runs_root_unique` and `tab_runs_supersedes_unique` are both partial indexes and both load-bearing — the first refuses a second first-lock, the second a second override. Neither is redundant. `lockResults` checks before it inserts, but neon-http has no transactions, so the check and the insert are two acts and two board members can land between them; the database is the only thing that can actually refuse a fork. If a lock path catches a DB error, read `error.cause.constraint` — drizzle's own `message` is the failed SQL, and a board member must never be shown it.
+
 ## Code style
 
 Follows the global CLAUDE.md. Specifically enforced by ESLint here:

@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { config } from "dotenv";
+import type { CompConfig } from "./config";
 import { isProtectedDatabase, protectedComputeId } from "./protected";
 
 config({ path: ".env.local", quiet: true });
@@ -17,9 +18,27 @@ const flag = (name: string): string | undefined => {
 const jsonPath = flag("--json");
 const configPath = flag("--config");
 
-const compConfig = configPath
-  ? parseCompConfig(JSON.parse(readFileSync(configPath, "utf8")))
-  : DEMO_CONFIG;
+/**
+ * A rejected config is a board's own spreadsheet not matching what the seeder expects, and the
+ * person reading this is the one holding the file. So it gets a sentence, not a stack trace.
+ */
+let compConfig: CompConfig;
+try {
+  compConfig = configPath
+    ? parseCompConfig(JSON.parse(readFileSync(configPath, "utf8")))
+    : DEMO_CONFIG;
+} catch (error) {
+  console.error(
+    [
+      "",
+      `✗ ${configPath ?? "the demo config"} was not accepted:`,
+      "",
+      `  ${error instanceof Error ? error.message : String(error)}`,
+      "",
+    ].join("\n"),
+  );
+  process.exit(1);
+}
 
 // On the deployed demo, refuse to reseed an org whose links are already in someone's hands. Seeding
 // deletes by org slug and reissues every token, so the links a prospect is holding stop resolving --
