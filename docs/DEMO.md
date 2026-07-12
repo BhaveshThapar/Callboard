@@ -34,7 +34,7 @@ To catch exactly this without wiping anything, run the read-only preflight again
 DATABASE_URL='<neon main pooled>' bun run db:doctor
 ```
 
-It confirms a board link *and* a judge link resolve and that both the board and the judge views render — the judge view reads `judge_notes`, a table the board view never touches, so a drift there would 500 every phone while the board stayed up. It also confirms every judge has a `Judge N` label, which only the exports read: a comp seeded before `label_seq` existed renders a perfectly healthy board screen and then fails at the download, mid-call. Then it prints `✓ Demo healthy` or a `✗` naming what to reseed, exiting non-zero on failure. It only reads, so — unlike `db:seed` and `bun run e2e`, which the guard refuses against `main` — it is safe to point at the live demo.
+It confirms a board link *and* a judge link resolve and that both the board and the judge views render — the judge view reads `judge_notes`, a table the board view never touches, so a drift there would 500 every phone while the board stayed up. It also confirms every judge has a `Judge N` label, which only the exports read: a comp seeded before `label_seq` existed renders a perfectly healthy board screen and then fails at the download, mid-call. Two of its checks are facts about the *database* rather than the demo, and neither is fixable by reseeding: that the `tab_runs` chain indexes exist, so a comp's locked results cannot fork; and that no comp has had every one of its board links revoked, which would leave nobody able to lock, correct, or export it and nothing in the product able to mint a way back in. Then it prints `✓ Demo healthy` or a `✗` naming what to do, exiting non-zero on failure. It only reads, so — unlike `db:seed` and `bun run e2e`, which the guard refuses against `main` — it is safe to point at the live demo.
 
 ## Before the call
 
@@ -49,6 +49,7 @@ A leading environment variable wins over `.env.local`, so nothing needs editing.
 ```
 Board (open on a laptop):
   Ananya Krishnan  https://.../board/<token>
+  Rohit Iyer       https://.../board/<token>
 
 Judges (one per phone):
   Priya Raghavan   https://.../judge/<token>
@@ -60,7 +61,7 @@ The raw tokens are shown exactly once. Only their sha256 is stored. Text the jud
 
 The seed proves each of these links resolves against the live schema before printing them, so a clean `db:seed` is itself the health check — a seed that cannot mint a working board *or* judge link fails loudly instead of handing you a dead one. If you forget the `NEXT_PUBLIC_BASE_URL` above, the links fall back to `localhost` and the seed prints a `⚠` saying so — localhost links open on your laptop and 404 on a phone. Run `db:doctor` any time afterward to re-confirm without reseeding.
 
-The board link carries a name because it belongs to a person, not to the comp. That is what lets a lock and a correction be attributed to a human (PRD B6, [ADR-0007](decisions/0007-board-links-are-per-person.md)). Add board members in `comp-config.json` and each gets their own link.
+Each board link carries a name because it belongs to a person, not to the comp. That is what lets a lock and a correction be attributed to a human (PRD B6, [ADR-0007](decisions/0007-board-links-are-per-person.md)). Add board members in `comp-config.json` and each gets their own link. Open the first one to run the demo; the second is what makes the revoke below possible, since nobody can revoke their own link.
 
 Reseeding at any point gives you fresh links and a clean comp.
 
@@ -138,6 +139,8 @@ Note out loud what is *not* in that file: no scores, and no judge's name. Then m
 The proof lives in the lock: the snapshot re-runs and returns the same placements, in front of them, a day later or a year later. The captain gets an answer instead of an argument. One file per team, too — you cannot accidentally send a team its rivals' notes, because there is no file that contains them.
 
 **Aside, if a judge's link comes up.** Any judge can be revoked from the board screen mid-comp. The link stops opening; their scores stand and still count. Revoking is not a retraction.
+
+**Aside, if a leaked link comes up — and on a real board it will.** A board link got forwarded into the group chat. Kill it from the board screen, mid-comp, and it stops opening on the next page load. Two things worth saying out loud, because both are the sort of thing a board only discovers at the worst moment. You cannot revoke *your own* link — which is what guarantees a comp can never be left with no way in, since the person doing the revoking always still has theirs. And unlike a judge's, a board link stays revocable *after* the lock: a judge's link only ever opened scoring, but a board link still opens the correction and the exports, so that is exactly when killing a leaked one matters most.
 
 ## What to say when they push back
 

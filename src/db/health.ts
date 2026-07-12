@@ -21,6 +21,8 @@ export type Observed = {
   forkGuaranteeEnforced: boolean;
   /** Comps whose run chain does not have exactly one root. Only ever non-empty above. */
   forkedComps: { compId: string; roots: number }[];
+  /** Comps that have board links but not one that still opens. */
+  boardlessComps: { compId: string; revoked: number }[];
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
@@ -57,18 +59,44 @@ const chainProblems = (observed: Observed): string[] => {
   return problems;
 };
 
+/**
+ * A comp every one of whose board links has been revoked. Nobody can lock it, correct it, or
+ * download its results, and nothing in the product can give it a link back.
+ *
+ * `revokeBoardAction` cannot produce this — it refuses to revoke the second-to-last link, in the
+ * same statement that does the write. But that guarantee lives in an application statement, not in
+ * the schema the way `tab_runs_root_unique` does, so it binds that one code path and nothing else: a
+ * hand-run UPDATE is not bound by it. That is exactly why the state is worth detecting rather than
+ * assuming away, and it is the same reasoning that puts the chain indexes above.
+ *
+ * Like those, this is a fact about the database rather than about the demo comp, so it outlives the
+ * "comp not seeded" short-circuit. And like those, reseeding is not the remedy: `db:seed` deletes
+ * the org and cascades to the comp's scores, so offering it here would answer "your board is locked
+ * out" with "destroy the results".
+ */
+const boardlessProblems = (observed: Observed): string[] =>
+  observed.boardlessComps.map(
+    ({ compId, revoked }) =>
+      `comp ${compId} has ${revoked} board link(s) and not one of them still opens: nobody can ` +
+      "lock, correct, or download its results. The board screen cannot produce this, so a link was " +
+      "revoked outside the product. A board link must be minted against the existing comp — " +
+      "reseeding would delete its scores.",
+  );
+
 export const summarizeHealth = (
   observed: Observed,
   expected: { judges: number; teams: number },
 ): DemoHealth => {
+  const databaseProblems = [...chainProblems(observed), ...boardlessProblems(observed)];
+
   if (!observed.compFound) {
     return {
       ok: false,
-      problems: [...chainProblems(observed), "comp not seeded — run 'bun run db:seed'"],
+      problems: [...databaseProblems, "comp not seeded — run 'bun run db:seed'"],
     };
   }
 
-  const problems: string[] = chainProblems(observed);
+  const problems: string[] = databaseProblems;
 
   if (observed.boardAssignments === 0) {
     problems.push(`no board link for the demo comp — ${RESEED}`);

@@ -39,5 +39,10 @@ export const DEMO_CONFIG: CompConfig = {
     { name: "Arjun Mehta", email: "arjun@example.com" },
     { name: "Sonia Desai", email: "sonia@example.com" },
   ],
-  board: [{ name: "Ananya Krishnan", email: "ananya@example.com" }],
+  // Two, not one. A board link is revocable only by another board member (`refuseRevoke`), so a
+  // one-person board is a board that cannot demonstrate — or use — the thing that kills a leaked link.
+  board: [
+    { name: "Ananya Krishnan", email: "ananya@example.com" },
+    { name: "Rohit Iyer", email: "rohit@example.com" },
+  ],
 };

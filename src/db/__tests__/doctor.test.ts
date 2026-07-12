@@ -4,7 +4,7 @@ import { summarizeHealth } from "../health";
 
 const healthy: Observed = {
   compFound: true,
-  boardAssignments: 1,
+  boardAssignments: 2,
   boardName: "Ananya Krishnan",
   boardViewLoaded: true,
   judges: 3,
@@ -13,6 +13,7 @@ const healthy: Observed = {
   teams: 8,
   forkGuaranteeEnforced: true,
   forkedComps: [],
+  boardlessComps: [],
 };
 
 const unseeded: Observed = {
@@ -26,6 +27,7 @@ const unseeded: Observed = {
   teams: 0,
   forkGuaranteeEnforced: true,
   forkedComps: [],
+  boardlessComps: [],
 };
 
 const expected = { judges: 3, teams: 8 };
@@ -125,5 +127,34 @@ describe("summarizeHealth", () => {
   it("passes a healthy database whose comp has never been locked", () => {
     const health = summarizeHealth({ ...healthy, forkedComps: [] }, expected);
     expect(health.ok).toBe(true);
+  });
+
+  it("fails when every board link of a comp is revoked, and does not offer to reseed it", () => {
+    const health = summarizeHealth(
+      { ...healthy, boardlessComps: [{ compId: "abc-123", revoked: 2 }] },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const boardless = health.problems.find((p) => p.includes("abc-123"));
+    expect(boardless).toMatch(/not one of them still opens/);
+    expect(boardless).toMatch(/minted against the existing comp/);
+    // Reseeding deletes the org and cascades to the comp's scores. Answering "your board is locked
+    // out" with "destroy the results" is the demo lying about its own repair.
+    expect(boardless).not.toMatch(/db:seed/);
+  });
+
+  // Same reasoning as the chain indexes: a comp whose board is locked out is locked out whether or
+  // not the demo happens to be seeded on this database, and `db:seed` is not the way back.
+  it("reports a boardless comp even when the demo comp is not seeded", () => {
+    const health = summarizeHealth(
+      { ...unseeded, boardlessComps: [{ compId: "abc-123", revoked: 2 }] },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems).toHaveLength(2);
+    expect(health.problems[0]).toMatch(/abc-123/);
+    expect(health.problems[1]).toMatch(/comp not seeded/);
   });
 });

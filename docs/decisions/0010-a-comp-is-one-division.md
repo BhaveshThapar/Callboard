@@ -1,6 +1,6 @@
 # ADR-0010 — a comp is one division; the run chain has one root
 
-**Status:** accepted · July 11, 2026
+**Status:** accepted · July 11, 2026 · the third deferral below (a board link cannot be revoked) is **closed** by [ADR-0011](0011-a-board-link-is-revocable-and-a-comp-keeps-one.md). The other two stand.
 **Related:** [ADR-0009](0009-teams-is-the-roster-of-record.md), which is the same mistake in a different column — and [ADR-0004](0004-tabulation-pure-functions-and-snapshots.md), whose one-snapshot-per-lock claim the second half of this restores.
 
 ## Context
@@ -61,4 +61,4 @@ The chain is now unforkable, but the board still has no instrument for three thi
 
 - **A deduction cannot be undone.** This one is by invariant, not oversight: scores and locks are append-only, so a mistaken deduction is corrected by another attributed deduction and a re-tabulation, not by deleting a row. The correction is fully expressible today. An "undo" button that mutated history would be the thing the audit trail exists to prevent.
 
-- **A board link cannot be revoked.** This is the only one of the three that is a live hole. `board_assignments.revoked_at` is *read* — by `resolveBoardActor`, by the seeder, by `doctor` — and **written by nothing**. `revokeJudgeAction` exists and is wired into the board screen; there is no board equivalent. A board link that leaks cannot be killed from the product, only from the database. ADR-0007 said board links "get revocation for free" when it made them per-person; that was true of the *read* path and false of the write path, and this is the correction.
+- ~~**A board link cannot be revoked.**~~ **Closed by [ADR-0011](0011-a-board-link-is-revocable-and-a-comp-keeps-one.md).** This was the only one of the three that was a live hole. `board_assignments.revoked_at` was *read* — by `resolveBoardActor`, by the seeder, by `doctor` — and **written by nothing**. `revokeJudgeAction` existed and was wired into the board screen; there was no board equivalent. A board link that leaked could not be killed from the product, only from the database. ADR-0007 said board links "get revocation for free" when it made them per-person; that was true of the *read* path and false of the write path. It is now written, refuses self-revoke, and cannot leave a comp with no link that opens.

@@ -16,7 +16,13 @@ import {
   primaryButtonClass,
 } from "@/components/styles";
 import type { BoardSnapshot } from "@/lib/comp/board";
-import { addDeductionAction, lockAction, overrideAction, revokeJudgeAction } from "./actions";
+import {
+  addDeductionAction,
+  lockAction,
+  overrideAction,
+  revokeBoardAction,
+  revokeJudgeAction,
+} from "./actions";
 import { IDLE } from "./state";
 
 const POLL_MS = 2_000;
@@ -44,12 +50,23 @@ export function LiveBoard({
   const [deductionState, deductionFormAction, deducting] = useActionState(addDeductionAction, IDLE);
   const [overrideState, overrideFormAction, overriding] = useActionState(overrideAction, IDLE);
   const [revokeState, revokeFormAction, revoking] = useActionState(revokeJudgeAction, IDLE);
+  const [revokeBoardState, revokeBoardFormAction, revokingBoard] = useActionState(
+    revokeBoardAction,
+    IDLE,
+  );
 
   useEffect(() => {
     let cancelled = false;
     const poll = async () => {
       try {
         const response = await fetch(`/api/board/${token}`, { cache: "no-store" });
+        // Somebody revoked this link while it was open. Without this the screen sits there showing
+        // live standings the holder no longer has any right to. The route 404s only when the token
+        // stops resolving, so this cannot loop.
+        if (response.status === 404) {
+          window.location.reload();
+          return;
+        }
         if (!response.ok) return;
         const next = (await response.json()) as BoardSnapshot;
         if (!cancelled) setSnapshot(next);
@@ -64,7 +81,7 @@ export function LiveBoard({
       cancelled = true;
       clearInterval(id);
     };
-  }, [token, lockState, deductionState, overrideState, revokeState]);
+  }, [token, lockState, deductionState, overrideState, revokeState, revokeBoardState]);
 
   const progress =
     snapshot.scoresExpected > 0
@@ -132,6 +149,53 @@ export function LiveBoard({
               )}
             >
               {revokeState.message}
+            </p>
+          )}
+        </div>
+
+        <div className="mt-7">
+          <p className={eyebrowClass}>Board</p>
+          <ul className="mt-3 space-y-2.5">
+            {snapshot.board.map((member) => (
+              <li key={member.assignmentId}>
+                <span className="truncate text-caption font-medium text-heading">
+                  {member.name}
+                  {member.isSelf && (
+                    <span className={cx(pillClass, "ml-1.5 bg-hover text-subtle")}>you</span>
+                  )}
+                  {member.revoked && (
+                    <span className={cx(pillClass, "ml-1.5 bg-hover text-subtle")}>revoked</span>
+                  )}
+                </span>
+                {/* No `!snapshot.locked` guard, unlike the judges above: a board link still opens the
+                    override and both exports after the lock, so that is when killing a leaked one
+                    matters most. */}
+                {!member.revoked && !member.isSelf && (
+                  <form action={revokeBoardFormAction} className="mt-1">
+                    <input type="hidden" name="token" value={token} />
+                    <input type="hidden" name="assignmentId" value={member.assignmentId} />
+                    <button
+                      type="submit"
+                      disabled={revokingBoard}
+                      data-testid={`revoke-board-${member.assignmentId}`}
+                      className="text-micro text-subtle underline underline-offset-2 transition-colors hover:text-danger disabled:opacity-40"
+                    >
+                      Revoke link
+                    </button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+          {revokeBoardState.message && (
+            <p
+              role="status"
+              className={cx(
+                "mt-3 text-micro",
+                revokeBoardState.status === "error" ? "text-danger" : "text-subtle",
+              )}
+            >
+              {revokeBoardState.message}
             </p>
           )}
         </div>

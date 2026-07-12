@@ -2,8 +2,10 @@ import { count, eq, max } from "drizzle-orm";
 import { db } from "@/db";
 import { scores } from "@/db/schema";
 import type { BoardActor } from "@/lib/auth/scope";
-import { listJudgesForBoard, listTeamsForBoard } from "@/lib/auth/scope";
+import { listBoardLinksForBoard, listJudgesForBoard, listTeamsForBoard } from "@/lib/auth/scope";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
+import type { BoardLink } from "./links";
+import { boardLinks } from "./links";
 import type { JudgeProgress } from "./progress";
 import { judgeProgress, progressTotals } from "./progress";
 import { getRubric, latestLockedRun, liveStandings, reproduce, runCount } from "./tab";
@@ -20,6 +22,7 @@ export type StandingRow = {
   resolvedBy: string | null;
 };
 
+export type { BoardLink } from "./links";
 export type { JudgeProgress } from "./progress";
 
 export type BoardSnapshot = {
@@ -34,6 +37,7 @@ export type BoardSnapshot = {
   supersedesId: string | null;
   overrideReason: string | null;
   judges: JudgeProgress[];
+  board: BoardLink[];
   scoresSubmitted: number;
   scoresExpected: number;
   lastScoreAt: string | null;
@@ -48,7 +52,7 @@ export type BoardSnapshot = {
  * never from a fresh computation.
  */
 export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> => {
-  const [teams, rubric, locked, progress, roster, perJudge, runs] = await Promise.all([
+  const [teams, rubric, locked, progress, roster, perJudge, runs, boardRoster] = await Promise.all([
     listTeamsForBoard(actor),
     getRubric(actor.compId),
     latestLockedRun(actor.compId),
@@ -63,6 +67,7 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
       .where(eq(scores.compId, actor.compId))
       .groupBy(scores.judgeAssignmentId),
     runCount(actor.compId),
+    listBoardLinksForBoard(actor),
   ]);
 
   const results = locked ? locked.results : await liveStandings(actor.compId);
@@ -100,6 +105,7 @@ export const boardSnapshot = async (actor: BoardActor): Promise<BoardSnapshot> =
     supersedesId: locked?.supersedesId ?? null,
     overrideReason: locked?.overrideReason ?? null,
     judges,
+    board: boardLinks(boardRoster, actor.boardAssignmentId),
     scoresSubmitted: totals.submitted,
     scoresExpected: totals.expected,
     lastScoreAt: row?.lastAt ? new Date(row.lastAt).toISOString() : null,

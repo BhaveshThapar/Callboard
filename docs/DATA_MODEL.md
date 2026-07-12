@@ -26,7 +26,9 @@ Persists across years. This is the institutional memory that PRD §2.3 says evap
 
 **`board_assignments`** — `id`, `comp_id`, `person_id`, `token_hash` (unique), `revoked_at`, `created_at`
 
-The board's access token, the same primitive judges use, and deliberately **one per board member rather than one per comp**. A lock and an override must name the human who authorized them (PRD B6); a link shared by the whole board can only name the board. Revoking works exactly as it does for a judge.
+The board's access token, the same primitive judges use, and deliberately **one per board member rather than one per comp**. A lock and an override must name the human who authorized them (PRD B6); a link shared by the whole board can only name the board.
+
+Revoking is a board action against `revoked_at`, but it is *not* the judge's rules ([ADR-0011](decisions/0011-a-board-link-is-revocable-and-a-comp-keeps-one.md)). You cannot revoke your own link, and revoking survives the lock — a judge's link only authorized scoring, while a board link still opens the override and both exports after placements are final. A comp always keeps at least one link that opens, which is what refusing self-revoke buys: the target is never you, so there is always a survivor. Nothing in the product mints a board link, so a revocation is one-way.
 
 ### Teams
 

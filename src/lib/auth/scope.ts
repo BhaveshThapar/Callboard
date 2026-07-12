@@ -35,6 +35,12 @@ export type BoardTeamView = JudgeTeamView & { name: string; school: string | nul
  */
 export type BoardJudgeView = { assignmentId: string; name: string; revokedAt: Date | null };
 
+/**
+ * The board's window onto its own links. There is no de-identification question here: board members
+ * are peers, and every lock and override already names one of them in the audit trail.
+ */
+export type BoardMemberView = { assignmentId: string; name: string; revokedAt: Date | null };
+
 export type { JudgeLabelView } from "./labels";
 
 const SCOREABLE = SCOREABLE_STATUSES;
@@ -136,6 +142,22 @@ export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]>
     .from(judgeAssignments)
     .innerJoin(people, eq(people.id, judgeAssignments.personId))
     .where(eq(judgeAssignments.compId, actor.compId))
+    .orderBy(people.name);
+
+/**
+ * Every board link of the board's comp, revoked ones included — a revoked row is the evidence that a
+ * leaked link was killed, so it stays on screen rather than vanishing.
+ */
+export const listBoardLinksForBoard = (actor: BoardActor): Promise<BoardMemberView[]> =>
+  db
+    .select({
+      assignmentId: boardAssignments.id,
+      name: people.name,
+      revokedAt: boardAssignments.revokedAt,
+    })
+    .from(boardAssignments)
+    .innerJoin(people, eq(people.id, boardAssignments.personId))
+    .where(eq(boardAssignments.compId, actor.compId))
     .orderBy(people.name);
 
 /**

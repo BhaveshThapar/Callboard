@@ -24,7 +24,7 @@ bun run db:seed                # 8 teams, 3 judges — prints the judge links
 bun run dev
 ```
 
-The seed prints three `/judge/<token>` URLs and one `/board/<token>` URL. Open one judge link per phone, the board link on a laptop, and watch scores land.
+The seed prints three `/judge/<token>` URLs and two `/board/<token>` URLs — board links are per person, not per comp. Open one judge link per phone, a board link on a laptop, and watch scores land.
 
 To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 

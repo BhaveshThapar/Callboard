@@ -18,7 +18,10 @@ import {
   teams,
 } from "./schema";
 
-type ChainObservation = Pick<Observed, "forkGuaranteeEnforced" | "forkedComps">;
+type DatabaseObservation = Pick<
+  Observed,
+  "forkGuaranteeEnforced" | "forkedComps" | "boardlessComps"
+>;
 
 /**
  * Whether a comp's locked results can still fork on this database, and whether one already has.
@@ -37,8 +40,8 @@ type ChainObservation = Pick<Observed, "forkGuaranteeEnforced" | "forkedComps">;
  * the preflight for applying it. A comp that has never been locked has no runs, groups to nothing,
  * and is correctly not flagged.
  */
-const observeChain = async (): Promise<ChainObservation> => {
-  const [indexes, forked] = await Promise.all([
+const observeDatabase = async (): Promise<DatabaseObservation> => {
+  const [indexes, forked, boardless] = await Promise.all([
     db.execute<{ indexname: string }>(
       sql`select indexname from pg_indexes where tablename = 'tab_runs'`,
     ),
@@ -48,6 +51,16 @@ const observeChain = async (): Promise<ChainObservation> => {
       .where(isNull(tabRuns.supersedesId))
       .groupBy(tabRuns.compId)
       .having(gt(count(), 1)),
+    // A comp all of whose board links are revoked: nobody can administer it any more. The `::int`
+    // is load-bearing — `count(*)` is a bigint and comes back as a string otherwise. A comp with no
+    // board links at all groups to nothing and is correctly not flagged here; that is the
+    // never-seeded case, and it has its own check with its own (reseed) remedy.
+    db.execute<{ comp_id: string; revoked: number }>(sql`
+      select comp_id, count(*)::int as revoked
+        from board_assignments
+       group by comp_id
+      having count(*) filter (where revoked_at is null) = 0
+    `),
   ]);
 
   const present = new Set(indexes.rows.map((row) => row.indexname));
@@ -55,6 +68,10 @@ const observeChain = async (): Promise<ChainObservation> => {
   return {
     forkGuaranteeEnforced: CHAIN_INDEX_NAMES.every((name) => present.has(name)),
     forkedComps: forked,
+    boardlessComps: boardless.rows.map((row) => ({
+      compId: row.comp_id,
+      revoked: row.revoked,
+    })),
   };
 };
 
@@ -65,8 +82,8 @@ const observeChain = async (): Promise<ChainObservation> => {
  * the board view renders), not migration-file hashes. It only reads, so it is safe against `main`.
  */
 export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
-  const [chain, [comp]] = await Promise.all([
-    observeChain(),
+  const [database, [comp]] = await Promise.all([
+    observeDatabase(),
     db
       .select({ id: comps.id, name: comps.name })
       .from(comps)
@@ -78,7 +95,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
   if (!comp) {
     return summarizeHealth(
       {
-        ...chain,
+        ...database,
         compFound: false,
         boardAssignments: 0,
         boardName: null,
@@ -162,7 +179,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
 
   return summarizeHealth(
     {
-      ...chain,
+      ...database,
       compFound: true,
       boardAssignments: board.length,
       boardName: first?.personName ?? null,

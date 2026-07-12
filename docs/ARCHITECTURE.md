@@ -47,7 +47,7 @@ Two details make this hold that are easy to get wrong:
 There isn't a user table with passwords, and for the scoring demo there does not need to be.
 
 - A **judge** gets a URL containing a 32-byte token. The database stores only its sha256. First load resolves the token to a `judge_assignments` row, which names the comp and the person. Revoking is a board action, not a SQL statement someone runs by hand.
-- A **board member** gets a URL of their own, using the identical primitive against `board_assignments`. It authorizes the tab view, deductions, the lock, and corrections.
+- A **board member** gets a URL of their own, using the identical primitive against `board_assignments`. It authorizes the tab view, deductions, the lock, and corrections. Revoking one is a board action too, but not on the judge's terms: a board member cannot revoke their own link, and unlike a judge's it stays revocable after the lock, because it still opens the override and both exports when a judge's link opens nothing. Refusing self-revoke is also what guarantees a comp is never left with no link that opens — the target is never you, so one always survives ([ADR 0011](decisions/0011-a-board-link-is-revocable-and-a-comp-keeps-one.md)).
 
 Board links are **per person, not per comp**. PRD B6 promises a *logged, attributed* override, and a link shared by the whole board can only ever name the board. `BoardActor.personId` is non-nullable, so an unattributed lock is unrepresentable rather than merely discouraged — the same trick `JudgeTeamView` uses to make a leaked team name unrepresentable. See [ADR 0007](decisions/0007-board-links-are-per-person.md).
 

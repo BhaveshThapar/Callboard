@@ -1,11 +1,16 @@
 "use server";
 
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
 import { CHAIN_INDEX_NAMES, deductions, judgeAssignments } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import {
+  listBoardLinksForBoard,
+  listTeamsForBoard,
+  resolveBoardActor,
+} from "@/lib/auth/scope";
+import { boardLinks, refuseRevoke } from "@/lib/comp/links";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
@@ -240,6 +245,92 @@ export const revokeJudgeAction = async (
 
   revalidatePath(`/board/${token}`);
   return { status: "ok", message: "That scoring link no longer opens." };
+};
+
+/**
+ * Kills another board member's link. A board link is bearer access to the lock, the override, the
+ * results page and both CSV exports, so a link forwarded into a group chat has to be killable from
+ * the screen -- which, until this existed, it was not.
+ *
+ * Deliberately **not** guarded on the lock, where `revokeJudgeAction` is. A judge's link only
+ * authorizes scoring and scoring closes at the lock, so revoking one afterwards is meaningless. A
+ * board link still authorizes `overrideAction` and both exports after the lock: the moment a leaked
+ * one is most worth killing is precisely the moment the judge guard would have refused.
+ *
+ * The write is one statement because it has to be. Two board members revoking each other at the same
+ * instant both pass `refuseRevoke`, and two plain UPDATEs would both land and leave the comp with no
+ * link that opens -- nobody could lock, correct, or download its results, ever. neon-http has no
+ * interactive transactions, but a single statement is still a transaction: the `for update` inside
+ * the CTE takes real row locks on every live link of the comp and holds them to the end of it. The
+ * loser blocks, then re-reads the winner's committed row under EvalPlanQual, sees `revoked_at` set,
+ * drops it from `live`, counts 1, fails `>= 2`, and updates nothing. Locking `comps` instead would
+ * not work: EvalPlanQual re-checks only the locked row, so a count over `board_assignments` would
+ * still run on the stale snapshot. The rows you count must be the rows you lock.
+ */
+export const revokeBoardAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  const links = boardLinks(await listBoardLinksForBoard(actor), actor.boardAssignmentId);
+  const refusal = refuseRevoke(links, assignmentId);
+  if (refusal) return { status: "error", message: refusal };
+
+  let revoked: { id: string; person_id: string } | undefined;
+  try {
+    const result = await db.execute<{ id: string; person_id: string }>(sql`
+      with live as (
+        select id from board_assignments
+        where comp_id = ${actor.compId} and revoked_at is null
+        order by id for update
+      )
+      update board_assignments set revoked_at = now()
+       where id = ${assignmentId}
+         and comp_id = ${actor.compId}
+         and revoked_at is null
+         and (select count(*) from live) >= 2
+      returning id, person_id
+    `);
+    revoked = result.rows[0];
+  } catch {
+    // Never surface the driver's message: drizzle's is the failed SQL, and a lost race here would
+    // reach a board member as `Failed query: update "board_assignments" ...`.
+    return { status: "error", message: "That link could not be revoked. Reload and try again." };
+  }
+
+  if (!revoked) {
+    // The statement refused it, so another revocation landed between `refuseRevoke` and the write.
+    // Which message is true depends on what that other revocation did, so re-read and say so.
+    const now = boardLinks(await listBoardLinksForBoard(actor), actor.boardAssignmentId);
+    const target = now.find((link) => link.assignmentId === assignmentId);
+
+    revalidatePath(`/board/${token}`);
+    return {
+      status: "error",
+      message: target?.revoked
+        ? "Another board member revoked that link first."
+        : "That is the last board link that still works. A comp has to keep one — revoke it and " +
+          "nobody could lock, correct, or download these results.",
+    };
+  }
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "board.revoke",
+    entity: "board_assignment",
+    entityId: revoked.id,
+    after: { revokedPersonId: revoked.person_id },
+  });
+
+  revalidatePath(`/board/${token}`);
+  return { status: "ok", message: "That board link no longer opens." };
 };
 
 export const addDeductionAction = async (

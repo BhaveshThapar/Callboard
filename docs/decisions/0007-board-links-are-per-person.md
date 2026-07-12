@@ -1,6 +1,6 @@
 # ADR-0007 — Board links are per person, so a lock has a name on it
 
-**Status:** accepted · July 9, 2026
+**Status:** accepted · July 9, 2026 · the "revocation for free" claim below is **false as written** and is corrected by [ADR-0011](0011-a-board-link-is-revocable-and-a-comp-keeps-one.md) — it was true of the read path and false of the write path, which did not exist until then.
 **Supersedes:** the board-link half of [ADR-0003](0003-judge-auth-via-signed-links.md). Judge links are untouched.
 
 ## Context
