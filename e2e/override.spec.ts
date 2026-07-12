@@ -100,6 +100,21 @@ test("a locked result is corrected by superseding it, never by editing it", asyn
   // The frozen snapshot of the *new* run still reproduces.
   await expect(boardPage.getByTestId("verification")).toHaveAttribute("data-reproduces", "true");
 
+  // Chain continuity: run 2's inputs are run 1's inputs plus exactly the deduction just applied.
+  // Reproducibility alone cannot say this -- each run reproduces from its own row, so two runs
+  // built from different worlds both verify. This is the assertion that the correction corrected
+  // one thing and changed nothing else underneath it.
+  const chain = JSON.parse(
+    execFileSync("bunx", ["tsx", "e2e/support/chain.ts", "--comp-id", demo.compId], {
+      encoding: "utf8",
+    }),
+  ) as { scoresIdentical: boolean; deductionsAdded: { points: number; reason: string }[] };
+
+  expect(chain.scoresIdentical).toBe(true);
+  expect(chain.deductionsAdded).toEqual([
+    { points: 20, reason: "exceeded time limit by 14s" },
+  ]);
+
   // Logged and attributed, which is the whole of PRD B6.
   await expect(boardPage.getByText("tab.override")).toBeVisible();
   await expect(boardPage.getByText(demo.boardName).first()).toBeVisible();

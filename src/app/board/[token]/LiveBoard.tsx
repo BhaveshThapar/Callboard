@@ -204,6 +204,26 @@ export function LiveBoard({
           </p>
         )}
 
+        {snapshot.scoresOutsideChain > 0 && (
+          <div
+            role="alert"
+            data-testid="scores-outside-chain"
+            className="flex gap-3 rounded-card border border-secondary/30 bg-secondary-light p-4 text-body"
+          >
+            <AlertIcon className="mt-0.5 size-4 shrink-0 text-secondary" />
+            <span>
+              <strong className="font-semibold">
+                {snapshot.scoresOutsideChain === 1
+                  ? "1 score arrived after the lock."
+                  : `${snapshot.scoresOutsideChain} scores arrived after the lock.`}
+              </strong>{" "}
+              {snapshot.scoresOutsideChain === 1 ? "It is" : "They are"} counted in no result, and a
+              correction will not pick {snapshot.scoresOutsideChain === 1 ? "it" : "them"} up —
+              scores are frozen at the lock. The placements below stand.
+            </span>
+          </div>
+        )}
+
         {snapshot.unresolvedTies.length > 0 && (
           <div
             role="alert"
