@@ -12,7 +12,7 @@ This map **sequences; it does not authorize.** The PRD argues against building (
 | **Designed** | specced in `docs/`, not built |
 | **Won't build** | the tarpit — stays in the tools that already do it |
 
-Counts: **9 live** (Module B) · **14 designed** (Module A) · **6 designed** (the Gita) · the rest below.
+Counts: **10 live** (Module B) · **14 designed** (Module A) · **6 designed** (the Gita) · the rest below.
 
 ---
 
@@ -27,7 +27,8 @@ Module B (Tabulation), PRD §8.3. Judges score from any phone; the math runs its
 | **B3** | Auto-normalization | Raw mean, per-judge z-score, or negated mean rank — per rubric. A zero-spread judge contributes 0, never NaN. | `normalize.ts` |
 | **B4** | Deduction entry | Time penalties applied to every judge's per-team total *before* normalization — the only well-defined choice when the aggregate is standard deviations. | `deductions` |
 | **B5** | Live tabulation + tiebreaks | Standings update every 2s. Ties broken by an ordered list (criterion, head-to-head Copeland, highest single judge); a surviving tie is surfaced, never silently picked. | `rank.ts` |
-| **B6** | Locked, attributed audit trail | Locking freezes inputs, rubric, results into one row. A correction supersedes — never edits — and every lock and override carries a person's name. Closed July 2026. | ADR-0007, `tab_runs` |
+| **B6** | Locked, attributed audit trail | Locking freezes inputs, rubric, results into one row. A correction **replays that frozen row** and appends its deduction — it never re-reads the tables, so nothing written after the lock can enter it — and every lock and override carries a person's name. A score that lands after the lock counts in no run, and the board is told. Closed July 2026. | ADR-0004, ADR-0007, `tab_runs` |
+| **B10** | Revocable links, both kinds | A leaked judge *or board* link can be killed from the board screen. Board revocation outlives the lock, because a board link is the one that can still override a locked result — and the last live link is refused, because nothing mints a replacement. | ADR-0011, `board_assignments` |
 | **B7** | Blind judging, both directions | A judge's projection of a team never selects its name; the board's projection of a judge *beside a score* never selects theirs. Blindness is a property of the return type both ways — a compile error to leak. Closed July 2026. | ADR-0008, `scope.ts` |
 | **B8** | Emcee sheet + per-team feedback | A printable placement sheet the emcee reads from directly. Each team's feedback file carries its placement, its deduction and the reason, and each judge's note under `Judge N` — and **no scores**. One file per team, so a forward cannot leak a rival's notes. | ADR-0008, `export/feedback.ts` |
 | **B9** | Board score breakdown | The board's own audit export: every judge's score on every criterion, from the frozen snapshot, under `Judge 1 / Judge 2`. Lets a board spot a rogue judge without learning which of its judges it was. | `export/scores.ts` |

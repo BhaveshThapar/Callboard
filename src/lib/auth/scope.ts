@@ -35,6 +35,13 @@ export type BoardTeamView = JudgeTeamView & { name: string; school: string | nul
  */
 export type BoardJudgeView = { assignmentId: string; name: string; revokedAt: Date | null };
 
+export type BoardMemberView = {
+  assignmentId: string;
+  personId: string;
+  name: string;
+  revokedAt: Date | null;
+};
+
 export type { JudgeLabelView } from "./labels";
 
 const SCOREABLE = SCOREABLE_STATUSES;
@@ -167,6 +174,23 @@ export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]>
     .from(judgeAssignments)
     .innerJoin(people, eq(people.id, judgeAssignments.personId))
     .where(eq(judgeAssignments.compId, actor.compId))
+    .orderBy(people.name);
+
+/**
+ * The board's own members and the state of their links. Named, unlike the judge projection beside a
+ * score: the board sends these links and chases the people holding them, so the name is the point.
+ */
+export const listBoardForBoard = (actor: BoardActor): Promise<BoardMemberView[]> =>
+  db
+    .select({
+      assignmentId: boardAssignments.id,
+      personId: boardAssignments.personId,
+      name: people.name,
+      revokedAt: boardAssignments.revokedAt,
+    })
+    .from(boardAssignments)
+    .innerJoin(people, eq(people.id, boardAssignments.personId))
+    .where(eq(boardAssignments.compId, actor.compId))
     .orderBy(people.name);
 
 /**
