@@ -1,13 +1,62 @@
-import { and, eq, isNull } from "drizzle-orm";
+import { and, count, eq, gt, isNull, sql } from "drizzle-orm";
 import type { BoardActor, JudgeActor } from "@/lib/auth/scope";
 import { listJudgeLabelsForBoard } from "@/lib/auth/scope";
 import { boardSnapshot } from "@/lib/comp/board";
 import { judgeSnapshot } from "@/lib/comp/judge";
 import type { CompConfig } from "./config";
 import { summarizeHealth } from "./health";
-import type { DemoHealth } from "./health";
+import type { DemoHealth, Observed } from "./health";
 import { db } from "./index";
-import { boardAssignments, comps, judgeAssignments, orgs, people, teams } from "./schema";
+import {
+  boardAssignments,
+  CHAIN_INDEX_NAMES,
+  comps,
+  judgeAssignments,
+  orgs,
+  people,
+  tabRuns,
+  teams,
+} from "./schema";
+
+type ChainObservation = Pick<Observed, "forkGuaranteeEnforced" | "forkedComps">;
+
+/**
+ * Whether a comp's locked results can still fork on this database, and whether one already has.
+ *
+ * Unlike everything else here this is a fact about the database, not about the seeded demo, so it is
+ * gathered before the comp is even looked for. It is also the one check reseeding cannot fix.
+ *
+ * `pg_indexes` is a catalog table and has no drizzle model, so it is reachable only as raw SQL. The
+ * indexes' *presence* is the guarantee: `lockResults` checks for a previous run before it inserts,
+ * but neon-http has no transactions, so that check and that insert are two acts and two board
+ * members can land between them. Postgres is the only thing that can actually refuse the fork, and
+ * a database missing these indexes silently does not.
+ *
+ * The two halves are one question. With the indexes in place a second root is unrepresentable, so a
+ * forked comp can only ever be found on a database that never got migration 0006 — which makes this
+ * the preflight for applying it. A comp that has never been locked has no runs, groups to nothing,
+ * and is correctly not flagged.
+ */
+const observeChain = async (): Promise<ChainObservation> => {
+  const [indexes, forked] = await Promise.all([
+    db.execute<{ indexname: string }>(
+      sql`select indexname from pg_indexes where tablename = 'tab_runs'`,
+    ),
+    db
+      .select({ compId: tabRuns.compId, roots: count() })
+      .from(tabRuns)
+      .where(isNull(tabRuns.supersedesId))
+      .groupBy(tabRuns.compId)
+      .having(gt(count(), 1)),
+  ]);
+
+  const present = new Set(indexes.rows.map((row) => row.indexname));
+
+  return {
+    forkGuaranteeEnforced: CHAIN_INDEX_NAMES.every((name) => present.has(name)),
+    forkedComps: forked,
+  };
+};
 
 /**
  * Is the seeded demo one a prospect can actually be shown? A comp seeded under an older schema can
@@ -16,16 +65,20 @@ import { boardAssignments, comps, judgeAssignments, orgs, people, teams } from "
  * the board view renders), not migration-file hashes. It only reads, so it is safe against `main`.
  */
 export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
-  const [comp] = await db
-    .select({ id: comps.id, name: comps.name })
-    .from(comps)
-    .innerJoin(orgs, eq(orgs.id, comps.orgId))
-    .where(and(eq(orgs.slug, config.org.slug), eq(comps.slug, config.comp.slug)))
-    .limit(1);
+  const [chain, [comp]] = await Promise.all([
+    observeChain(),
+    db
+      .select({ id: comps.id, name: comps.name })
+      .from(comps)
+      .innerJoin(orgs, eq(orgs.id, comps.orgId))
+      .where(and(eq(orgs.slug, config.org.slug), eq(comps.slug, config.comp.slug)))
+      .limit(1),
+  ]);
 
   if (!comp) {
     return summarizeHealth(
       {
+        ...chain,
         compFound: false,
         boardAssignments: 0,
         boardName: null,
@@ -109,6 +162,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
 
   return summarizeHealth(
     {
+      ...chain,
       compFound: true,
       boardAssignments: board.length,
       boardName: first?.personName ?? null,
