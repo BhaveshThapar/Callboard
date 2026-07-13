@@ -1,6 +1,7 @@
 import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { boardAssignments, comps, judgeAssignments, people, SCOREABLE_STATUSES, teams } from "@/db/schema";
+import type { TeamStatus } from "@/db/schema";
 import type { JudgeLabelView } from "./labels";
 import { judgeLabel } from "./labels";
 import { hashToken } from "./token";
@@ -40,6 +41,13 @@ export type BoardMemberView = {
   personId: string;
   name: string;
   revokedAt: Date | null;
+};
+
+/** The registration window: the whole roster, statuses and all. Never shown to a judge. */
+export type RosterTeamView = BoardTeamView & {
+  status: TeamStatus;
+  waitlistRank: number | null;
+  rosterSize: number | null;
 };
 
 export type { JudgeLabelView } from "./labels";
@@ -175,6 +183,35 @@ export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]>
     .innerJoin(people, eq(people.id, judgeAssignments.personId))
     .where(eq(judgeAssignments.compId, actor.compId))
     .orderBy(people.name);
+
+/**
+ * The board's window onto the **whole** roster, every status included — what registration manages.
+ *
+ * Deliberately not `listTeamsForBoard`, which filters to `SCOREABLE_STATUSES` because it feeds
+ * scoring. A registration screen has to show the applied, the waitlisted and the dropped; a scoring
+ * screen must not. Two windows, and the `teamId` check on a form resolves against whichever one
+ * produced *that* form — which is the whole rule, not a second copy of it.
+ */
+export const listRosterForBoard = (actor: BoardActor): Promise<RosterTeamView[]> =>
+  db
+    .select({
+      id: teams.id,
+      bidCode: teams.bidCode,
+      performanceOrder: teams.performanceOrder,
+      name: teams.name,
+      school: teams.school,
+      status: teams.status,
+      waitlistRank: teams.waitlistRank,
+      rosterSize: teams.rosterSize,
+    })
+    .from(teams)
+    .where(eq(teams.compId, actor.compId))
+    .orderBy(teams.status, teams.waitlistRank, teams.name);
+
+export const resolveRosterTeamForBoard = async (
+  actor: BoardActor,
+  teamId: string,
+): Promise<RosterTeamView | null> => claimed(await listRosterForBoard(actor), teamId);
 
 /**
  * The board's own members and the state of their links. Named, unlike the judge projection beside a

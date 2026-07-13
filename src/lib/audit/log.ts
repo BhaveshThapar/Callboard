@@ -1,4 +1,5 @@
 import { desc, eq } from "drizzle-orm";
+import type { Transaction } from "@/db";
 import { db } from "@/db";
 import { auditLog, people } from "@/db/schema";
 import type { ActorKind } from "@/db/schema";
@@ -14,8 +15,14 @@ export type AuditEntry = {
   after?: unknown;
 };
 
-export const recordAudit = async (entry: AuditEntry): Promise<void> => {
-  await db.insert(auditLog).values({
+/**
+ * `on` is the writer, defaulting to the pooled connection. A write that happens inside a
+ * transaction has to log inside the same one: an audit row that commits while the change it
+ * describes rolls back is worse than no audit row, because it is a record of something that did
+ * not happen.
+ */
+export const recordAudit = async (entry: AuditEntry, on: Transaction | typeof db = db) => {
+  await on.insert(auditLog).values({
     compId: entry.compId,
     actorKind: entry.actorKind,
     actorPersonId: entry.actorPersonId ?? null,

@@ -1,8 +1,17 @@
 import { sql } from "drizzle-orm";
 import { check, integer, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
-import { comps } from "./orgs";
+import { comps, people } from "./orgs";
 
-export type TeamStatus = "applied" | "waitlisted" | "accepted" | "dropped" | "competing";
+/** One definition: the type, the check constraint, and the board's form all derive from this. */
+export const TEAM_STATUSES = [
+  "applied",
+  "waitlisted",
+  "accepted",
+  "dropped",
+  "competing",
+] as const;
+
+export type TeamStatus = (typeof TEAM_STATUSES)[number];
 
 /**
  * The statuses that place. One definition, because it decides two different things that must agree:
@@ -27,13 +36,23 @@ export const teams = pgTable(
     rosterSize: integer("roster_size"),
     division: text("division"),
     performanceOrder: integer("performance_order"),
+    /** Who registered this team. `people` is per-org, so a captain across two comps is one person. */
+    contactPersonId: uuid("contact_person_id").references(() => people.id, {
+      onDelete: "set null",
+    }),
+    auditionUrl: text("audition_url"),
+    /**
+     * When the waiver was accepted, not whether. A boolean records a claim; a timestamp records an
+     * event, and this is the column a board would be asked to produce if anything ever went wrong.
+     */
+    waiverAcceptedAt: timestamp("waiver_accepted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("teams_comp_bid_code_unique").on(t.compId, t.bidCode),
     check(
       "teams_status_check",
-      sql`${t.status} in ('applied','waitlisted','accepted','dropped','competing')`,
+      sql`${t.status} in ${sql.raw(`(${TEAM_STATUSES.map((s) => `'${s}'`).join(",")})`)}`,
     ),
   ],
 );
