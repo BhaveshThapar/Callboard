@@ -12,7 +12,7 @@ This map **sequences; it does not authorize.** The PRD argues against building (
 | **Designed** | specced in `docs/`, not built |
 | **Won't build** | the tarpit — stays in the tools that already do it |
 
-Counts: **10 live** (Module B) · **14 designed** (Module A) · **6 designed** (the Gita) · the rest below.
+Counts: **10 live** (Module B) · **2 live, 12 designed** (Module A) · **6 designed** (the Gita) · the rest below.
 
 ---
 
@@ -28,10 +28,10 @@ Module B (Tabulation), PRD §8.3. Judges score from any phone; the math runs its
 | **B4** | Deduction entry | Time penalties applied to every judge's per-team total *before* normalization — the only well-defined choice when the aggregate is standard deviations. | `deductions` |
 | **B5** | Live tabulation + tiebreaks | Standings update every 2s. Ties broken by an ordered list (criterion, head-to-head Copeland, highest single judge); a surviving tie is surfaced, never silently picked. | `rank.ts` |
 | **B6** | Locked, attributed audit trail | Locking freezes inputs, rubric, results into one row. A correction **replays that frozen row** and appends its deduction — it never re-reads the tables, so nothing written after the lock can enter it — and every lock and override carries a person's name. A score that lands after the lock counts in no run, and the board is told. Closed July 2026. | ADR-0004, ADR-0007, `tab_runs` |
-| **B10** | Revocable links, both kinds | A leaked judge *or board* link can be killed from the board screen. Board revocation outlives the lock, because a board link is the one that can still override a locked result — and the last live link is refused, because nothing mints a replacement. | ADR-0011, `board_assignments` |
 | **B7** | Blind judging, both directions | A judge's projection of a team never selects its name; the board's projection of a judge *beside a score* never selects theirs. Blindness is a property of the return type both ways — a compile error to leak. Closed July 2026. | ADR-0008, `scope.ts` |
 | **B8** | Emcee sheet + per-team feedback | A printable placement sheet the emcee reads from directly. Each team's feedback file carries its placement, its deduction and the reason, and each judge's note under `Judge N` — and **no scores**. One file per team, so a forward cannot leak a rival's notes. | ADR-0008, `export/feedback.ts` |
 | **B9** | Board score breakdown | The board's own audit export: every judge's score on every criterion, from the frozen snapshot, under `Judge 1 / Judge 2`. Lets a board spot a rogue judge without learning which of its judges it was. | `export/scores.ts` |
+| **B10** | Revocable links, both kinds | A leaked judge *or board* link can be killed from the board screen. Board revocation outlives the lock, because a board link is the one that can still override a locked result — and the last live link is refused, because nothing mints a replacement. | ADR-0011, `board_assignments` |
 
 ---
 
@@ -53,16 +53,18 @@ The founding season is **free** ($0; $300 from 2027–28), so a "yes" costs a bo
 
 ---
 
-## Phase 01 — v1 · Module A · Registration · **Designed (gated)**
+## Phase 01 — v1 · Module A · Registration · **A1–A2 live · A3–A4 gated**
 
 The spine, and the registration lead's pain. Roster and money live in one record so the acceptance-doc-vs-Venmo split that made "who paid" unanswerable at Mayuri 2026 cannot happen.
 
-| ID | Feature | Detail | Needs | Source |
-|---|---|---|---|---|
-| **A1** | Configurable registration form | Per comp: team info, roster, division, audition-video link, waiver acknowledgment, custom fields. | — | `teams`, `people` |
-| **A2** | Application → acceptance → waitlist | Waitlist promotion reconciles obligations in the *same transaction* — a drop and a promotion update balances and slots together. | A1 | `teams.status` |
-| **A3** | Roster + payment status, one record | Joined by design, eliminating the acceptance-doc-vs-Venmo split. The structural fix, not a report. | A2, charges | PRD A3 |
-| **A4** | Team submission portal | Post-acceptance materials: final music, roster updates, emergency contacts — a team-facing filtered view of the same record. | — | PRD A4 |
+**A1 and A2 were built in July 2026, before the gate cleared**, at the founder's direction. That is recorded here rather than tidied away: the map says it sequences and does not authorize, and this is what it looks like when the sequence is run early. Everything else in Phases 01–07 remains gated, and Track 1 is still 0/10.
+
+| ID | Feature | Status | Detail | Needs | Source |
+|---|---|---|---|---|---|
+| **A1** | Configurable registration form | **Live** | Per comp: team info, roster size, audition-video link, waiver acknowledgment — authored as data in the comp config, like the rubric. The public form is the one page with no `Actor`; the projection is the scope. **No division field**, and no custom fields yet. | — | `teams`, `people`, `comps.registration` |
+| **A2** | Application → acceptance → waitlist | **Live** | The status lifecycle as one total transition map. Dropping a team that held a slot promotes the top of the waitlist, and the two land **in the same transaction** (ADR-0012) or neither does. The roster freezes at the lock. Obligations are *not* reconciled — there are no `charges` yet, so the balance half of this waits for Phase 02. | A1 | `teams.status`, `transitions.ts` |
+| **A3** | Roster + payment status, one record | Designed | Joined by design, eliminating the acceptance-doc-vs-Venmo split. The structural fix, not a report. **Needs `charges`, which do not exist** — this is the easiest thing to drift into and the line where the gate still holds. | A2, charges | PRD A3 |
+| **A4** | Team submission portal | Designed | Post-acceptance materials: final music, roster updates, emergency contacts — a team-facing filtered view of the same record. Needs a third actor kind; `Actor` is still `BoardActor \| JudgeActor`. | — | PRD A4 |
 
 ---
 

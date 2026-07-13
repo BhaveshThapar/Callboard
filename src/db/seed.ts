@@ -87,6 +87,7 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
       compDate: config.comp.compDate ?? null,
       venue: config.comp.venue ?? null,
       status: config.comp.status,
+      registration: config.registration ?? null,
     })
     .returning();
   if (!comp) throw new Error("failed to seed comp");
@@ -115,7 +116,10 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
       name: team.name,
       school: team.school ?? null,
       bidCode: team.bidCode,
-      status: "competing" as const,
+      // A config written for a scoring demo describes a comp that is already running, so the
+      // default is `competing`. A registration config says otherwise, team by team.
+      status: team.status ?? ("competing" as const),
+      waitlistRank: team.waitlistRank ?? null,
       performanceOrder: team.performanceOrder ?? null,
       rosterSize: team.rosterSize ?? null,
       division: team.division ?? null,

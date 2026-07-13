@@ -201,7 +201,16 @@ export function LiveBoard({
           )}
         </div>
 
-        <div className="mt-7 flex items-center gap-2 border-t border-border-soft pt-5">
+        <div className="mt-7 border-t border-border-soft pt-5">
+          <a
+            href={`/board/${token}/roster`}
+            className="text-caption text-muted underline underline-offset-2 hover:text-primary"
+          >
+            Registration →
+          </a>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2">
           <span
             className={cx(
               "size-1.5 shrink-0 rounded-full",

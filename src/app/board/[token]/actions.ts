@@ -3,8 +3,16 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { boardAssignments, CHAIN_INDEX_NAMES, deductions, judgeAssignments } from "@/db/schema";
+import {
+  boardAssignments,
+  CHAIN_INDEX_NAMES,
+  deductions,
+  judgeAssignments,
+  TEAM_STATUSES,
+} from "@/db/schema";
+import type { TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
+import { setTeamStatus } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
   NOT_COMPETING,
@@ -327,6 +335,40 @@ export const revokeBoardAction = async (
 
   revalidatePath(`/board/${token}`);
   return { status: "ok", message: "That board link no longer opens." };
+};
+
+/**
+ * Registration's one write from the board side (A2). The interesting half is not the status change
+ * but what rides with it: dropping a team that held a slot promotes the top of the waitlist, and the
+ * two land together or not at all (ADR-0012). A half-applied promotion is a comp that has lost a
+ * team and not replaced it, or one with more accepted teams than slots — both states a human has to
+ * find and repair by hand, which is the reconciliation problem this product is sold to end.
+ */
+export const setTeamStatusAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const teamId = String(formData.get("teamId") ?? "");
+  const to = String(formData.get("status") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (!TEAM_STATUSES.includes(to as TeamStatus)) {
+    return { status: "error", message: "That is not a roster status." };
+  }
+
+  const result = await setTeamStatus(actor, teamId, to as TeamStatus);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/roster`);
+  return {
+    status: "ok",
+    message: result.promoted
+      ? `Dropped. ${result.promoted.name} was promoted off the waitlist into the slot.`
+      : `Team is now ${to}.`,
+  };
 };
 
 export const addDeductionAction = async (
