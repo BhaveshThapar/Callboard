@@ -1,4 +1,6 @@
-import type { CompStatus } from "@/db/schema/orgs";
+import type { CompStatus, RegistrationConfig } from "@/db/schema/orgs";
+import { TEAM_STATUSES } from "@/db/schema/teams";
+import type { TeamStatus } from "@/db/schema/teams";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
 
 /**
@@ -36,9 +38,23 @@ export type CompConfig = {
     division?: string;
     rosterSize?: number;
     performanceOrder?: number;
+    /** Defaults to `competing`: a config written for a scoring demo describes a comp already run. */
+    status?: TeamStatus;
+    waitlistRank?: number;
   }[];
   judges: { name: string; email?: string }[];
   board: { name: string; email?: string }[];
+  /**
+   * The public registration form, as data — the same way the rubric is (B1).
+   *
+   * Absent means registration is not open, which is not the same as an empty form: a comp with no
+   * `registration` block serves a 404 at `/register`, rather than a form nobody will read.
+   *
+   * There is deliberately **no division field.** A comp is one division (ADR-0010), so asking an
+   * applicant to choose one would be soliciting an answer nothing reads — which is the exact mistake
+   * that ADR removed a column to fix.
+   */
+  registration?: RegistrationConfig;
 };
 
 const NORMALIZATIONS = ["raw", "zscore", "rank"] as const;
@@ -147,6 +163,13 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
 
   const teams = array(root.teams, "teams").map((entry, i) => {
     const t = record(entry, `teams[${i}]`);
+    const status =
+      t.status === undefined ? undefined : oneOf(t.status, TEAM_STATUSES, `teams[${i}].status`);
+
+    if (t.waitlistRank !== undefined && status !== "waitlisted") {
+      fail(`teams[${i}].waitlistRank`, "a team that is waitlisted — a rank on any other status ranks nothing");
+    }
+
     return {
       name: str(t.name, `teams[${i}].name`),
       school: optStr(t.school, `teams[${i}].school`),
@@ -154,6 +177,8 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
       division: optStr(t.division, `teams[${i}].division`),
       rosterSize: optInt(t.rosterSize, `teams[${i}].rosterSize`),
       performanceOrder: optInt(t.performanceOrder, `teams[${i}].performanceOrder`) ?? i + 1,
+      status,
+      waitlistRank: optInt(t.waitlistRank, `teams[${i}].waitlistRank`),
     };
   });
   if (teams.length === 0) fail("teams", "at least one team");
@@ -183,6 +208,31 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
   // Without a board member there is nobody to attribute a lock to, and no board link to hand out.
   if (board.length === 0) fail("board", "at least one board member");
 
+  const registration = ((): CompConfig["registration"] => {
+    if (root.registration === undefined || root.registration === null) return undefined;
+    const r = record(root.registration, "registration");
+
+    const maxRosterSize = optInt(r.maxRosterSize, "registration.maxRosterSize");
+    if (maxRosterSize !== undefined && maxRosterSize <= 0) {
+      fail("registration.maxRosterSize", "a value above zero");
+    }
+
+    if (r.division !== undefined) {
+      fail(
+        "registration.division",
+        "no division field — a comp is one division (ADR-0010), so the form must not ask",
+      );
+    }
+
+    return {
+      // The waiver is the one thing a board cannot be given a default for: it is their text, and
+      // `waiver_accepted_at` records that an applicant accepted *it*.
+      waiverText: str(r.waiverText, "registration.waiverText"),
+      requireAuditionUrl: r.requireAuditionUrl === true,
+      maxRosterSize,
+    };
+  })();
+
   return {
     org: { name: str(org.name, "org.name"), slug: str(org.slug, "org.slug") },
     comp: {
@@ -201,5 +251,6 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     teams,
     judges: judges.map(({ name, email }) => ({ name, email })),
     board,
+    registration,
   };
 };

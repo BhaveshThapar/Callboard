@@ -1,8 +1,21 @@
-import { check, date, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { check, date, json, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 export type CompStatus = "draft" | "open" | "live" | "complete";
 export type CompRole = "board" | "liaison" | "judge" | "captain" | "attendee";
+
+/**
+ * The public registration form, as data. Null means the comp has no form at all, which is not the
+ * same as a form that is closed — whether it *accepts* an application is `comps.status === 'open'`.
+ *
+ * No division field, on purpose: a comp is one division (ADR-0010), so an applicant has nothing to
+ * choose and a field nothing reads is the mistake that ADR removed a column to fix.
+ */
+export type RegistrationConfig = {
+  waiverText: string;
+  requireAuditionUrl: boolean;
+  maxRosterSize?: number;
+};
 
 /** Persists across years. This is the institutional memory a board cannot otherwise hand off. */
 export const orgs = pgTable("orgs", {
@@ -24,6 +37,7 @@ export const comps = pgTable(
     compDate: date("comp_date"),
     venue: text("venue"),
     status: text("status").$type<CompStatus>().notNull().default("draft"),
+    registration: json("registration").$type<RegistrationConfig>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
