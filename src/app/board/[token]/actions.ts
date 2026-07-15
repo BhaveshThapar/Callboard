@@ -3,6 +3,7 @@
 import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
+import { violatedConstraint } from "@/db/errors";
 import {
   boardAssignments,
   CHAIN_INDEX_NAMES,
@@ -33,15 +34,13 @@ const CHAIN_INDEXES = new Set<string>(CHAIN_INDEX_NAMES);
  * no transactions, so the check and the insert are two acts, and two people submitting at once can
  * land between them. Postgres is the only thing that can refuse it.
  *
- * The `constraint` lives on the *cause*, not on what is thrown: drizzle wraps the driver error, and
- * its own message is the failed SQL. Read that message and a board member is shown
- * `Failed query: insert into "tab_runs" ...` at the moment placements go final.
+ * `violatedConstraint` is what digs the name out of the cause chain, and why it must be dug out at
+ * all is written there: drizzle's own message is the failed SQL, and a board member must never be
+ * shown `Failed query: insert into "tab_runs" ...` at the moment placements go final.
  */
 const isChainFork = (error: unknown): boolean => {
-  for (let e: unknown = error; e instanceof Error; e = e.cause) {
-    if ("constraint" in e && CHAIN_INDEXES.has(String(e.constraint))) return true;
-  }
-  return false;
+  const constraint = violatedConstraint(error);
+  return constraint !== null && CHAIN_INDEXES.has(constraint);
 };
 
 export const lockAction = async (
