@@ -16,6 +16,48 @@ const STATUS_TONE: Record<TeamStatus, string> = {
   dropped: "bg-hover text-subtle",
 };
 
+/**
+ * What the team actually submitted — the evidence the accept/waitlist/drop decision is made on.
+ *
+ * A comp can *require* an audition link (`registration.requireAuditionUrl`), which makes a missing
+ * one worth saying out loud rather than rendering as a blank cell. A seeded team never applied and
+ * has neither, so "—" means "there was no application", not "the application was empty".
+ */
+function ApplicationCell({ team }: { team: RosterTeamView }) {
+  if (!team.auditionUrl && !team.waiverAcceptedAt) {
+    return <span className="text-caption text-subtle">—</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      {team.auditionUrl ? (
+        <a
+          href={team.auditionUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid={`roster-audition-${team.bidCode}`}
+          className="text-caption text-primary underline-offset-2 hover:underline"
+        >
+          Audition ↗
+        </a>
+      ) : (
+        <span className="text-caption text-subtle">no audition link</span>
+      )}
+      {team.waiverAcceptedAt ? (
+        <span
+          data-testid={`roster-waiver-${team.bidCode}`}
+          className="text-micro text-subtle"
+          title={team.waiverAcceptedAt.toISOString()}
+        >
+          Waiver ✓ {team.waiverAcceptedAt.toISOString().slice(0, 10)}
+        </span>
+      ) : (
+        <span className="text-micro text-danger">no waiver</span>
+      )}
+    </div>
+  );
+}
+
 export function RosterTable({
   token,
   roster,
@@ -56,6 +98,7 @@ export function RosterTable({
             <th className={cx(eyebrowClass, "pb-2")}>Team</th>
             <th className={cx(eyebrowClass, "pb-2")}>Bid</th>
             <th className={cx(eyebrowClass, "pb-2")}>Dancers</th>
+            <th className={cx(eyebrowClass, "pb-2")}>Application</th>
             <th className={cx(eyebrowClass, "pb-2")}>Status</th>
             {!locked && <th className={cx(eyebrowClass, "pb-2")}>Move to</th>}
           </tr>
@@ -73,9 +116,21 @@ export function RosterTable({
                 {team.school && (
                   <span className="block text-caption text-subtle">{team.school}</span>
                 )}
+                {team.contactEmail && (
+                  <a
+                    href={`mailto:${team.contactEmail}`}
+                    data-testid={`roster-contact-${team.bidCode}`}
+                    className="block text-caption text-muted underline-offset-2 hover:text-primary hover:underline"
+                  >
+                    {team.contactName ?? team.contactEmail}
+                  </a>
+                )}
               </td>
               <td className="tabular py-2.5 pr-3 text-muted">{team.bidCode}</td>
               <td className="tabular py-2.5 pr-3 text-muted">{team.rosterSize ?? "—"}</td>
+              <td className="py-2.5 pr-3">
+                <ApplicationCell team={team} />
+              </td>
               <td className="py-2.5 pr-3">
                 <span className={cx(pillClass, STATUS_TONE[team.status])}>{team.status}</span>
                 {team.status === "waitlisted" && team.waitlistRank !== null && (

@@ -127,6 +127,77 @@ test("a team applies, the board accepts it, and the form respects the comp's own
   await context.close();
 });
 
+/**
+ * Registration day is the whole circuit applying inside the same 48 hours, so two captains hitting
+ * submit in the same second is the normal case, not the adversarial one.
+ *
+ * `nextBidCode` reads the codes in use and returns the first free one; on neon-http that read and
+ * the insert are two acts, so both applicants are handed `T-001` and `teams_comp_bid_code_unique`
+ * refuses the second. That refusal is correct — it is the same shape as the run chain, where the
+ * check narrows the race and the database is what actually closes it.
+ *
+ * What must not happen is the loser paying for it. This is the one page with no `Actor` behind it:
+ * an uncaught unique violation hands a stranger `Failed query: insert into "teams" ...`, because
+ * drizzle's message is the failed SQL. So the assertion is two-sided — *both* applications exist,
+ * with *different* bid codes, and neither applicant was ever shown the schema.
+ */
+test("two captains applying at the same moment both get in, with different bid codes", async ({
+  browser,
+}) => {
+  const comp = seed();
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+
+  const fill = async (name: string, email: string) => {
+    const page = await context.newPage();
+    await page.goto(`/register/${ORG}/${COMP}`);
+    await page.getByLabel("Team name").fill(name);
+    await page.getByLabel("Contact name").fill(name);
+    await page.getByLabel("Contact email").fill(email);
+    await page.getByLabel("Audition video link").fill("https://example.com/audition");
+    await page.getByLabel("Roster size").fill("20");
+    await page.getByLabel("Accept the waiver").check();
+    return page;
+  };
+
+  const first = await fill("Race One", "one@example.com");
+  const second = await fill("Race Two", "two@example.com");
+
+  // Both forms are filled and sitting there. Click them together -- no awaits between -- so the two
+  // `nextBidCode` reads overlap and both actions try to insert the same code.
+  await Promise.all([
+    first.getByRole("button", { name: "Apply" }).click(),
+    second.getByRole("button", { name: "Apply" }).click(),
+  ]);
+
+  const codes: string[] = [];
+  for (const page of [first, second]) {
+    const applied = page.getByTestId("applied");
+    await expect(applied).toBeVisible();
+
+    // The failed SQL, in the words Postgres and drizzle actually use. Same assertion as
+    // `lock-race.spec.ts` makes for the board, now made for the stranger.
+    await expect(
+      page.getByText(/Failed query|duplicate key|violates unique constraint/i),
+    ).toHaveCount(0);
+
+    codes.push((await applied.textContent())?.match(/T-\d+/)?.[0] ?? "");
+  }
+
+  expect(codes[0]).toMatch(/^T-\d+$/);
+  expect(codes[1]).toMatch(/^T-\d+$/);
+  expect(codes[0]).not.toBe(codes[1]);
+
+  // And the board sees both -- the loser's application was retried, not lost. Asserting only that
+  // the two pages showed different codes would pass even if one insert had silently never landed.
+  const board = await context.newPage();
+  await board.goto(`/board/${comp.boardToken}/roster`);
+  await expect(board.getByTestId(`roster-row-${codes[0]}`)).toBeVisible();
+  await expect(board.getByTestId(`roster-row-${codes[1]}`)).toBeVisible();
+
+  await context.close();
+});
+
 test("dropping a team that held a slot promotes the top of the waitlist, atomically", async ({
   browser,
 }) => {
@@ -155,6 +226,55 @@ test("dropping a team that held a slot promotes the top of the waitlist, atomica
 
   // The second waitlisted team did not move: one slot came free, so exactly one promotion happened.
   await expect(page.getByTestId("roster-row-W-2")).toHaveAttribute("data-status", "waitlisted");
+
+  await context.close();
+});
+
+/**
+ * The board decides whether to accept a team. This asserts it can see what it is deciding *on*.
+ *
+ * Registration wrote `audition_url`, `contact_person_id` and `waiver_accepted_at` from its first
+ * commit, and `listRosterForBoard` selected none of them, so the data went into the database and
+ * died there — a board approving teams on a name and a headcount, with the comp's *required*
+ * audition link unreachable from the product that demanded it. Nothing failed, which is why nothing
+ * caught it: the missing test is the bug.
+ */
+test("the board can see the application it is being asked to accept", async ({ browser }) => {
+  const comp = seed();
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  await page.goto(`/register/${ORG}/${COMP}`);
+  await page.getByLabel("Team name").fill("Evidence Crew");
+  await page.getByLabel("Contact name").fill("Priya Raman");
+  await page.getByLabel("Contact email").fill("priya@example.com");
+  await page.getByLabel("Audition video link").fill("https://example.com/the-audition");
+  await page.getByLabel("Roster size").fill("18");
+  await page.getByLabel("Accept the waiver").check();
+  await page.getByRole("button", { name: "Apply" }).click();
+
+  const applied = page.getByTestId("applied");
+  await expect(applied).toBeVisible();
+  const bidCode = (await applied.textContent())?.match(/T-\d+/)?.[0] ?? "";
+  expect(bidCode).toMatch(/^T-\d+$/);
+
+  const board = await context.newPage();
+  await board.goto(`/board/${comp.boardToken}/roster`);
+
+  // The audition link the comp *required* — reachable, and pointing where the captain put it.
+  const audition = board.getByTestId(`roster-audition-${bidCode}`);
+  await expect(audition).toBeVisible();
+  await expect(audition).toHaveAttribute("href", "https://example.com/the-audition");
+
+  // The captain to reply to, and the waiver as an event rather than a claim.
+  const contact = board.getByTestId(`roster-contact-${bidCode}`);
+  await expect(contact).toHaveAttribute("href", "mailto:priya@example.com");
+  await expect(contact).toContainText("Priya Raman");
+  await expect(board.getByTestId(`roster-waiver-${bidCode}`)).toContainText("Waiver");
+
+  // A seeded team never applied, so it has no application to show. That is a gap, not a blank.
+  await expect(board.getByTestId("roster-audition-A-1")).toHaveCount(0);
 
   await context.close();
 });

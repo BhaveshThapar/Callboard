@@ -33,16 +33,34 @@ export const applyAction = async (
     return { status: "error", message: "Registration for this comp is not open.", values };
   }
 
-  const result = await apply(open, {
-    teamName: values.teamName,
-    school: values.school || null,
-    contactName: values.contactName,
-    contactEmail: values.contactEmail,
-    rosterSize: Number(values.rosterSize),
-    auditionUrl: values.auditionUrl || null,
-    waiverAccepted: values.waiverAccepted,
-  });
+  /**
+   * `apply` returns a typed refusal for everything it can foresee, including the bid-code race it
+   * retries. This catch is for everything else — a dropped connection, a check constraint nobody
+   * predicted — and it exists because of who is standing here: an applicant, on the one page with no
+   * `Actor`, whose form React will blank the moment this action returns. An uncaught throw hands a
+   * stranger a Next.js error boundary and loses everything they typed; a thrown *database* error
+   * hands them `Failed query: insert into "teams" ...`, since drizzle's message is the failed SQL.
+   *
+   * So: the values go back, and the schema does not.
+   */
+  try {
+    const result = await apply(open, {
+      teamName: values.teamName,
+      school: values.school || null,
+      contactName: values.contactName,
+      contactEmail: values.contactEmail,
+      rosterSize: Number(values.rosterSize),
+      auditionUrl: values.auditionUrl || null,
+      waiverAccepted: values.waiverAccepted,
+    });
 
-  if (!result.ok) return { status: "error", message: result.message, values };
-  return { status: "applied", bidCode: result.bidCode };
+    if (!result.ok) return { status: "error", message: result.message, values };
+    return { status: "applied", bidCode: result.bidCode };
+  } catch {
+    return {
+      status: "error",
+      message: "Something went wrong filing your application. Please try again.",
+      values,
+    };
+  }
 };

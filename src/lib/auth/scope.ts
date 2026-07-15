@@ -43,11 +43,26 @@ export type BoardMemberView = {
   revokedAt: Date | null;
 };
 
-/** The registration window: the whole roster, statuses and all. Never shown to a judge. */
+/**
+ * The registration window: the whole roster, statuses and all. Never shown to a judge.
+ *
+ * It carries what the application *said*, because accepting a team is a decision made about that
+ * application: the audition link the comp may have required, the captain to reply to, and the moment
+ * the waiver was accepted. Registration wrote all three from the first commit and nothing read them
+ * back, which left a board approving teams on a name and a headcount.
+ *
+ * All four are nullable, and not only because a seeded team has no application — `contact_person_id`
+ * is `on delete set null`, so a deleted person leaves a team whose captain is gone. The screen shows
+ * that as a gap rather than pretending the row is malformed.
+ */
 export type RosterTeamView = BoardTeamView & {
   status: TeamStatus;
   waitlistRank: number | null;
   rosterSize: number | null;
+  auditionUrl: string | null;
+  waiverAcceptedAt: Date | null;
+  contactName: string | null;
+  contactEmail: string | null;
 };
 
 export type { JudgeLabelView } from "./labels";
@@ -191,6 +206,14 @@ export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]>
  * scoring. A registration screen has to show the applied, the waitlisted and the dropped; a scoring
  * screen must not. Two windows, and the `teamId` check on a form resolves against whichever one
  * produced *that* form — which is the whole rule, not a second copy of it.
+ *
+ * The join onto `people` is a `leftJoin`: `teams.contact_person_id` is nullable (a seeded team never
+ * applied, and the FK is `on delete set null`), and an inner join would silently drop those rows from
+ * the board's own roster screen — a team that exists, is scoreable, and cannot be seen.
+ *
+ * The captain's name and email belong to a `BoardActor` and to no one else. ADR-0008 de-identifies a
+ * *judge beside a score*; it says nothing about a board seeing the person who filed an application,
+ * and `JudgeTeamView` is a different type for exactly this reason.
  */
 export const listRosterForBoard = (actor: BoardActor): Promise<RosterTeamView[]> =>
   db
@@ -203,8 +226,13 @@ export const listRosterForBoard = (actor: BoardActor): Promise<RosterTeamView[]>
       status: teams.status,
       waitlistRank: teams.waitlistRank,
       rosterSize: teams.rosterSize,
+      auditionUrl: teams.auditionUrl,
+      waiverAcceptedAt: teams.waiverAcceptedAt,
+      contactName: people.name,
+      contactEmail: people.email,
     })
     .from(teams)
+    .leftJoin(people, eq(people.id, teams.contactPersonId))
     .where(eq(teams.compId, actor.compId))
     .orderBy(teams.status, teams.waitlistRank, teams.name);
 

@@ -20,6 +20,14 @@ export type TeamStatus = (typeof TEAM_STATUSES)[number];
  */
 export const SCOREABLE_STATUSES = ["accepted", "competing"] as const;
 
+/**
+ * One definition, because two things have to agree on the string and neither can derive it: the
+ * index itself, and `apply`, which retries when a concurrent application takes the bid code it was
+ * about to use. Same discipline as `CHAIN_INDEXES` in `./scores`, and for the same reason — the
+ * database is what actually refuses, so the code has to name the refusal exactly.
+ */
+export const TEAMS_BID_CODE_UNIQUE = "teams_comp_bid_code_unique";
+
 export const teams = pgTable(
   "teams",
   {
@@ -49,7 +57,7 @@ export const teams = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    unique("teams_comp_bid_code_unique").on(t.compId, t.bidCode),
+    unique(TEAMS_BID_CODE_UNIQUE).on(t.compId, t.bidCode),
     check(
       "teams_status_check",
       sql`${t.status} in ${sql.raw(`(${TEAM_STATUSES.map((s) => `'${s}'`).join(",")})`)}`,
