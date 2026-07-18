@@ -14,6 +14,7 @@ bun run db:generate   # after any src/db/schema change
 bun run db:migrate
 bun run db:seed                                    # the Mayuri demo
 bunx tsx src/db/seed-cli.ts --config comp.json     # any comp; see comp-config.example.json
+bun run db:doctor     # preflight. Run it before every prospect call — see docs/DEMO.md
 ```
 
 Run `typecheck`, `lint`, and `test` before calling any change done.
@@ -32,11 +33,25 @@ Everything else stays gated. Do not build **payments, Stripe, `charges`, the fee
 
 **`src/lib/tabulation/` is pure.** No imports from `src/db/`, no `Date.now()`, no randomness. It takes `TabulationInput` and returns `TabulationResult`. This is what makes locked results reproducible a day later, and reproducibility is the thing being sold. Nothing new goes into `TabulationInput` without a reason that survives `reproducibility.test.ts` — `judge_notes` stays out for exactly this reason.
 
+This is **enforced by ESLint**, not by discipline: `eslint.config.mjs` carries a zone over `src/lib/tabulation/**` banning `@/db`, `drizzle-orm`, `Date.now()`, `new Date()` and `Math.random()`. It had to be. `reproducibility.test.ts` only catches an impurity that *changes the result* — a clock read that happens not to is invisible to it, and stays invisible until the day it isn't.
+
+**A database error is read by its `constraint`, never by its message.** `violatedConstraint` in `src/db/errors.ts` is the one place that digs the name out of the cause chain, because drizzle wraps the driver error and its own `message` is the failed SQL. Two callers read it and mean opposite things by it: `lockAction` treats a chain index as a **refusal** — there must not be a second root — while `apply` treats `teams_comp_bid_code_unique` as a **retry**, because `nextBidCode` is a read-then-insert, registration day is the whole circuit applying at once, and the losing applicant did nothing wrong. Same mechanism, opposite remedy; what they share is that neither may guess from the message text. The registration form is the one page with no `Actor` behind it, and `Failed query: insert into "teams" ...` is not a thing to show a stranger.
+
 **Append, never mutate.** Scores are immutable after a lock, with no exception and no unlock. A post-lock correction is an attributed `deductions` row plus a re-tabulation, written as a new `tab_runs` row with `supersedes_id` and a reason; the superseded row keeps its own frozen inputs. `audit_log` gets a row for every write that touches scores, locks, or overrides.
 
 **A correction replays the snapshot; it does not re-read the world.** `lockResults` builds `TabulationInput` from the live tables **only for the first lock**. An override takes the superseded run's frozen `inputs` and `config` and appends only the deductions its caller wrote — otherwise anything landing between the lock and the correction (a judge who lost the race with the lock button, a rubric weight edited after) enters the corrected result silently, and *nothing can detect it*: each run reproduces from its own row, so both verify while describing different worlds. Reproducibility is a property of one row; continuity is a property of the pair, and only `e2e/override.spec.ts` reads it. New deductions are passed in, never diffed out of the table, because `DeductionInput` has no id and no timestamp — which is also what keeps `TabulationInput` unchanged. The consequence is deliberate and must stay visible: a score landing after the lock enters **no run, ever**, and `scoresOutsideChain` is what says so on the board.
 
-**A `teamId` on a form is a claim.** It has one check — `resolveTeamForJudge` / `resolveTeamForBoard` in `src/lib/auth/scope.ts` — and all four write paths (`submitScores`, `submitNote`, `addDeductionAction`, `overrideAction`) go through it. Do not write a fifth check; `addDeductionAction` is what a fourth *missing* one cost. `scores.team_id`, `judge_notes.team_id` and `deductions.team_id` are all bare FKs, so the database takes the row happily and `tabulate()` then filters it back out of the arithmetic — the write succeeds, the actor is told it worked, and it counts for nothing. A deduction that silently does not apply is worse than one that fails.
+**A `teamId` on a form is a claim.** The rule is one line: **a `teamId` is resolved against the scoped read that produced the form it arrived on.** That read is the check — comp scope and status filtering both come free from its own `where`, which is what stops the check from becoming a second definition of "which teams count".
+
+There are three windows, because they answer different questions, and five write paths resolve against whichever one produced their form:
+
+| Window | Write paths |
+|---|---|
+| `listTeamsForJudge` → `resolveTeamForJudge` | `submitScores`, `submitNote` |
+| `listTeamsForBoard` → `resolveTeamForBoard` | `addDeductionAction`, `overrideAction` |
+| `listRosterForBoard` → `resolveRosterTeamForBoard` | `setTeamStatus` |
+
+All three are in `src/lib/auth/scope.ts` and all three go through `claimed()`. The scoring windows filter to `SCOREABLE_STATUSES`; the roster window deliberately does not, because registration has to manage the applied, the waitlisted and the dropped — a screen that hid them could not accept a team. **Do not add a fourth window, and do not write a check outside one.** `addDeductionAction` is what a *missing* one cost: `scores.team_id`, `judge_notes.team_id` and `deductions.team_id` are all bare FKs, so the database takes the row happily and `tabulate()` then filters it back out of the arithmetic — the write succeeds, the actor is told it worked, and it counts for nothing. A deduction that silently does not apply is worse than one that fails.
 
 **A link can be killed; nothing mints one** ([ADR-0011](docs/decisions/0011-nothing-mints-a-link.md)). Both `judge_assignments.revoked_at` and `board_assignments.revoked_at` are now written, not just read. Board revocation stays available **after** the lock (a board link is the one that can still override) and refuses the **last** live link (nothing issues a replacement, and a reseed destroys the scores). Do not add a link-minting path — issuing a credential to a person is board management, which is Module A.
 

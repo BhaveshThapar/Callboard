@@ -71,6 +71,10 @@ The audit trail is not instrumentation. It is the product. Paper clipboards in a
 
 ## What is deliberately absent
 
-No Stripe. No registration workflow. No Gita. No comms engine. No row-level security. Each is designed — see [DATA_MODEL.md](DATA_MODEL.md), [PAYMENTS.md](PAYMENTS.md), and [ROADMAP.md](ROADMAP.md) — and each waits behind the founding-partner gate in PRD §13.
+No Stripe. No `charges`, no ledger. No Gita. No comms engine. No row-level security. No team-facing actor: `Actor` is `BoardActor | JudgeActor`, and nothing mints a link ([ADR-0011](decisions/0011-nothing-mints-a-link.md)). Each is designed — see [DATA_MODEL.md](DATA_MODEL.md), [PAYMENTS.md](PAYMENTS.md), and [FEATURE_MAP.md](FEATURE_MAP.md) — and each waits behind the founding-partner gate in PRD §13.
+
+**Registration is the exception, and it is a deliberate one.** The public form (A1) and the application → acceptance → waitlist lifecycle (A2) were built in July 2026 ahead of that gate, at the founder's direction. They brought two things into the architecture that the rest of this document should be read against: the **only unauthenticated read in the product** (`openRegistration`, where the applicant is nobody yet, so the projection *is* the scope), and the **only transaction** (`withTransaction`, [ADR-0012](decisions/0012-transactions-for-writes-that-span-statements.md) — a drop and a waitlist promotion must land together, and `db` is neon-http, which has none). Writes stay on neon-http everywhere else, and `lockResults` stays there on purpose: a unique index refuses a fork from code that never opens a transaction.
+
+What registration still does **not** have is the money half. There are no `charges`, so A3 ("roster and payment status, one record") does not exist and a team's obligations are not reconciled anywhere.
 
 Multi-tenancy today is app-layer: every table carries `comp_id`, and reads go through `src/lib/auth/scope.ts`. Postgres RLS is the eventual hardening, recorded in [ADR-0006](decisions/0006-tenancy-app-layer-scoping-rls-later.md), not a thing to build before the first customer.

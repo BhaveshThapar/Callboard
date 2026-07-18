@@ -47,8 +47,11 @@ Meets the §8.3 acceptance test, encoded in `e2e/scoring.spec.ts`: 8 teams, 3 ju
 Ship target: live for the **January–March 2027** season.
 
 **Module A — Registration + Payments.** The spine, and the treasurer's pain.
-- Configurable registration form; application → acceptance → waitlist workflow with promotion that reconciles balances (A1, A2)
-- Roster and payment status joined by design (A3)
+
+> **A1 and A2 shipped in July 2026, before this gate cleared**, at the founder's direction and against the PRD's own advice. That is recorded rather than tidied away: the public registration form is live, and so is the application → acceptance → waitlist lifecycle, whose drop-and-promotion lands in a single transaction ([ADR-0012](decisions/0012-transactions-for-writes-that-span-statements.md)) and whose roster freezes at the lock. What A2 does **not** do is the half its own description promises — it does not reconcile balances, because there are no `charges`. **The line now holds at A3.** Everything below is still gated, and Track 1 is still 0/10 conversations and 0/3 signatures.
+
+- ~~Configurable registration form; application → acceptance → waitlist workflow (A1, A2)~~ — **shipped July 2026, ahead of the gate.** Balance reconciliation is *not* included; it needs `charges`.
+- Roster and payment status joined by design (A3) — **needs `charges`, which do not exist.** The easiest thing to drift into, and the line the gate now holds at.
 - Team submission portal for post-acceptance materials (A4)
 - Stripe Connect Standard, ACH-first, nonprofit rate, optional surcharge (A5, A5a–c)
 - Fee schedule engine; exact per-team totals (A6)
