@@ -8,11 +8,13 @@ Read [`docs/PRD.md`](docs/PRD.md) for the full product argument and the evidence
 
 ## What exists right now
 
-**A judge-scoring demo, and nothing else.** This is deliberate.
+**The judge-scoring demo, complete — plus the first slice of registration.**
 
-The PRD gates the real build on **three founding partners** by Sept 15, 2026 (§13). The founding season is free, so the costly signal is not a deposit: a partner is a named person and comp date, their real data in hand, and a written $300 line in the budget they hand their successors. Until that gate clears, the only thing worth building is the sales instrument: three judges scoring eight teams from their phones, live tabulation on screen, locked and auditable placements in under five minutes. That is what this repo contains.
+The PRD gates the real build on **three founding partners** by Sept 15, 2026 (§13). The founding season is free, so the costly signal is not a deposit: a partner is a named person and comp date, their real data in hand, and a written $300 line in the budget they hand their successors. Until that gate clears, the thing worth building is the sales instrument: three judges scoring eight teams from their phones, live tabulation on screen, locked and auditable placements in under five minutes.
 
-Registration, payments, Stripe Connect, the Gita, and the comms engine are **designed** in `docs/` and **not built**. See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+**Module B (scoring, B1–B10) is done.** So is the first slice of **Module A**: the public registration form (A1) and the application → acceptance → waitlist lifecycle (A2), built in July 2026 at the founder's direction, **ahead of the gate and against the PRD's own advice**. That is recorded rather than tidied away — [`docs/FEATURE_MAP.md`](docs/FEATURE_MAP.md) sequences the build and does not authorize it, and this is what it looks like when the sequence runs early. Track 1 is still 0/10 conversations and 0/3 signatures, and no line of code moves it.
+
+Everything else is **designed** in `docs/` and **not built**: payments and Stripe Connect (A5–A10), the roster-plus-payment record (A3, which needs `charges`), the team portal (A4), the Gita, and the comms engine. See [`docs/FEATURE_MAP.md`](docs/FEATURE_MAP.md) for the whole map and the gate it sits behind.
 
 ## Quickstart
 
@@ -39,7 +41,8 @@ To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 | `bun run e2e` | Playwright acceptance test |
 | `bun run db:generate` | Generate a migration from schema changes |
 | `bun run db:migrate` | Apply migrations |
-| `bun run db:seed` | Reset and seed demo data |
+| `bun run db:seed` | Seed the Mayuri demo. **Refuses a protected org** — a reseed destroys real scores |
+| `bun run db:doctor` | Preflight: does this database still enforce the invariants? Run it before every prospect call |
 | `bun run db:studio` | Drizzle Studio |
 
 ## Documentation

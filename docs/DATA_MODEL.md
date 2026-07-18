@@ -14,9 +14,11 @@ Two groups of tables follow. The first group exists in Postgres. The second grou
 
 Persists across years. This is the institutional memory that PRD §2.3 says evaporates every May when the board turns over.
 
-**`comps`** — `id`, `org_id`, `name`, `slug`, `comp_date`, `venue`, `status`, `created_at`
+**`comps`** — `id`, `org_id`, `name`, `slug`, `comp_date`, `venue`, `status`, `registration`, `created_at`
 
 `status` ∈ `draft | open | live | complete`, enforced by a check constraint. Unique on `(org_id, slug)`.
+
+`registration` is the public form, authored as data in the comp config exactly like the rubric — waiver text, `requireAuditionUrl`, `maxRosterSize`. Null, or a `status` other than `open`, and there is no form to fill in; `openRegistration` collapses those two cases into one answer, because distinguishing them publicly would leak the existence of a comp that has not announced itself.
 
 **`people`** — `id`, `org_id`, `name`, `email`, `phone`, `created_at`. Unique on `(org_id, email)`.
 
@@ -30,11 +32,15 @@ The board's access token, the same primitive judges use, and deliberately **one 
 
 ### Teams
 
-**`teams`** — `id`, `comp_id`, `name`, `school`, `bid_code`, `status`, `waitlist_rank`, `roster_size`, `division`, `performance_order`, `created_at`
+**`teams`** — `id`, `comp_id`, `name`, `school`, `bid_code`, `status`, `waitlist_rank`, `roster_size`, `division`, `performance_order`, `contact_person_id`, `audition_url`, `waiver_accepted_at`, `created_at`
 
-`status` ∈ `applied | waitlisted | accepted | dropped | competing`. Unique on `(comp_id, bid_code)`.
+`status` ∈ `applied | waitlisted | accepted | dropped | competing`. Unique on `(comp_id, bid_code)` — the name `teams_comp_bid_code_unique` has one definition, in `src/db/schema/teams.ts`, because `apply` has to name it: `nextBidCode` is a read-then-insert and neon-http has no transactions, so two applications landing together collide, and the loser retries rather than failing.
 
 `bid_code` is the anonymized identifier judges see. The status values are the vocabulary of the churn documented in PRD §14: two accepted teams dropped and two waitlisted teams were promoted between the December acceptances doc and the February show, which is precisely why "who has paid" became unanswerable.
+
+The last three columns are what an application *said*, and they are the evidence a board accepts or rejects a team on: `contact_person_id` (the captain — `people` is per-org, so a captain across two comps is one person; `on delete set null`), `audition_url` (which a comp may *require*), and `waiver_accepted_at` — a timestamp rather than a boolean, because a boolean records a claim and a timestamp records an event, and this is the column a board would be asked to produce if anything ever went wrong. All three are null for a seeded team, which never applied. `listRosterForBoard` is the only window that selects them, and it is the only one that may: a judge's projection of a team never carries a name, let alone a captain's email.
+
+`waitlist_rank` is read by `nextOffWaitlist` and **written by nothing in the product** — `setTeamStatus` only ever preserves it or clears it, and the seed config is the one thing that sets it. A board therefore cannot yet *order* its own waitlist through the UI; promotion falls back to a deterministic id-order tiebreak. That is a gap, not a bug, and it is deliberately not being filled ahead of the gate.
 
 ### Scoring
 
@@ -56,7 +62,9 @@ There is deliberately **no `division`**: a comp is one division ([ADR-0010](deci
 
 **`scores`** — `id`, `comp_id`, `judge_assignment_id`, `team_id`, `criterion_id`, `raw_value`, `submitted_at`
 
-Unique on `(judge_assignment_id, team_id, criterion_id)`, so a resubmission upserts rather than duplicating. Refused entirely once a `tab_runs` row exists.
+Unique on `(judge_assignment_id, team_id, criterion_id)`, so a resubmission upserts rather than duplicating.
+
+Once a `tab_runs` row exists, a score is refused — **by the application, not by the database.** The distinction is the whole point and must not be smoothed over: there is no constraint here that could refuse it, so a judge who lost the race with the lock button, or a hand-typed `INSERT`, can still land a `scores` row after the lock. That row enters **no run, ever** — the first lock froze its inputs, and an override replays that frozen snapshot rather than re-reading the tables. It is therefore invisible to every result, which is exactly the state that must not be silent. `scoresOutsideChain` is what counts those rows and says so on the board screen, and `e2e/late-score.spec.ts` is what holds it. Read this line as "the database enforces it" and that counter looks like dead code.
 
 **`judge_notes`** — `id`, `comp_id`, `judge_assignment_id`, `team_id`, `note`, `submitted_at`
 
