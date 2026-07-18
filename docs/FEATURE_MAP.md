@@ -2,6 +2,8 @@
 
 Every feature Callboard will ever have, on one page, mapped to the gate that decides when it gets built. Each ID traces to [`PRD.md`](PRD.md) (A1–A11 §8.2, B1–B8 §8.3, G1–G6 §9); tables to [`DATA_MODEL.md`](DATA_MODEL.md); rationale to [`decisions/`](decisions/).
 
+**B9 and B10 are the exceptions** — they have no PRD entry, because they did not exist when §8.3 was written. Both came out of building B6 and B7 and finding what those actually needed: an audit export the board can read without learning which judge is which, and a kill switch for a leaked link. They are recorded here, and their rationale is in [ADR-0008](decisions/0008-judge-scores-are-de-identified.md) and [ADR-0011](decisions/0011-nothing-mints-a-link.md).
+
 This map **sequences; it does not authorize.** The PRD argues against building (§13). Nothing below the gate starts before three founding partners sign — building it to win a signature spends the whole selling window on boards that have committed nothing. This is the build order for the moment the gate clears, not a to-do list that ignores it.
 
 **Status**
@@ -12,7 +14,7 @@ This map **sequences; it does not authorize.** The PRD argues against building (
 | **Designed** | specced in `docs/`, not built |
 | **Won't build** | the tarpit — stays in the tools that already do it |
 
-Counts: **10 live** (Module B) · **2 live, 12 designed** (Module A) · **6 designed** (the Gita) · the rest below.
+Counts: **13 live** — 10 (Module B) + 2 (Module A) + 1 (Adjacent) · **12 designed** (Module A) · **6 designed** (the Gita) · the rest below.
 
 ---
 
@@ -26,7 +28,7 @@ Module B (Tabulation), PRD §8.3. Judges score from any phone; the math runs its
 | **B2** | Score from any phone, no install | A signed link; the raw 32-byte token lives only in the URL, its sha256 in the database. The form is plain HTML and submits without JavaScript. | ADR-0003, `judge_assignments` |
 | **B3** | Auto-normalization | Raw mean, per-judge z-score, or negated mean rank — per rubric. A zero-spread judge contributes 0, never NaN. | `normalize.ts` |
 | **B4** | Deduction entry | Time penalties applied to every judge's per-team total *before* normalization — the only well-defined choice when the aggregate is standard deviations. | `deductions` |
-| **B5** | Live tabulation + tiebreaks | Standings update every 2s. Ties broken by an ordered list (criterion, head-to-head Copeland, highest single judge); a surviving tie is surfaced, never silently picked. | `rank.ts` |
+| **B5** | Live tabulation + tiebreaks | Standings update every 2s. Ties broken by an ordered list (criterion, head-to-head Copeland, highest single judge); a surviving tie is surfaced, never silently picked. A score naming a team that is not on the roster is ignored — `teams` is the roster of record, and a team that withdrew must not keep placing with the scores it was already given. | ADR-0009, `rank.ts` |
 | **B6** | Locked, attributed audit trail | Locking freezes inputs, rubric, results into one row. A correction **replays that frozen row** and appends its deduction — it never re-reads the tables, so nothing written after the lock can enter it — and every lock and override carries a person's name. A score that lands after the lock counts in no run, and the board is told. Closed July 2026. | ADR-0004, ADR-0007, `tab_runs` |
 | **B7** | Blind judging, both directions | A judge's projection of a team never selects its name; the board's projection of a judge *beside a score* never selects theirs. Blindness is a property of the return type both ways — a compile error to leak. Closed July 2026. | ADR-0008, `scope.ts` |
 | **B8** | Emcee sheet + per-team feedback | A printable placement sheet the emcee reads from directly. Each team's feedback file carries its placement, its deduction and the reason, and each judge's note under `Judge N` — and **no scores**. One file per team, so a forward cannot leak a rival's notes. | ADR-0008, `export/feedback.ts` |
@@ -61,10 +63,10 @@ The spine, and the registration lead's pain. Roster and money live in one record
 
 | ID | Feature | Status | Detail | Needs | Source |
 |---|---|---|---|---|---|
-| **A1** | Configurable registration form | **Live** | Per comp: team info, roster size, audition-video link, waiver acknowledgment — authored as data in the comp config, like the rubric. The public form is the one page with no `Actor`; the projection is the scope. **No division field**, and no custom fields yet. | — | `teams`, `people`, `comps.registration` |
-| **A2** | Application → acceptance → waitlist | **Live** | The status lifecycle as one total transition map. Dropping a team that held a slot promotes the top of the waitlist, and the two land **in the same transaction** (ADR-0012) or neither does. The roster freezes at the lock. Obligations are *not* reconciled — there are no `charges` yet, so the balance half of this waits for Phase 02. | A1 | `teams.status`, `transitions.ts` |
-| **A3** | Roster + payment status, one record | Designed | Joined by design, eliminating the acceptance-doc-vs-Venmo split. The structural fix, not a report. **Needs `charges`, which do not exist** — this is the easiest thing to drift into and the line where the gate still holds. | A2, charges | PRD A3 |
-| **A4** | Team submission portal | Designed | Post-acceptance materials: final music, roster updates, emergency contacts — a team-facing filtered view of the same record. Needs a third actor kind; `Actor` is still `BoardActor \| JudgeActor`. | — | PRD A4 |
+| **A1** | Configurable registration form | **Live** | Per comp: team info, roster size, audition-video link, waiver acknowledgment — authored as data in the comp config, like the rubric. The public form is the one page with no `Actor`; the projection is the scope. What it collects, the board can *see*: the audition link, the captain, and the waiver are on the roster screen, because accepting a team is a decision made about its application. The bid code is minted by a read-then-insert, so two captains applying at once collide on `teams_comp_bid_code_unique` — the loser retries rather than being handed the failed SQL. **No division field** ([ADR-0010](decisions/0010-a-comp-is-one-division.md)), and no custom fields yet. | — | ADR-0010, `teams`, `people`, `comps.registration` |
+| **A2** | Application → acceptance → waitlist | **Live** | The status lifecycle as one total transition map. Dropping a team that held a slot promotes the top of the waitlist, and the two land **in the same transaction** ([ADR-0012](decisions/0012-transactions-for-writes-that-span-statements.md)) or neither does. The roster freezes at the lock — reinstating a dropped team afterwards would hand it back scores it had already been given ([ADR-0009](decisions/0009-teams-is-the-roster-of-record.md)). Two gaps, both deliberate: obligations are *not* reconciled (there are no `charges`, so the balance half waits for Phase 02), and a board cannot yet **order** its own waitlist — `waitlist_rank` is read but never written by the product, so promotion falls back to a deterministic id-order tiebreak. | A1 | ADR-0009, ADR-0012, `teams.status`, `transitions.ts` |
+| **A3** | Roster + payment status, one record | Designed | Joined by design, eliminating the acceptance-doc-vs-Venmo split. The structural fix, not a report. **Needs `charges`, which do not exist** — this is the easiest thing to drift into and the line where the gate still holds. It also sits on top of a question ADR-0012 explicitly reserved for the founding partners: whether Callboard routes money at all. | A2, `charges` | ADR-0012, PRD A3 |
+| **A4** | Team submission portal | Designed | Post-acceptance materials: final music, roster updates, emergency contacts — a team-facing filtered view of the same record. **Not as free as it looks.** It needs a third actor kind (`Actor` is still `BoardActor \| JudgeActor`), a `team_assignments` table, and a migration widening `audit_log`'s `actor_kind` check. Above all it needs a **link**, and nothing mints one — that is [ADR-0011](decisions/0011-nothing-mints-a-link.md), a decision, not an oversight. | a third actor kind; a link-minting path ([ADR-0011](decisions/0011-nothing-mints-a-link.md)) | ADR-0011, PRD A4 |
 
 ---
 
@@ -99,13 +101,13 @@ What Module A needs underneath it. Real accounts arrive only when there is somet
 
 ---
 
-## Phase 04 — Adjacent tier · reads the same record · **Mostly designed**
+## Phase 04 — Adjacent tier · reads the same record · **1 live · 3 designed**
 
 Nearly free because it reads the record that already exists. One piece already shipped with Module B.
 
 | ID | Feature | Status | Detail | Source |
 |---|---|---|---|---|
-| **ADJ·1** | Per-team score export | **Live** | Already shipped as the Module B feedback CSV — scores and notes per team, from the frozen snapshot. | `export/feedback.ts` |
+| **ADJ·1** | Per-team feedback export | **Live** | Shipped as B8's feedback CSV — one file per team, carrying its placement, its deduction and reason, and each judge's note under `Judge N`. It carries **no scores**, deliberately ([ADR-0008](decisions/0008-judge-scores-are-de-identified.md)): a team learns what the judges *said*, not what they gave. Same export as B8, listed here because it is what the adjacent tier asks for and it is already met. | ADR-0008, `export/feedback.ts` |
 | **ADJ·2** | Judge feedback delivery | Designed | Notes are captured and exportable; *delivering* them to each team (email/portal) is the unbuilt half. Needs P1, comms. | `judge_notes` |
 | **ADJ·3** | Public read-only info page | Designed | The brochure/general-info view an attendee sees — a filtered projection, no auth. | PRD §7.2 |
 | **ADJ·4** | Food timing | Designed | The hospitality slice that already lives inside the Gita's derivation, surfaced on its own. | `schedule_segments` |
