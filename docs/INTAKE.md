@@ -31,6 +31,10 @@ Plain answers are fine. Send it in a doc, an email, a spreadsheet, a voice note.
 - Performance order, if you have it.
 - **If you run divisions, send each one separately** — its own teams, its own judges, its own score sheet (they are usually different anyway). A division is scored as its own competition, because that is what it is: nobody places a classical team against a fusion team. You get a board screen and a set of judge links per division. Say so up front if you run more than one, since it changes what the score sheet section above is asking for.
 
+**Your registration form**, if you want teams to apply through it rather than being seeded.
+- We collect team name, school, roster size, an audition-video link and a waiver acknowledgment as standard. **Anything else you ask, send us the questions** — the wording you want, and whether it is free text, a number, a dropdown (with its options), or a checkbox.
+- Each question gets a short id we store the answers under. **Once applications start arriving, that id is frozen.** Rewording a question is fine and costs nothing; renaming or removing its id orphans every answer already filed, because an answer is stored against the id and is meaningless without the question. So it is worth spending a minute on the list before it goes live, and it is not worth panicking about the wording.
+
 **The people**
 - Judges: names (emails if you have them). Each gets a private link, one per phone.
 - Board: names of whoever should see live results and lock the final placements. Board links are **per person**, not per board, because every lock and every override is attributed to a human being ([ADR-0007](decisions/0007-board-links-are-per-person.md)).
