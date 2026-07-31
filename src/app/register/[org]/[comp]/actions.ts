@@ -1,5 +1,6 @@
 "use server";
 
+import { collectAnswers } from "@/lib/comp/fields";
 import { apply, openRegistration } from "@/lib/comp/registration";
 import type { ApplicationValues, ApplyState } from "./state";
 
@@ -26,6 +27,9 @@ export const applyAction = async (
     rosterSize: String(formData.get("rosterSize") ?? ""),
     auditionUrl: String(formData.get("auditionUrl") ?? ""),
     waiverAccepted: formData.get("waiver") === "on",
+    // Collected by prefix rather than from the comp's field list, which is not known yet — so a
+    // refusal that happens *before* the comp resolves still hands back what the applicant typed.
+    custom: collectAnswers(formData.entries()),
   };
 
   const open = await openRegistration(orgSlug, compSlug);
@@ -52,6 +56,7 @@ export const applyAction = async (
       rosterSize: Number(values.rosterSize),
       auditionUrl: values.auditionUrl || null,
       waiverAccepted: values.waiverAccepted,
+      custom: values.custom,
     });
 
     if (!result.ok) return { status: "error", message: result.message, values };

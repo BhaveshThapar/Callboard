@@ -158,4 +158,110 @@ describe("parseCompConfig", () => {
       });
     });
   });
+
+  /**
+   * The registration block is the public form, and the config is the only door it comes through —
+   * so a form that cannot be rendered, or whose answers cannot be checked, has to be refused here
+   * rather than discovered by a captain at 1am on the deadline.
+   */
+  describe("registration", () => {
+    const withRegistration = (registration: unknown): Record<string, unknown> => ({
+      ...valid(),
+      registration,
+    });
+
+    const base = { waiverText: "Compete at your own risk.", requireAuditionUrl: true };
+
+    it("keeps the form a board authored, and defaults requireAuditionUrl to false", () => {
+      const parsed = parseCompConfig(withRegistration({ waiverText: "Risk." }));
+      expect(parsed.registration).toEqual({
+        waiverText: "Risk.",
+        requireAuditionUrl: false,
+        maxRosterSize: undefined,
+        fields: undefined,
+      });
+    });
+
+    it("requires the waiver text, because it is the board's own and has no default", () => {
+      expect(() => parseCompConfig(withRegistration({ requireAuditionUrl: true }))).toThrow(
+        /registration.waiverText/,
+      );
+    });
+
+    it("refuses a roster cap of zero", () => {
+      expect(() => parseCompConfig(withRegistration({ ...base, maxRosterSize: 0 }))).toThrow(
+        /registration.maxRosterSize: expected a value above zero/,
+      );
+    });
+
+    it("refuses a division field on the form (ADR-0010)", () => {
+      expect(() => parseCompConfig(withRegistration({ ...base, division: "fusion" }))).toThrow(
+        /registration.division.*ADR-0010/s,
+      );
+    });
+
+    describe("custom fields", () => {
+      const fields = (...f: unknown[]) => withRegistration({ ...base, fields: f });
+
+      it("keeps a board's own questions, in the order it asked them", () => {
+        const parsed = parseCompConfig(
+          fields(
+            { id: "props", label: "Props needed", type: "text", required: true, maxLength: 200 },
+            { id: "arrival", label: "Arrival", type: "select", options: ["Friday", "Saturday"] },
+          ),
+        );
+
+        expect(parsed.registration?.fields?.map((f) => f.id)).toEqual(["props", "arrival"]);
+        expect(parsed.registration?.fields?.[0]?.required).toBe(true);
+        expect(parsed.registration?.fields?.[1]?.required).toBe(false);
+        expect(parsed.registration?.fields?.[1]?.options).toEqual(["Friday", "Saturday"]);
+      });
+
+      // The id is the key answers are stored under, so a duplicate is one question silently
+      // overwriting another's answers — which is unrecoverable once applications start arriving.
+      it("refuses two fields sharing an id", () => {
+        expect(() =>
+          parseCompConfig(
+            fields({ id: "props", label: "A", type: "text" }, { id: "props", label: "B", type: "text" }),
+          ),
+        ).toThrow(/no other field uses/);
+      });
+
+      // The id names a key in `teams.custom_answers` forever, so it is constrained to something
+      // that stays readable in the raw json a board may one day be handed.
+      it("refuses an id that is not a usable storage key", () => {
+        for (const id of ["Props Needed", "teamName", "9lives", "props-needed", ""]) {
+          expect(() => parseCompConfig(fields({ id, label: "X", type: "text" }))).toThrow(
+            /registration.fields\[0\].id/,
+          );
+        }
+      });
+
+      it("refuses a type nothing can render", () => {
+        expect(() => parseCompConfig(fields({ id: "props", label: "X", type: "file" }))).toThrow(
+          /registration.fields\[0\].type: expected one of/,
+        );
+      });
+
+      it("refuses a select with fewer than two choices", () => {
+        expect(() =>
+          parseCompConfig(fields({ id: "arrival", label: "X", type: "select", options: ["Friday"] })),
+        ).toThrow(/at least two choices/);
+      });
+
+      it("refuses a select with no choices at all", () => {
+        expect(() => parseCompConfig(fields({ id: "arrival", label: "X", type: "select" }))).toThrow(
+          /registration.fields\[0\].options/,
+        );
+      });
+
+      it("names the offending field by index, so a long form says which one", () => {
+        expect(() =>
+          parseCompConfig(
+            fields({ id: "ok", label: "Fine", type: "text" }, { id: "bad", type: "text" }),
+          ),
+        ).toThrow(/registration.fields\[1\].label/);
+      });
+    });
+  });
 });

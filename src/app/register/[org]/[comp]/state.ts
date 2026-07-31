@@ -14,6 +14,13 @@ export type ApplicationValues = {
   rosterSize: string;
   auditionUrl: string;
   waiverAccepted: boolean;
+  /**
+   * The comp's own questions, keyed by field id and kept as raw strings — including a checkbox,
+   * which echoes back as `"on"` or `""`. Nothing here is coerced: this is what the applicant typed,
+   * on its way back into the form they typed it in, and the moment it is parsed it stops being
+   * that. The parsed shape is `validateAnswers`' business and lands in `teams.custom_answers`.
+   */
+  custom: Record<string, string>;
 };
 
 export type ApplyState =
@@ -31,4 +38,5 @@ export const EMPTY: ApplicationValues = {
   rosterSize: "",
   auditionUrl: "",
   waiverAccepted: false,
+  custom: {},
 };

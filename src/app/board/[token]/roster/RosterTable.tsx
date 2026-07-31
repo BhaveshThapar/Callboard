@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
-import type { TeamStatus } from "@/db/schema";
+import type { CustomField, TeamStatus } from "@/db/schema";
 import type { RosterTeamView } from "@/lib/auth/scope";
 import { allowedFrom } from "@/lib/roster/transitions";
 import { setTeamStatusAction, setWaitlistRankAction } from "../actions";
@@ -26,10 +26,19 @@ const STATUS_TONE: Record<TeamStatus, string> = {
  * one worth saying out loud rather than rendering as a blank cell. A seeded team never applied and
  * has neither, so "—" means "there was no application", not "the application was empty".
  */
-function ApplicationCell({ team }: { team: RosterTeamView }) {
+function ApplicationCell({ team, fields }: { team: RosterTeamView; fields: CustomField[] }) {
   if (!team.auditionUrl && !team.waiverAcceptedAt) {
     return <span className="text-caption text-subtle">—</span>;
   }
+
+  // Driven by the comp's field list rather than by the answer map's own keys, so the board reads
+  // its questions in the order it asked them — and a question added after this team applied shows
+  // as unanswered rather than silently vanishing.
+  const answered = fields.flatMap((field) => {
+    const value = team.customAnswers?.[field.id];
+    if (value === undefined) return [];
+    return [{ field, text: typeof value === "boolean" ? (value ? "yes" : "no") : String(value) }];
+  });
 
   return (
     <div className="flex flex-col gap-0.5">
@@ -57,6 +66,16 @@ function ApplicationCell({ team }: { team: RosterTeamView }) {
       ) : (
         <span className="text-micro text-danger">no waiver</span>
       )}
+      {answered.map(({ field, text }) => (
+        <span
+          key={field.id}
+          data-testid={`roster-answer-${team.bidCode}-${field.id}`}
+          className="text-micro text-subtle"
+        >
+          <span className="text-subtle">{field.label}:</span>{" "}
+          <span className="text-muted">{text}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -65,10 +84,12 @@ export function RosterTable({
   token,
   roster,
   locked,
+  fields,
 }: {
   token: string;
   roster: RosterTeamView[];
   locked: boolean;
+  fields: CustomField[];
 }) {
   const [state, formAction, pending] = useActionState(setTeamStatusAction, IDLE);
   const [rankState, rankAction, rankPending] = useActionState(setWaitlistRankAction, IDLE);
@@ -141,7 +162,7 @@ export function RosterTable({
               <td className="tabular py-2.5 pr-3 text-muted">{team.bidCode}</td>
               <td className="tabular py-2.5 pr-3 text-muted">{team.rosterSize ?? "—"}</td>
               <td className="py-2.5 pr-3">
-                <ApplicationCell team={team} />
+                <ApplicationCell team={team} fields={fields} />
               </td>
               <td className="py-2.5 pr-3">
                 <span className={cx(pillClass, STATUS_TONE[team.status])}>{team.status}</span>
