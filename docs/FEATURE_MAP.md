@@ -96,7 +96,7 @@ What Module A needs underneath it. Real accounts arrive only when there is somet
 | ID | Feature | Detail | Source |
 |---|---|---|---|
 | **P1** | Real board accounts | Email, password, sessions — replacing the per-person signed link once a board manages money and rosters across a whole comp. | ARCHITECTURE.md, `board_assignments` |
-| **P2** | Setup UI *(deferred)* | Rubric builder, roster import, board-account management. Deliberately deferred: a founder runs the seed script by hand for founding customers. | PRD §12, `seed-cli.ts` |
+| **P2** | Setup UI *(deferred)* | Rubric builder, roster import, board-account management. Deliberately deferred: a founder runs the seed script by hand for founding customers — one config and one seed per comp, and a board running two divisions is a board running two comps ([ADR-0013](decisions/0013-a-seed-replaces-a-comp-not-an-org.md)). | ADR-0013, PRD §12, `seed-cli.ts` |
 | **P3** | Postgres RLS hardening | Tenancy is app-layer today (every table carries `comp_id`, reads pass through the scope module). RLS is the eventual hardening, not a pre-first-customer task. | ADR-0006, `scope.ts` |
 
 ---

@@ -25,7 +25,7 @@ The second and third are the ones that will actually bite a comp, and they canno
 
 - **It refuses the last live link.** A board that revoked its way to zero would be locked out of its own comp, mid-night, with no instrument to get back in — because of the rest of this ADR. The button is hidden when one link remains; the *server* is what refuses, because the button is not the guarantee.
 
-**Minting stays unbuilt, and that is a decision, not an oversight.** Callboard has exactly one code path that issues a link, `seedFromConfig`, and it deletes the org by slug before it writes — so it reissues *every* token for the comp. It cannot add a judge without revoking the eight already scoring. `seed-cli` already knows this and refuses to reseed an org whose links are live, which means that on comp day there is genuinely no path: not a blocked one, not a dangerous one, **none**.
+**Minting stays unbuilt, and that is a decision, not an oversight.** Callboard has exactly one code path that issues a link, `seedFromConfig`, and it deletes the comp before it writes ([ADR-0013](0013-a-seed-replaces-a-comp-not-an-org.md)) — so it reissues *every* token for that comp. It cannot add a judge without revoking the eight already scoring. `seed-cli` already knows this and refuses to reseed a comp whose links are live, which means that on comp day there is genuinely no path: not a blocked one, not a dangerous one, **none**.
 
 ## Consequences
 
