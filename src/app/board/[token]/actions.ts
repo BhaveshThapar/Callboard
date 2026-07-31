@@ -13,7 +13,7 @@ import {
 } from "@/db/schema";
 import type { TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import { setTeamStatus } from "@/lib/roster/roster";
+import { setTeamStatus, setWaitlistRank } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
   NOT_COMPETING,
@@ -368,6 +368,33 @@ export const setTeamStatusAction = async (
       ? `Dropped. ${result.promoted.name} was promoted off the waitlist into the slot.`
       : `Team is now ${to}.`,
   };
+};
+
+/**
+ * The other half of the waitlist (A2): a board could append to its queue but not rearrange it, so
+ * arrival order was the only order it could ever have. A board that has decided a team should go
+ * first now has an instrument to say so, instead of dropping and re-waitlisting teams to fake one.
+ */
+export const setWaitlistRankAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const teamId = String(formData.get("teamId") ?? "");
+  const direction = String(formData.get("direction") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (direction !== "up" && direction !== "down") {
+    return { status: "error", message: "That is not a direction." };
+  }
+
+  const result = await setWaitlistRank(actor, teamId, direction);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/roster`);
+  return { status: "ok", message: "Waitlist reordered." };
 };
 
 export const addDeductionAction = async (

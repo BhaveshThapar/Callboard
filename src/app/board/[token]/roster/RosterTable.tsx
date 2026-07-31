@@ -5,8 +5,11 @@ import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
 import type { TeamStatus } from "@/db/schema";
 import type { RosterTeamView } from "@/lib/auth/scope";
 import { allowedFrom } from "@/lib/roster/transitions";
-import { setTeamStatusAction } from "../actions";
+import { setTeamStatusAction, setWaitlistRankAction } from "../actions";
 import { IDLE } from "../state";
+
+const stepClass =
+  "rounded border border-border px-1 text-micro leading-4 text-muted transition-colors hover:border-primary hover:text-primary disabled:opacity-30 disabled:hover:border-border disabled:hover:text-muted";
 
 const STATUS_TONE: Record<TeamStatus, string> = {
   applied: "bg-hover text-muted",
@@ -68,11 +71,20 @@ export function RosterTable({
   locked: boolean;
 }) {
   const [state, formAction, pending] = useActionState(setTeamStatusAction, IDLE);
+  const [rankState, rankAction, rankPending] = useActionState(setWaitlistRankAction, IDLE);
 
   const counts = roster.reduce<Record<string, number>>((acc, team) => {
     acc[team.status] = (acc[team.status] ?? 0) + 1;
     return acc;
   }, {});
+
+  // Which team is at each end of the queue, so the button that cannot do anything says so. This
+  // reads the *displayed* order, which is the board's own view of the list; the server resolves the
+  // move against the promotion order and refuses a boundary itself, because the button is not the
+  // guarantee. The two agree except on teams sharing a rank, where neither order is stated.
+  const queue = roster.filter((team) => team.status === "waitlisted");
+  const firstInQueue = queue[0]?.id;
+  const lastInQueue = queue[queue.length - 1]?.id;
 
   return (
     <div className={cardClass}>
@@ -141,6 +153,29 @@ export function RosterTable({
                     #{team.waitlistRank}
                   </span>
                 )}
+                {team.status === "waitlisted" && !locked && (
+                  <span className="ml-1.5 inline-flex gap-0.5 align-middle">
+                    {(["up", "down"] as const).map((direction) => (
+                      <form key={direction} action={rankAction} className="inline">
+                        <input type="hidden" name="token" value={token} />
+                        <input type="hidden" name="teamId" value={team.id} />
+                        <input type="hidden" name="direction" value={direction} />
+                        <button
+                          type="submit"
+                          disabled={
+                            rankPending ||
+                            team.id === (direction === "up" ? firstInQueue : lastInQueue)
+                          }
+                          data-testid={`rank-${team.bidCode}-${direction}`}
+                          aria-label={`Move ${team.name} ${direction} the waitlist`}
+                          className={stepClass}
+                        >
+                          {direction === "up" ? "↑" : "↓"}
+                        </button>
+                      </form>
+                    ))}
+                  </span>
+                )}
               </td>
               {!locked && (
                 <td className="py-2.5">
@@ -167,6 +202,19 @@ export function RosterTable({
           ))}
         </tbody>
       </table>
+
+      {rankState.message && (
+        <p
+          role="status"
+          data-testid="roster-rank-message"
+          className={cx(
+            "mt-3 text-caption",
+            rankState.status === "error" ? "text-danger" : "text-muted",
+          )}
+        >
+          {rankState.message}
+        </p>
+      )}
 
       {state.message && (
         <p
