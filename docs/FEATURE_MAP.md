@@ -14,7 +14,7 @@ This map **sequences; it does not authorize.** The PRD argues against building (
 | **Designed** | specced in `docs/`, not built |
 | **Won't build** | the tarpit — stays in the tools that already do it |
 
-Counts: **13 live** — 10 (Module B) + 2 (Module A) + 1 (Adjacent) · **12 designed** (Module A) · **6 designed** (the Gita) · the rest below.
+Counts: **14 live** — 10 (Module B) + 2 (Module A) + 2 (Adjacent) · **12 designed** (Module A) · **6 designed** (the Gita) · the rest below.
 
 ---
 
@@ -101,15 +101,15 @@ What Module A needs underneath it. Real accounts arrive only when there is somet
 
 ---
 
-## Phase 04 — Adjacent tier · reads the same record · **1 live · 3 designed**
+## Phase 04 — Adjacent tier · reads the same record · **2 live · 2 designed**
 
-Nearly free because it reads the record that already exists. One piece already shipped with Module B.
+Nearly free because it reads the record that already exists. One piece shipped with Module B; the public page is the cheapest thing in the repo, being a projection with no auth and no new table.
 
 | ID | Feature | Status | Detail | Source |
 |---|---|---|---|---|
 | **ADJ·1** | Per-team feedback export | **Live** | Shipped as B8's feedback CSV — one file per team, carrying its placement, its deduction and reason, and each judge's note under `Judge N`. It carries **no scores**, deliberately ([ADR-0008](decisions/0008-judge-scores-are-de-identified.md)): a team learns what the judges *said*, not what they gave. Same export as B8, listed here because it is what the adjacent tier asks for and it is already met. | ADR-0008, `export/feedback.ts` |
 | **ADJ·2** | Judge feedback delivery | Designed | Notes are captured and exportable; *delivering* them to each team (email/portal) is the unbuilt half. Needs P1, comms. | `judge_notes` |
-| **ADJ·3** | Public read-only info page | Designed | The brochure/general-info view an attendee sees — a filtered projection, no auth. | PRD §7.2 |
+| **ADJ·3** | Public read-only info page | **Live** | The attendee's view at `/c/[org]/[comp]`: the comp's facts, a link to the form while registration is open, who is competing, and — once a result is locked — the placements. The second read in the product with no `Actor`, on `openRegistration`'s terms: the projection *is* the scope. It carries **no bid code**, because a judge is a member of the public and a public name-to-code pairing would end blind judging for that comp ([ADR-0008](decisions/0008-judge-scores-are-de-identified.md)); **no scores** (PRD B8); and only the teams actually in the comp, because whether a team was waitlisted or turned away is the board's business. Placements are read from the frozen snapshot and disappear if it stops reproducing — a result the product cannot verify is not one to publish. A `draft` comp 404s exactly as a nonexistent one does. | ADR-0008, PRD §7.2, `comp/public.ts` |
 | **ADJ·4** | Food timing | Designed | The hospitality slice that already lives inside the Gita's derivation, surfaced on its own. | `schedule_segments` |
 
 ---
