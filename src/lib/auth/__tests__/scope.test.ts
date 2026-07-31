@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { judgeLabel } from "../labels";
 import type { JudgeLabelView } from "../labels";
+import type { PublicComp, PublicPlacement, PublicTeam } from "@/lib/comp/public";
 import type { BoardJudgeView, BoardTeamView, JudgeTeamView } from "../scope";
 
 /**
@@ -28,6 +29,27 @@ describe("the projections", () => {
 
   it("still lets the board name a judge to send them a link and chase them", () => {
     expectTypeOf<BoardJudgeView>().toHaveProperty("name");
+  });
+
+  /**
+   * The attendee's projection is the widest audience in the product, so it is the one where a
+   * leaked field is least recoverable. A bid code here is the worst of them: the judge whose whole
+   * view is bid codes can read this page, and a public name-to-code mapping is the end of blind
+   * judging for that comp. Nothing else on the page is secret, which is exactly why this one is
+   * asserted rather than assumed.
+   */
+  it("gives the public no way to pair a team with the bid code its judges see", () => {
+    expectTypeOf<PublicTeam>().not.toHaveProperty("bidCode");
+    expectTypeOf<PublicTeam>().not.toHaveProperty("id");
+    expectTypeOf<PublicPlacement>().not.toHaveProperty("bidCode");
+    expectTypeOf<PublicPlacement>().not.toHaveProperty("teamId");
+  });
+
+  it("gives the public a placement without the numbers behind it", () => {
+    expectTypeOf<PublicPlacement>().toHaveProperty("place");
+    expectTypeOf<PublicPlacement>().not.toHaveProperty("aggregate");
+    expectTypeOf<PublicPlacement>().not.toHaveProperty("judgeCount");
+    expectTypeOf<PublicComp>().not.toHaveProperty("scores");
   });
 });
 
