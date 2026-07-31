@@ -5,6 +5,7 @@ import { CheckCircleIcon } from "@/components/icons";
 import { cardClass, cx, inputClass, primaryButtonClass } from "@/components/styles";
 import type { OpenRegistration } from "@/lib/comp/registration";
 import { applyAction } from "./actions";
+import { CustomFields } from "./CustomFields";
 import { EMPTY, IDLE } from "./state";
 
 const labelClass = "text-body font-medium text-heading";
@@ -139,6 +140,14 @@ export function RegistrationForm({
           />
         </div>
 
+        {/* The comp's own questions sit after everything the product asks and before the waiver,
+            which stays last: it is the acknowledgment of the whole form above it. */}
+        {open.form.fields && open.form.fields.length > 0 && (
+          <div className="space-y-4 border-t border-border-soft pt-4" data-testid="custom-fields">
+            <CustomFields fields={open.form.fields} was={was.custom} />
+          </div>
+        )}
+
         <div className="border-t border-border-soft pt-4">
           <p className="text-caption whitespace-pre-line text-muted">{open.form.waiverText}</p>
           <label className="mt-3 flex items-start gap-2.5 text-body text-heading">
@@ -160,7 +169,7 @@ export function RegistrationForm({
       </button>
 
       {state.status === "error" && (
-        <p role="alert" className="mt-3 text-caption text-danger">
+        <p role="alert" data-testid="apply-error" className="mt-3 text-caption text-danger">
           {state.message}
         </p>
       )}

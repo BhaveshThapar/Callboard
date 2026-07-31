@@ -1,4 +1,5 @@
-import type { CompStatus, RegistrationConfig } from "@/db/schema/orgs";
+import { CUSTOM_FIELD_TYPES } from "@/db/schema/orgs";
+import type { CompStatus, CustomField, RegistrationConfig } from "@/db/schema/orgs";
 import { TEAM_STATUSES } from "@/db/schema/teams";
 import type { TeamStatus } from "@/db/schema/teams";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
@@ -98,6 +99,58 @@ const tiebreaker = (value: unknown, path: string): ConfigTiebreaker => {
     return { kind, criterion: str(raw.criterion, `${path}.criterion`) };
   }
   return { kind };
+};
+
+/**
+ * A field id is a storage key, not a label: it names a column in `teams.custom_answers` forever.
+ * Constraining it to lowercase snake_case keeps it readable in the raw json a board may one day be
+ * handed, and keeps it distinguishable at a glance from the camelCase names the built-in half of
+ * the form uses — which it never has to be checked against, because the two live in separate
+ * namespaces (`CUSTOM_FIELD_PREFIX`) rather than in one namespace policed by a list.
+ */
+const FIELD_ID = /^[a-z][a-z0-9_]*$/;
+
+/**
+ * One board-authored question. Refused at the door, because this is the only door: the config is
+ * both the form and the schema its answers are validated against, so a field that cannot be
+ * rendered or cannot be checked must never reach a comp.
+ *
+ * `id` is constrained hardest because it is the key answers are stored under. It is also the one
+ * thing a board must not edit after applications start arriving — renaming it orphans every answer
+ * already filed — which the shape cannot enforce and `INTAKE.md` has to say out loud.
+ */
+const customField = (value: unknown, path: string, seen: Set<string>): CustomField => {
+  const raw = record(value, path);
+
+  const id = str(raw.id, `${path}.id`);
+  if (!FIELD_ID.test(id)) {
+    fail(`${path}.id`, "a lowercase key like `props_needed` — it is the key answers are stored under");
+  }
+  if (seen.has(id)) fail(`${path}.id`, `an id no other field uses (not "${id}" twice)`);
+  seen.add(id);
+
+  const type = oneOf(raw.type, CUSTOM_FIELD_TYPES, `${path}.type`);
+
+  const options =
+    type === "select"
+      ? array(raw.options, `${path}.options`).map((o, i) => str(o, `${path}.options[${i}]`))
+      : undefined;
+  if (options && options.length < 2) {
+    fail(`${path}.options`, "at least two choices — a choice of one is a statement, not a question");
+  }
+
+  const maxLength = optInt(raw.maxLength, `${path}.maxLength`);
+  if (maxLength !== undefined && maxLength <= 0) fail(`${path}.maxLength`, "a value above zero");
+
+  return {
+    id,
+    label: str(raw.label, `${path}.label`),
+    type,
+    required: raw.required === true,
+    help: optStr(raw.help, `${path}.help`),
+    options,
+    maxLength,
+  };
 };
 
 /**
@@ -224,12 +277,21 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
       );
     }
 
+    const seen = new Set<string>();
+    const fields =
+      r.fields === undefined || r.fields === null
+        ? undefined
+        : array(r.fields, "registration.fields").map((f, i) =>
+            customField(f, `registration.fields[${i}]`, seen),
+          );
+
     return {
       // The waiver is the one thing a board cannot be given a default for: it is their text, and
       // `waiver_accepted_at` records that an applicant accepted *it*.
       waiverText: str(r.waiverText, "registration.waiverText"),
       requireAuditionUrl: r.requireAuditionUrl === true,
       maxRosterSize,
+      fields,
     };
   })();
 

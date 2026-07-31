@@ -83,6 +83,29 @@
   "registration": {
     "waiverText": "Teams compete at their own risk. The host org is not liable for injury, loss, or damage to property. By applying you confirm every dancer on your roster has been made aware of this.",
     "requireAuditionUrl": true,
-    "maxRosterSize": 30
+    "maxRosterSize": 30,
+    "fields": [
+      {
+        "id": "props_needed",
+        "label": "Props needed",
+        "type": "text",
+        "required": false,
+        "help": "Anything the crew has to carry on or off. Leave blank if none.",
+        "maxLength": 200
+      },
+      {
+        "id": "arrival_day",
+        "label": "Arrival day",
+        "type": "select",
+        "required": true,
+        "options": ["Friday", "Saturday morning"]
+      },
+      {
+        "id": "photo_consent",
+        "label": "Happy to be photographed for promotional use",
+        "type": "checkbox",
+        "required": false
+      }
+    ]
   }
 }

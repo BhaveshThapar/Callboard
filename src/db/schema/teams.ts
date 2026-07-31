@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
-import { check, integer, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import { check, integer, json, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
+import type { CustomAnswer } from "./orgs";
 import { comps, people } from "./orgs";
 
 /** One definition: the type, the check constraint, and the board's form all derive from this. */
@@ -54,6 +55,18 @@ export const teams = pgTable(
      * event, and this is the column a board would be asked to produce if anything ever went wrong.
      */
     waiverAcceptedAt: timestamp("waiver_accepted_at", { withTimezone: true }),
+    /**
+     * Answers to the questions this comp added to its own form, keyed by `CustomField.id`.
+     *
+     * `json`, not `jsonb`, for `tab_runs`' reason: jsonb reorders keys and collapses duplicates, and
+     * what a team submitted should come back as what it submitted. Null for a seeded team and for a
+     * comp that asked nothing, which are the same fact — there was no application to answer.
+     *
+     * A column rather than a table because an answer has no life of its own: it is never queried
+     * across teams, never updated, and dies with the team it describes. The questions it is keyed
+     * against live in `comps.registration`, which is the only thing that can say what was asked.
+     */
+    customAnswers: json("custom_answers").$type<Record<string, CustomAnswer>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
