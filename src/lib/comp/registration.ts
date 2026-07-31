@@ -17,7 +17,8 @@ export type OpenRegistration = {
 };
 
 /**
- * The public form's only read, and the only unauthenticated read in the product.
+ * The public form's only read, and the first of the two unauthenticated reads in the product.
+ * `publicComp` in `./public.ts` is the other, and it was written against this one's rule.
  *
  * There is no `Actor` here — an applicant is nobody yet, which is the point of registration — so
  * this returns exactly the fields a stranger may see and no others. It never selects a team, a
