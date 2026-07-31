@@ -134,7 +134,12 @@ export function RosterTable({
               <td className="py-2.5 pr-3">
                 <span className={cx(pillClass, STATUS_TONE[team.status])}>{team.status}</span>
                 {team.status === "waitlisted" && team.waitlistRank !== null && (
-                  <span className="ml-1.5 text-micro text-subtle">#{team.waitlistRank}</span>
+                  <span
+                    data-testid={`roster-rank-${team.bidCode}`}
+                    className="ml-1.5 text-micro text-subtle"
+                  >
+                    #{team.waitlistRank}
+                  </span>
                 )}
               </td>
               {!locked && (
