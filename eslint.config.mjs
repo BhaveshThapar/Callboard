@@ -2,6 +2,16 @@ import { FlatCompat } from "@eslint/eslintrc";
 
 const compat = new FlatCompat({ baseDirectory: import.meta.dirname });
 
+const NO_ENUM = {
+  selector: "TSEnumDeclaration",
+  message: "Use a string literal union instead of an enum.",
+};
+
+const NO_CLASS = {
+  selector: "ClassDeclaration, ClassExpression",
+  message: "Functional. Use a function and a type.",
+};
+
 const config = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
@@ -18,13 +28,7 @@ const config = [
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/consistent-type-definitions": ["error", "type"],
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector: "TSEnumDeclaration",
-          message: "Use a string literal union instead of an enum.",
-        },
-      ],
+      "no-restricted-syntax": ["error", NO_ENUM, NO_CLASS],
     },
   },
   {
@@ -46,12 +50,13 @@ const config = [
           ],
         },
       ],
+      // This block *replaces* `no-restricted-syntax` rather than merging into it, so the shared
+      // selectors are repeated here on purpose: drop them and the enum and class bans quietly stop
+      // applying to exactly the directory that most needs them.
       "no-restricted-syntax": [
         "error",
-        {
-          selector: "TSEnumDeclaration",
-          message: "Use a string literal union instead of an enum.",
-        },
+        NO_ENUM,
+        NO_CLASS,
         {
           selector: "MemberExpression[object.name='Date'][property.name='now']",
           message: "src/lib/tabulation/ is pure. Pass the time in on TabulationInput instead.",
