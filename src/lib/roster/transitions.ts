@@ -47,6 +47,19 @@ export const nextOffWaitlist = (waitlisted: readonly WaitlistEntry[]): string | 
 };
 
 /**
+ * The rank a team joining the waitlist gets: the end of the queue. Arrival order is the only order
+ * a board has not had to state, and it is the one they assume is running -- "we waitlisted them in
+ * the order they applied" is what a treasurer will say out loud when a slot opens.
+ *
+ * Unranked rows are skipped rather than counted, so a comp seeded with some ranks and some nulls
+ * still appends past the highest *stated* rank instead of colliding with it.
+ */
+export const nextWaitlistRank = (existing: readonly (number | null)[]): number => {
+  const ranked = existing.filter((r): r is number => r !== null);
+  return ranked.length === 0 ? 1 : Math.max(...ranked) + 1;
+};
+
+/**
  * Dropping an `accepted` or `competing` team frees a slot, so the waitlist moves. Dropping one that
  * was only `applied` or `waitlisted` frees nothing, because it never held a slot.
  */

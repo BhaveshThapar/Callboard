@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { SCOREABLE_STATUSES, type TeamStatus } from "@/db/schema";
-import { allowedFrom, canTransition, dropFreesASlot, nextOffWaitlist } from "../transitions";
+import {
+  allowedFrom,
+  canTransition,
+  dropFreesASlot,
+  nextOffWaitlist,
+  nextWaitlistRank,
+} from "../transitions";
 
 const ALL: TeamStatus[] = ["applied", "waitlisted", "accepted", "dropped", "competing"];
 
@@ -90,6 +96,41 @@ describe("nextOffWaitlist", () => {
 
   it("returns null on an empty waitlist rather than inventing a promotion", () => {
     expect(nextOffWaitlist([])).toBeNull();
+  });
+});
+
+describe("nextWaitlistRank", () => {
+  it("starts at 1 on an empty waitlist", () => {
+    expect(nextWaitlistRank([])).toBe(1);
+  });
+
+  it("appends past the highest rank, so a joiner never jumps the queue", () => {
+    expect(nextWaitlistRank([1, 2, 3])).toBe(4);
+  });
+
+  // Ranks are not re-normalized when a team is promoted or dropped, so the list a board is
+  // actually holding has gaps in it. Appending past the maximum is what keeps arrival order
+  // intact through those gaps; appending past the *count* would reissue a rank still in use.
+  it("appends past the maximum, not the count, when the list has gaps", () => {
+    expect(nextWaitlistRank([2, 5])).toBe(6);
+  });
+
+  it("ignores unranked rows rather than counting them", () => {
+    expect(nextWaitlistRank([null, 3, null])).toBe(4);
+    expect(nextWaitlistRank([null, null])).toBe(1);
+  });
+
+  // The rank it hands out has to be one `nextOffWaitlist` will put last, or appending is a lie.
+  it("hands out a rank that sorts behind everyone already waiting", () => {
+    const waiting = [
+      { id: "first", waitlistRank: 1 },
+      { id: "second", waitlistRank: 2 },
+    ];
+    const joined = [...waiting, { id: "third", waitlistRank: nextWaitlistRank([1, 2]) }];
+
+    expect(nextOffWaitlist(joined)).toBe("first");
+    expect(nextOffWaitlist(joined.filter((t) => t.id !== "first"))).toBe("second");
+    expect(nextOffWaitlist(joined.filter((t) => t.id === "third"))).toBe("third");
   });
 });
 

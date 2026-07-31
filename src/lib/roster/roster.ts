@@ -6,13 +6,35 @@ import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
 import { resolveRosterTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
-import { canTransition, dropFreesASlot, nextOffWaitlist } from "./transitions";
+import { canTransition, dropFreesASlot, nextOffWaitlist, nextWaitlistRank } from "./transitions";
 
 export type RosterChange =
   | { ok: true; promoted: { id: string; name: string } | null }
   | { ok: false; message: string };
 
 const LOCKED = "Results are locked. The roster can no longer change.";
+
+/**
+ * The rank for a team joining this comp's waitlist. Read-then-write, and deliberately not in a
+ * transaction: two board members waitlisting two teams in the same second can both read the same
+ * maximum and land on the same rank. That is a tie, not a fork -- `nextOffWaitlist` already breaks
+ * ties by id, so the pair degrades to exactly the arbitrary-but-deterministic order that used to
+ * govern the whole list, and every other team keeps its stated position.
+ *
+ * A `unique(comp_id, waitlist_rank)` would turn that tie into a *refusal*, which is the wrong
+ * remedy: registration crush is when two people work the roster at once, and a board being told
+ * "could not waitlist that team" because a colleague clicked first is worse than two teams sharing
+ * rank 4. This is the same read-then-insert shape as `nextBidCode`, and the opposite call, because
+ * a duplicate bid code is a broken identity and a duplicate rank is only an unstated preference.
+ */
+const appendToWaitlist = async (compId: string): Promise<number> => {
+  const existing = await db
+    .select({ waitlistRank: teams.waitlistRank })
+    .from(teams)
+    .where(and(eq(teams.compId, compId), eq(teams.status, "waitlisted")));
+
+  return nextWaitlistRank(existing.map((t) => t.waitlistRank));
+};
 
 /**
  * Moves a team through the roster lifecycle, promoting off the waitlist when a slot comes free.
@@ -28,6 +50,11 @@ const LOCKED = "Results are locked. The roster can no longer change.";
  * **The `teamId` is a claim.** It resolves through `listRosterForBoard` -- the same scoped read that
  * produced the screen the claim arrived from -- because `teams.comp_id` is the only thing tying a
  * team to a comp and a form can name any uuid it likes.
+ *
+ * A team becoming `waitlisted` is appended to the end of the queue. It is not given back whatever
+ * rank it held before, because the only routes in are `applied -> waitlisted` and
+ * `dropped -> waitlisted`: the first never had one, and the second gave its place up when it was
+ * dropped and does not get to reclaim it over teams that waited.
  */
 export const setTeamStatus = async (
   actor: BoardActor,
@@ -48,7 +75,10 @@ export const setTeamStatus = async (
   if (!(to === "dropped" && dropFreesASlot(from))) {
     await db
       .update(teams)
-      .set({ status: to, waitlistRank: to === "waitlisted" ? team.waitlistRank : null })
+      .set({
+        status: to,
+        waitlistRank: to === "waitlisted" ? await appendToWaitlist(actor.compId) : null,
+      })
       .where(and(eq(teams.id, teamId), eq(teams.compId, actor.compId)));
 
     await recordAudit({

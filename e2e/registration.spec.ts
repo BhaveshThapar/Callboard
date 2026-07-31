@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
 /**
@@ -78,6 +79,19 @@ const seed = (): SeededComp => {
     stdio: "pipe",
   });
   return JSON.parse(readFileSync(out, "utf8")) as SeededComp;
+};
+
+/** One honest application through the public form. Bid codes are minted `T-001`, `T-002`, … */
+const apply = async (page: Page, name: string, email: string): Promise<void> => {
+  await page.goto(`/register/${ORG}/${COMP}`);
+  await page.getByLabel("Team name").fill(name);
+  await page.getByLabel("Contact name").fill(name);
+  await page.getByLabel("Contact email").fill(email);
+  await page.getByLabel("Audition video link").fill("https://example.com/audition");
+  await page.getByLabel("Roster size").fill("20");
+  await page.getByLabel("Accept the waiver").check();
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByTestId("applied")).toBeVisible();
 };
 
 test("a team applies, the board accepts it, and the form respects the comp's own rules", async ({
@@ -226,6 +240,69 @@ test("dropping a team that held a slot promotes the top of the waitlist, atomica
 
   // The second waitlisted team did not move: one slot came free, so exactly one promotion happened.
   await expect(page.getByTestId("roster-row-W-2")).toHaveAttribute("data-status", "waitlisted");
+
+  await context.close();
+});
+
+/**
+ * A team the *board* waitlists joins the back of the queue, and the queue is the order they joined.
+ *
+ * `waitlist_rank` was read by `nextOffWaitlist` and written by nothing in the product: the seed
+ * config set it, and `setTeamStatus` only ever preserved or cleared it. So every team a board
+ * waitlisted through the roster screen arrived unranked, which made id order not the *fallback*
+ * order but the only one — and ids are uuids. A board dropped an accepted team, somebody was
+ * promoted into the slot, and the audit log recorded an attributed `team.promote` that looked
+ * entirely correct while naming a team chosen by uuid sort.
+ *
+ * The rank badge is the deterministic witness: before this, a board-waitlisted team rendered none.
+ */
+test("a team the board waitlists joins the back of the queue, and the queue is arrival order", async ({
+  browser,
+}) => {
+  const comp = seed();
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  // Two teams arrive through the form, in a known order. `applied` is the only status a board can
+  // waitlist from besides `dropped`, so this is the route a real waitlist is built along.
+  await apply(page, "Queue First", "first@example.com");
+  await apply(page, "Queue Second", "second@example.com");
+
+  await page.goto(`/board/${comp.boardToken}/roster`);
+  await expect(page.getByTestId("roster")).toBeVisible();
+
+  // The seed ranked its two waitlisted teams 1 and 2, so the joiners take 3 and 4.
+  await expect(page.getByTestId("roster-rank-W-1")).toHaveText("#1");
+  await expect(page.getByTestId("roster-rank-W-2")).toHaveText("#2");
+
+  await page.getByTestId("move-T-001-waitlisted").click();
+  await expect(page.getByTestId("roster-rank-T-001")).toHaveText("#3");
+
+  await page.getByTestId("move-T-002-waitlisted").click();
+  await expect(page.getByTestId("roster-rank-T-002")).toHaveText("#4");
+
+  // Take the seeded pair off the waitlist, so the next promotion has to choose between the two the
+  // board added. Accepting a waitlisted team consumes no slot the drop below is about to free.
+  await page.getByTestId("move-W-1-accepted").click();
+  await expect(page.getByTestId("roster-row-W-1")).toHaveAttribute("data-status", "accepted");
+  await page.getByTestId("move-W-2-accepted").click();
+  await expect(page.getByTestId("roster-row-W-2")).toHaveAttribute("data-status", "accepted");
+
+  // Dropping an accepted team frees a slot, and it must go to the team that joined the queue
+  // first — not the one that sorts lower by uuid, which is what decided it while nothing in the
+  // product wrote a rank.
+  await page.getByTestId("move-A-2-dropped").click();
+
+  await expect(page.getByTestId("roster-message")).toContainText(
+    "Queue First was promoted off the waitlist into the slot.",
+  );
+  await expect(page.getByTestId("roster-row-T-001")).toHaveAttribute("data-status", "accepted");
+  await expect(page.getByTestId("roster-row-T-002")).toHaveAttribute("data-status", "waitlisted");
+
+  // The team still waiting keeps the rank it was given, rather than being renumbered by the
+  // promotion that happened ahead of it.
+  await expect(page.getByTestId("roster-rank-T-002")).toHaveText("#4");
 
   await context.close();
 });
