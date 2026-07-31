@@ -57,6 +57,13 @@
       "when": 1783865757746,
       "tag": "0007_abandoned_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785531525571,
+      "tag": "0008_happy_the_fury",
+      "breakpoints": true
     }
   ]
 }

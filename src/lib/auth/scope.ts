@@ -1,7 +1,7 @@
 import { and, eq, isNull, inArray } from "drizzle-orm";
 import { db } from "@/db";
 import { boardAssignments, comps, judgeAssignments, people, SCOREABLE_STATUSES, teams } from "@/db/schema";
-import type { TeamStatus } from "@/db/schema";
+import type { CustomAnswer, CustomField, TeamStatus } from "@/db/schema";
 import type { JudgeLabelView } from "./labels";
 import { judgeLabel } from "./labels";
 import { hashToken } from "./token";
@@ -63,6 +63,12 @@ export type RosterTeamView = BoardTeamView & {
   waiverAcceptedAt: Date | null;
   contactName: string | null;
   contactEmail: string | null;
+  /**
+   * Answers to the questions this comp added to its own form. Keyed by field id, so the labels to
+   * display them under come from `comps.registration` — a board that asked a question is the only
+   * thing that can say what it was.
+   */
+  customAnswers: Record<string, CustomAnswer> | null;
 };
 
 export type { JudgeLabelView } from "./labels";
@@ -230,6 +236,7 @@ export const listRosterForBoard = (actor: BoardActor): Promise<RosterTeamView[]>
       waiverAcceptedAt: teams.waiverAcceptedAt,
       contactName: people.name,
       contactEmail: people.email,
+      customAnswers: teams.customAnswers,
     })
     .from(teams)
     .leftJoin(people, eq(people.id, teams.contactPersonId))
@@ -240,6 +247,27 @@ export const resolveRosterTeamForBoard = async (
   actor: BoardActor,
   teamId: string,
 ): Promise<RosterTeamView | null> => claimed(await listRosterForBoard(actor), teamId);
+
+/**
+ * The questions this comp added to its own form, so the board can read the answers under the words
+ * it asked them in. `custom_answers` is keyed by field id and the ids are deliberately not the
+ * labels — a board may reword a question at any time without orphaning what has already been filed
+ * — so the labels have to be fetched, and this is the only thing that has them.
+ *
+ * Not a team window and not a claim check: it resolves no `teamId` and reads no team. It is the
+ * comp's own configuration, scoped to the comp the actor holds a link for.
+ */
+export const listRegistrationFieldsForBoard = async (
+  actor: BoardActor,
+): Promise<CustomField[]> => {
+  const [row] = await db
+    .select({ registration: comps.registration })
+    .from(comps)
+    .where(eq(comps.id, actor.compId))
+    .limit(1);
+
+  return row?.registration?.fields ?? [];
+};
 
 /**
  * The board's own members and the state of their links. Named, unlike the judge projection beside a

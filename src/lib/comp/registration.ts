@@ -5,6 +5,7 @@ import type { RegistrationConfig } from "@/db/schema";
 import { comps, orgs, people, teams, TEAMS_BID_CODE_UNIQUE } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { nextBidCode } from "@/lib/roster/roster";
+import { validateAnswers } from "./fields";
 
 export type OpenRegistration = {
   compId: string;
@@ -70,6 +71,8 @@ export type Application = {
   rosterSize: number;
   auditionUrl: string | null;
   waiverAccepted: boolean;
+  /** Answers to the comp's own questions, keyed by field id, exactly as they came off the form. */
+  custom: Record<string, string>;
 };
 
 export type ApplicationResult =
@@ -135,6 +138,13 @@ export const apply = async (
     return { ok: false, message: "This comp requires an audition video link." };
   }
 
+  // The comp's own questions are checked against the comp's own config, which is the only thing
+  // that can say what was asked. The form's `required` attributes are a courtesy to an honest
+  // applicant; this is the rule, and it is also the whitelist — an answer is kept only if a field
+  // asked for it, so a hand-crafted POST writes nothing extra.
+  const custom = validateAnswers(open.form.fields, application.custom);
+  if (!custom.ok) return { ok: false, message: custom.message };
+
   const email = application.contactEmail.trim().toLowerCase();
   const [contact] = await db
     .insert(people)
@@ -168,6 +178,7 @@ export const apply = async (
           contactPersonId: contact.id,
           auditionUrl: application.auditionUrl?.trim() || null,
           waiverAcceptedAt: new Date(),
+          customAnswers: custom.answers,
         })
         .returning({ id: teams.id });
 

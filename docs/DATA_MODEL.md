@@ -18,7 +18,9 @@ Persists across years. This is the institutional memory that PRD §2.3 says evap
 
 `status` ∈ `draft | open | live | complete`, enforced by a check constraint. Unique on `(org_id, slug)`.
 
-`registration` is the public form, authored as data in the comp config exactly like the rubric — waiver text, `requireAuditionUrl`, `maxRosterSize`. Null, or a `status` other than `open`, and there is no form to fill in; `openRegistration` collapses those two cases into one answer, because distinguishing them publicly would leak the existence of a comp that has not announced itself.
+`registration` is the public form, authored as data in the comp config exactly like the rubric — waiver text, `requireAuditionUrl`, `maxRosterSize`, and `fields`, the board's own questions. Null, or a `status` other than `open`, and there is no form to fill in; `openRegistration` collapses those two cases into one answer, because distinguishing them publicly would leak the existence of a comp that has not announced itself.
+
+`registration.fields` is both the form and the schema its answers are validated against, which is what keeps one definition of what a comp asked. Each field carries an `id`, a `label`, a type (`text | longtext | number | select | checkbox`), and whether it is required. The `id` is the key answers are stored under and is the one thing a board must not change once applications start arriving — renaming it orphans every answer already filed. The `label` is what the applicant reads and is safe to reword at any time; keeping the two separate is the whole reason the id is stated rather than derived.
 
 **`people`** — `id`, `org_id`, `name`, `email`, `phone`, `created_at`. Unique on `(org_id, email)`.
 
@@ -32,13 +34,15 @@ The board's access token, the same primitive judges use, and deliberately **one 
 
 ### Teams
 
-**`teams`** — `id`, `comp_id`, `name`, `school`, `bid_code`, `status`, `waitlist_rank`, `roster_size`, `division`, `performance_order`, `contact_person_id`, `audition_url`, `waiver_accepted_at`, `created_at`
+**`teams`** — `id`, `comp_id`, `name`, `school`, `bid_code`, `status`, `waitlist_rank`, `roster_size`, `division`, `performance_order`, `contact_person_id`, `audition_url`, `waiver_accepted_at`, `custom_answers`, `created_at`
 
 `status` ∈ `applied | waitlisted | accepted | dropped | competing`. Unique on `(comp_id, bid_code)` — the name `teams_comp_bid_code_unique` has one definition, in `src/db/schema/teams.ts`, because `apply` has to name it: `nextBidCode` is a read-then-insert and neon-http has no transactions, so two applications landing together collide, and the loser retries rather than failing.
 
 `bid_code` is the anonymized identifier judges see. The status values are the vocabulary of the churn documented in PRD §14: two accepted teams dropped and two waitlisted teams were promoted between the December acceptances doc and the February show, which is precisely why "who has paid" became unanswerable.
 
 The last three columns are what an application *said*, and they are the evidence a board accepts or rejects a team on: `contact_person_id` (the captain — `people` is per-org, so a captain across two comps is one person; `on delete set null`), `audition_url` (which a comp may *require*), and `waiver_accepted_at` — a timestamp rather than a boolean, because a boolean records a claim and a timestamp records an event, and this is the column a board would be asked to produce if anything ever went wrong. All three are null for a seeded team, which never applied. `listRosterForBoard` is the only window that selects them, and it is the only one that may: a judge's projection of a team never carries a name, let alone a captain's email.
+
+`custom_answers` is the fourth, and it holds the answers to whatever the comp added to its own form, keyed by `registration.fields[].id`. `json` rather than `jsonb`, for `tab_runs`' reason: jsonb reorders keys and collapses duplicates, and what a team submitted should come back as what it submitted. A column rather than a table because an answer has no life of its own — never queried across teams, never updated, and dead when the team is. It is meaningless without the questions in `comps.registration`, which is the only thing that can say what was asked, and is why the board screen reads the labels from there rather than from the keys.
 
 `waitlist_rank` is assigned by `setTeamStatus` when a team joins the waitlist: the end of the queue, `max + 1` over the comp's ranked waitlisted teams. Arrival order is the only order a board never has to state, and it is the one they assume is running. Before this it was read by `nextOffWaitlist` and written by nothing but the seed config, which meant every team a board waitlisted through the roster screen was unranked — so id order was not the *fallback* order but the only one, and ids are uuids.
 

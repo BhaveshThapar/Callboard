@@ -2,7 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Wordmark } from "@/components/Wordmark";
 import { eyebrowClass } from "@/components/styles";
-import { listRosterForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import {
+  listRegistrationFieldsForBoard,
+  listRosterForBoard,
+  resolveBoardActor,
+} from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
 import { RosterTable } from "./RosterTable";
 
@@ -14,9 +18,10 @@ export default async function RosterPage({ params }: { params: Promise<{ token: 
   const actor = await resolveBoardActor(token);
   if (!actor) notFound();
 
-  const [roster, locked] = await Promise.all([
+  const [roster, locked, fields] = await Promise.all([
     listRosterForBoard(actor),
     latestLockedRun(actor.compId),
+    listRegistrationFieldsForBoard(actor),
   ]);
 
   return (
@@ -37,7 +42,7 @@ export default async function RosterPage({ params }: { params: Promise<{ token: 
           </Link>
         </header>
 
-        <RosterTable token={token} roster={roster} locked={locked !== null} />
+        <RosterTable token={token} roster={roster} locked={locked !== null} fields={fields} />
       </main>
     </div>
   );

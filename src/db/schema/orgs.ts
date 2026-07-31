@@ -4,17 +4,51 @@ import { sql } from "drizzle-orm";
 export type CompStatus = "draft" | "open" | "live" | "complete";
 export type CompRole = "board" | "liaison" | "judge" | "captain" | "attendee";
 
+export const CUSTOM_FIELD_TYPES = ["text", "longtext", "number", "select", "checkbox"] as const;
+export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
+
+/** What one answer can be. Narrow on purpose: an answer is evidence, not a document. */
+export type CustomAnswer = string | number | boolean;
+
+/**
+ * One question a board adds to its own form. Boards ask things the product cannot anticipate —
+ * prop requirements, arrival window, dietary counts — and the alternative to asking them here is a
+ * second Google Form whose answers live somewhere the roster screen cannot reach.
+ *
+ * `id` is the key the answer is stored under, so it is the one field that must never change once a
+ * comp has taken an application: renaming it orphans every answer already filed. `label` is what
+ * the applicant reads and is safe to reword at any time. Keeping them separate is the whole reason
+ * the id is required rather than derived from the label.
+ */
+export type CustomField = {
+  id: string;
+  label: string;
+  type: CustomFieldType;
+  required: boolean;
+  help?: string;
+  /** `select` only, and at least two — a choice of one is a statement, not a question. */
+  options?: string[];
+  /** `text` and `longtext` only. */
+  maxLength?: number;
+};
+
 /**
  * The public registration form, as data. Null means the comp has no form at all, which is not the
  * same as a form that is closed — whether it *accepts* an application is `comps.status === 'open'`.
  *
  * No division field, on purpose: a comp is one division (ADR-0010), so an applicant has nothing to
  * choose and a field nothing reads is the mistake that ADR removed a column to fix.
+ *
+ * `fields` is the board's own half of the form. It is *also* the schema its answers are validated
+ * against and the labels they are displayed under, so there is exactly one definition of what this
+ * comp asked — which is what keeps an answer readable a year later, when the only record of the
+ * question is the config that posed it.
  */
 export type RegistrationConfig = {
   waiverText: string;
   requireAuditionUrl: boolean;
   maxRosterSize?: number;
+  fields?: CustomField[];
 };
 
 /** Persists across years. This is the institutional memory a board cannot otherwise hand off. */
