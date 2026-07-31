@@ -27,7 +27,7 @@ The selling window is **August**, before the fall crush. Boards for spring 2027 
 
 ## Scoreboard
 
-*Last updated July 14, 2026 — **63 days** to Gate 1, and roughly **18 days** to the August selling window.*
+*Last updated July 30, 2026 — **47 days** to Gate 1. The August selling window opens in **2 days**, and the scoreboard below has not moved since July 11.*
 
 | | |
 |---|---|
