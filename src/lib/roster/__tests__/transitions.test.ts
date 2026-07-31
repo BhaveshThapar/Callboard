@@ -6,9 +6,38 @@ import {
   dropFreesASlot,
   nextOffWaitlist,
   nextWaitlistRank,
+  reorderWaitlist,
+  type WaitlistEntry,
 } from "../transitions";
 
 const ALL: TeamStatus[] = ["applied", "waitlisted", "accepted", "dropped", "competing"];
+
+/** The queue as a board reads it: ids in promotion order, which is the only thing a reorder moves. */
+const queue = (entries: readonly WaitlistEntry[]): string[] => {
+  const remaining = [...entries];
+  const order: string[] = [];
+
+  while (remaining.length > 0) {
+    const next = nextOffWaitlist(remaining)!;
+    order.push(next);
+    remaining.splice(
+      remaining.findIndex((t) => t.id === next),
+      1,
+    );
+  }
+
+  return order;
+};
+
+/** Applies a rewrite set the way the `case` expression in `setWaitlistRank` does. */
+const applied = (
+  entries: readonly WaitlistEntry[],
+  rewrites: readonly { id: string; waitlistRank: number }[],
+): WaitlistEntry[] =>
+  entries.map((entry) => {
+    const rewrite = rewrites.find((r) => r.id === entry.id);
+    return rewrite ? { ...entry, waitlistRank: rewrite.waitlistRank } : entry;
+  });
 
 describe("canTransition", () => {
   it("walks the ordinary path: applied -> accepted -> competing", () => {
@@ -131,6 +160,110 @@ describe("nextWaitlistRank", () => {
     expect(nextOffWaitlist(joined)).toBe("first");
     expect(nextOffWaitlist(joined.filter((t) => t.id !== "first"))).toBe("second");
     expect(nextOffWaitlist(joined.filter((t) => t.id === "third"))).toBe("third");
+  });
+});
+
+describe("reorderWaitlist", () => {
+  const three: WaitlistEntry[] = [
+    { id: "a", waitlistRank: 1 },
+    { id: "b", waitlistRank: 2 },
+    { id: "c", waitlistRank: 3 },
+  ];
+
+  it("moves a team up one place", () => {
+    const moved = applied(three, reorderWaitlist(three, "c", "up"));
+    expect(queue(moved)).toEqual(["a", "c", "b"]);
+  });
+
+  it("moves a team down one place", () => {
+    const moved = applied(three, reorderWaitlist(three, "a", "down"));
+    expect(queue(moved)).toEqual(["b", "a", "c"]);
+  });
+
+  it("refuses to move past either end rather than wrapping or renumbering", () => {
+    expect(reorderWaitlist(three, "a", "up")).toEqual([]);
+    expect(reorderWaitlist(three, "c", "down")).toEqual([]);
+  });
+
+  it("refuses a team that is not on the waitlist at all", () => {
+    expect(reorderWaitlist(three, "not-here", "up")).toEqual([]);
+  });
+
+  // The whole point of the trade: the set of ranks on the comp is unchanged, so nobody outside the
+  // pair is renumbered and the gaps a promotion left behind survive the reorder.
+  it("trades two ranks and touches nothing else", () => {
+    const rewrites = reorderWaitlist(three, "c", "up");
+
+    expect(rewrites).toHaveLength(2);
+    expect(rewrites.map((r) => r.id).sort()).toEqual(["b", "c"]);
+
+    const before = three.map((t) => t.waitlistRank).sort();
+    const after = applied(three, rewrites)
+      .map((t) => t.waitlistRank)
+      .sort();
+    expect(after).toEqual(before);
+  });
+
+  it("keeps the gaps a promotion left behind", () => {
+    const gapped: WaitlistEntry[] = [
+      { id: "a", waitlistRank: 1 },
+      { id: "b", waitlistRank: 4 },
+      { id: "c", waitlistRank: 9 },
+    ];
+    const moved = applied(gapped, reorderWaitlist(gapped, "c", "up"));
+
+    expect(queue(moved)).toEqual(["a", "c", "b"]);
+    expect(moved.map((t) => t.waitlistRank).sort((x, y) => x! - y!)).toEqual([1, 4, 9]);
+  });
+
+  // Two board members waitlisting in the same second share a rank, which `appendToWaitlist`
+  // tolerates on purpose. There is no second number to trade, so this is the one path that
+  // renumbers -- and it must still leave the team ahead of the pair where it was.
+  it("re-spaces a tie instead of trading, without disturbing the team ahead of it", () => {
+    const tied: WaitlistEntry[] = [
+      { id: "a", waitlistRank: 1 },
+      { id: "b", waitlistRank: 4 },
+      { id: "c", waitlistRank: 4 },
+    ];
+    const rewrites = reorderWaitlist(tied, "c", "up");
+
+    expect(rewrites.map((r) => r.id)).not.toContain("a");
+    expect(queue(applied(tied, rewrites))).toEqual(["a", "c", "b"]);
+  });
+
+  it("gives an unranked team a real rank the first time it is moved", () => {
+    const partly: WaitlistEntry[] = [
+      { id: "a", waitlistRank: 1 },
+      { id: "b", waitlistRank: 2 },
+      { id: "unranked", waitlistRank: null },
+    ];
+    const moved = applied(partly, reorderWaitlist(partly, "unranked", "up"));
+
+    expect(queue(moved)).toEqual(["a", "unranked", "b"]);
+    expect(moved.find((t) => t.id === "unranked")?.waitlistRank).not.toBeNull();
+  });
+
+  it("is its own inverse: up then down puts the queue back", () => {
+    const up = applied(three, reorderWaitlist(three, "c", "up"));
+    const back = applied(up, reorderWaitlist(up, "c", "down"));
+
+    expect(queue(back)).toEqual(["a", "b", "c"]);
+  });
+
+  // A rank a board can see but a promotion ignores would be a lie on the screen. Every rewrite has
+  // to leave the list in a state `nextOffWaitlist` reads the same way the board just arranged it.
+  it("walks a team from the back of the queue to the front, one place at a time", () => {
+    let list: WaitlistEntry[] = [
+      { id: "a", waitlistRank: 1 },
+      { id: "b", waitlistRank: 2 },
+      { id: "c", waitlistRank: 5 },
+      { id: "d", waitlistRank: 6 },
+    ];
+
+    for (let step = 0; step < 3; step++) list = applied(list, reorderWaitlist(list, "d", "up"));
+
+    expect(queue(list)).toEqual(["d", "a", "b", "c"]);
+    expect(nextOffWaitlist(list)).toBe("d");
   });
 });
 

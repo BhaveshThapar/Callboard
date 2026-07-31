@@ -27,23 +27,100 @@ export const canTransition = (from: TeamStatus, to: TeamStatus): boolean =>
 
 export const allowedFrom = (from: TeamStatus): readonly TeamStatus[] => ALLOWED[from];
 
-/**
- * Who comes off the waitlist next: the lowest `waitlist_rank`, and an unranked team never jumps a
- * ranked one. A board that never ranked its waitlist still gets a deterministic answer -- ties and
- * nulls break by id, so a promotion is reproducible rather than dependent on row order, which
- * Postgres does not promise.
- */
 export type WaitlistEntry = { id: string; waitlistRank: number | null };
 
-export const nextOffWaitlist = (waitlisted: readonly WaitlistEntry[]): string | null => {
-  const ordered = [...waitlisted].sort((a, b) => {
-    if (a.waitlistRank === b.waitlistRank) return a.id < b.id ? -1 : 1;
-    if (a.waitlistRank === null) return 1;
-    if (b.waitlistRank === null) return -1;
-    return a.waitlistRank - b.waitlistRank;
-  });
+/**
+ * The order of the queue, and the only definition of it. Lowest `waitlist_rank` first; an unranked
+ * team never jumps a ranked one; ties and nulls break by id, so the answer is reproducible rather
+ * than dependent on row order, which Postgres does not promise.
+ *
+ * Everything that asks a question about waitlist position sorts with this -- who comes off next,
+ * and what "the team above this one" means to a board reordering the list. A second comparator
+ * would be a second answer to the same question, and the two would disagree on exactly the rows
+ * that matter: the tied ones and the unranked ones.
+ */
+const byWaitlistOrder = (a: WaitlistEntry, b: WaitlistEntry): number => {
+  if (a.waitlistRank === b.waitlistRank) return a.id < b.id ? -1 : 1;
+  if (a.waitlistRank === null) return 1;
+  if (b.waitlistRank === null) return -1;
+  return a.waitlistRank - b.waitlistRank;
+};
 
-  return ordered[0]?.id ?? null;
+export const nextOffWaitlist = (waitlisted: readonly WaitlistEntry[]): string | null =>
+  [...waitlisted].sort(byWaitlistOrder)[0]?.id ?? null;
+
+export type RankRewrite = { id: string; waitlistRank: number };
+
+/**
+ * Re-spacing, and the only path that renumbers anything. Walks the intended order and leaves a rank
+ * alone whenever it already sorts after the one before it, so the renumbering stops as soon as the
+ * existing numbers can carry the order on their own -- teams ahead of the moved pair keep their
+ * places, gaps included.
+ */
+const respace = (target: readonly WaitlistEntry[]): RankRewrite[] => {
+  const rewrites: RankRewrite[] = [];
+  let previous = 0;
+
+  for (const entry of target) {
+    const rank =
+      entry.waitlistRank !== null && entry.waitlistRank > previous
+        ? entry.waitlistRank
+        : previous + 1;
+
+    if (rank !== entry.waitlistRank) rewrites.push({ id: entry.id, waitlistRank: rank });
+    previous = rank;
+  }
+
+  return rewrites;
+};
+
+/**
+ * Moves one team one place up or down its comp's waitlist, as arithmetic. Returns only the rows that
+ * have to change, and an empty list for a move that cannot happen -- a team already at the end it is
+ * being sent toward, or one not on the waitlist at all.
+ *
+ * **A reorder does not renumber.** The ordinary case is a *trade*: two adjacent teams exchange
+ * ranks, which leaves the set of numbers on the comp exactly as it was. Every team outside the pair
+ * keeps the number the board has already seen, including the gaps that promotions and drops left
+ * behind -- and a gap is the normal state of a live waitlist, because ranks are assigned on arrival
+ * and never compacted.
+ *
+ * Two teams cannot trade what one of them does not have, so a pair that shares a rank -- two board
+ * members waitlisting in the same second, which `appendToWaitlist` deliberately tolerates -- or one
+ * that has no rank at all falls through to `respace`. That is the only way a third team's number
+ * moves, and it moves as little as the ordering allows.
+ */
+export const reorderWaitlist = (
+  waitlisted: readonly WaitlistEntry[],
+  teamId: string,
+  direction: "up" | "down",
+): RankRewrite[] => {
+  const ordered = [...waitlisted].sort(byWaitlistOrder);
+  const from = ordered.findIndex((t) => t.id === teamId);
+  if (from === -1) return [];
+
+  const to = direction === "up" ? from - 1 : from + 1;
+  if (to < 0 || to >= ordered.length) return [];
+
+  const moved = ordered[from]!;
+  const passed = ordered[to]!;
+
+  if (
+    moved.waitlistRank !== null &&
+    passed.waitlistRank !== null &&
+    moved.waitlistRank !== passed.waitlistRank
+  ) {
+    return [
+      { id: moved.id, waitlistRank: passed.waitlistRank },
+      { id: passed.id, waitlistRank: moved.waitlistRank },
+    ];
+  }
+
+  const target = [...ordered];
+  target[from] = passed;
+  target[to] = moved;
+
+  return respace(target);
 };
 
 /**

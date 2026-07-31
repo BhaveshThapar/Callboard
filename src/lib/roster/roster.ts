@@ -1,4 +1,4 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, withTransaction } from "@/db";
 import type { TeamStatus } from "@/db/schema";
 import { teams } from "@/db/schema";
@@ -6,11 +6,19 @@ import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
 import { resolveRosterTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
-import { canTransition, dropFreesASlot, nextOffWaitlist, nextWaitlistRank } from "./transitions";
+import {
+  canTransition,
+  dropFreesASlot,
+  nextOffWaitlist,
+  nextWaitlistRank,
+  reorderWaitlist,
+} from "./transitions";
 
 export type RosterChange =
   | { ok: true; promoted: { id: string; name: string } | null }
   | { ok: false; message: string };
+
+export type RosterMove = { ok: true } | { ok: false; message: string };
 
 const LOCKED = "Results are locked. The roster can no longer change.";
 
@@ -157,6 +165,89 @@ export const setTeamStatus = async (
 
     return { ok: true, promoted: promoted && { id: promoted.id, name: promoted.name } };
   });
+};
+
+/**
+ * Moves one team one place along its comp's waitlist.
+ *
+ * The two guards are `setTeamStatus`'s, and for its reasons: a rank *is* roster, so the lock freezes
+ * it, and a `teamId` on a form is a claim that resolves through the same scoped read that produced
+ * the screen it arrived from. The third guard is this function's own -- rank is only meaningful for
+ * a waitlisted team, and a board that has just watched one get promoted should be told that rather
+ * than have the click silently do nothing.
+ *
+ * **This writes many rows and still does not open a transaction**, which is the one thing here worth
+ * arguing rather than assuming. `withTransaction` exists for writes whose invariant spans statements
+ * (ADR-0012), and a reorder's does not span anything: `reorderWaitlist` returns a set of rewrites
+ * that are applied as a single `case` expression, and one statement is atomic on neon-http without
+ * asking for anything. The transaction stays what ADR-0012 wanted it to be -- the exception.
+ *
+ * What can still go wrong is bounded and deliberately tolerated. A team promoted off the waitlist
+ * between the read and the write drops out of the `where`, so its half of a trade is skipped and the
+ * pair ends up sharing a rank. That is a tie, which `byWaitlistOrder` already breaks by id and which
+ * a second click resolves -- the same call `appendToWaitlist` makes, for the same reason: refusing a
+ * board mid-registration is worse than an unstated preference between two teams.
+ */
+export const setWaitlistRank = async (
+  actor: BoardActor,
+  teamId: string,
+  direction: "up" | "down",
+): Promise<RosterMove> => {
+  if (await latestLockedRun(actor.compId)) return { ok: false, message: LOCKED };
+
+  const team = await resolveRosterTeamForBoard(actor, teamId);
+  if (!team) return { ok: false, message: "That team is not in this comp." };
+
+  if (team.status !== "waitlisted") {
+    return { ok: false, message: `A team that is ${team.status} is not on the waitlist.` };
+  }
+
+  const waitlisted = await db
+    .select({ id: teams.id, waitlistRank: teams.waitlistRank })
+    .from(teams)
+    .where(and(eq(teams.compId, actor.compId), eq(teams.status, "waitlisted")));
+
+  const rewrites = reorderWaitlist(waitlisted, teamId, direction);
+  if (rewrites.length === 0) {
+    const end = direction === "up" ? "top" : "bottom";
+    return { ok: false, message: `${team.name} is already at the ${end} of the waitlist.` };
+  }
+
+  // Cast the rank explicitly: every branch of the `case` is a bound parameter, so without it
+  // Postgres has nothing to infer an integer from and resolves the whole expression to text.
+  await db
+    .update(teams)
+    .set({
+      waitlistRank: sql`case ${sql.join(
+        rewrites.map((r) => sql`when ${teams.id} = ${r.id} then ${r.waitlistRank}::integer`),
+        sql` `,
+      )} end`,
+    })
+    .where(
+      and(
+        eq(teams.compId, actor.compId),
+        eq(teams.status, "waitlisted"),
+        inArray(
+          teams.id,
+          rewrites.map((r) => r.id),
+        ),
+      ),
+    );
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "team.rank",
+    entity: "team",
+    entityId: teamId,
+    before: { waitlistRank: team.waitlistRank },
+    // The whole rewrite, not just this team's: a trade moves two rows and a re-space can move more,
+    // and an audit row that named only the team the board clicked would not explain the others.
+    after: { direction, rewrites },
+  });
+
+  return { ok: true };
 };
 
 /** The next bid code for a comp: registration has to mint one, and they are unique per comp. */

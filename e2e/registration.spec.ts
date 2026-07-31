@@ -308,6 +308,99 @@ test("a team the board waitlists joins the back of the queue, and the queue is a
 });
 
 /**
+ * Arrival order is the order a board *assumes*; it is not always the order it *wants*. A team that
+ * applied late but is the one the board would rather have had no way to be moved up: the product
+ * could append to a waitlist and not rearrange it, so the only instrument was to drop teams and
+ * re-waitlist them in the desired order — which rewrites the audit log with drops that never
+ * happened and, after a lock, cannot be done at all.
+ *
+ * The reorder is only real if the *promotion* honors it. A rank a board can see and a promotion
+ * ignores would be worse than no reorder at all, so this drops a slot-holder and asserts the team
+ * the board moved is the one that fills it.
+ */
+test("a board reorders its waitlist, and the promotion honors the new order", async ({
+  browser,
+}) => {
+  const comp = seed();
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  await page.goto(`/board/${comp.boardToken}/roster`);
+
+  // The seed's two waitlisted teams, in arrival order.
+  await expect(page.getByTestId("roster-rank-W-1")).toHaveText("#1");
+  await expect(page.getByTestId("roster-rank-W-2")).toHaveText("#2");
+
+  // The ends of the queue offer nothing to click, because there is nowhere to go.
+  await expect(page.getByTestId("rank-W-1-up")).toBeDisabled();
+  await expect(page.getByTestId("rank-W-2-down")).toBeDisabled();
+
+  await page.getByTestId("rank-W-2-up").click();
+  await expect(page.getByTestId("roster-rank-message")).toContainText("Waitlist reordered.");
+
+  // A trade, not a renumbering: the two swapped the numbers they already had.
+  await expect(page.getByTestId("roster-rank-W-2")).toHaveText("#1");
+  await expect(page.getByTestId("roster-rank-W-1")).toHaveText("#2");
+
+  // The only assertion that proves the feature does anything: the slot goes to the team the board
+  // moved, not the team that arrived first.
+  await page.getByTestId("move-A-2-dropped").click();
+  await expect(page.getByTestId("roster-message")).toContainText(
+    "was promoted off the waitlist into the slot",
+  );
+  await expect(page.getByTestId("roster-row-W-2")).toHaveAttribute("data-status", "accepted");
+  await expect(page.getByTestId("roster-row-W-1")).toHaveAttribute("data-status", "waitlisted");
+
+  await context.close();
+});
+
+/**
+ * A rank is roster, so the lock freezes it. The reorder is a separate write path from
+ * `setTeamStatus`, which means it needs its own guard and its own proof of one — a lock that stops
+ * the status buttons and leaves the arrows live would let a board rearrange the queue inside a comp
+ * whose team list is already frozen inside `tab_runs.inputs`.
+ */
+test("the lock freezes the waitlist order too", async ({ browser }) => {
+  const comp = seed();
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+
+  const judge = await context.newPage();
+  await judge.goto(`/judge/${comp.judges[0]!.token}`);
+  const card = judge.locator('form[data-testid^="team-card-"]').first();
+  for (const criterion of ["Choreography", "Execution"]) {
+    await card.getByLabel(criterion, { exact: true }).fill("25");
+  }
+  await card.getByRole("button", { name: /Submit|Update/ }).click();
+  await expect(card.getByText("Scored")).toBeVisible();
+  await judge.close();
+
+  const page = await context.newPage();
+
+  // Capture a live arrow before the lock, so the click below is a genuinely stale form.
+  await page.goto(`/board/${comp.boardToken}/roster`);
+  const staleArrow = page.getByTestId("rank-W-2-up");
+  await expect(staleArrow).toBeEnabled();
+
+  const board = await context.newPage();
+  await board.goto(`/board/${comp.boardToken}`);
+  await board.getByTestId("lock-button").click();
+  await expect(board.getByRole("heading", { name: "Final placements" })).toBeVisible();
+
+  await staleArrow.click();
+  await expect(page.getByTestId("roster-rank-message")).toContainText(
+    "Results are locked. The roster can no longer change.",
+  );
+  await expect(page.getByTestId("roster-rank-W-1")).toHaveText("#1");
+  await expect(page.getByTestId("roster-rank-W-2")).toHaveText("#2");
+
+  await page.reload();
+  await expect(page.getByTestId("rank-W-2-up")).toHaveCount(0);
+
+  await context.close();
+});
+
+/**
  * The board decides whether to accept a team. This asserts it can see what it is deciding *on*.
  *
  * Registration wrote `audition_url`, `contact_person_id` and `waiver_accepted_at` from its first
