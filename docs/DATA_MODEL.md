@@ -40,7 +40,11 @@ The board's access token, the same primitive judges use, and deliberately **one 
 
 The last three columns are what an application *said*, and they are the evidence a board accepts or rejects a team on: `contact_person_id` (the captain — `people` is per-org, so a captain across two comps is one person; `on delete set null`), `audition_url` (which a comp may *require*), and `waiver_accepted_at` — a timestamp rather than a boolean, because a boolean records a claim and a timestamp records an event, and this is the column a board would be asked to produce if anything ever went wrong. All three are null for a seeded team, which never applied. `listRosterForBoard` is the only window that selects them, and it is the only one that may: a judge's projection of a team never carries a name, let alone a captain's email.
 
-`waitlist_rank` is read by `nextOffWaitlist` and **written by nothing in the product** — `setTeamStatus` only ever preserves it or clears it, and the seed config is the one thing that sets it. A board therefore cannot yet *order* its own waitlist through the UI; promotion falls back to a deterministic id-order tiebreak. That is a gap, not a bug, and it is deliberately not being filled ahead of the gate.
+`waitlist_rank` is assigned by `setTeamStatus` when a team joins the waitlist: the end of the queue, `max + 1` over the comp's ranked waitlisted teams. Arrival order is the only order a board never has to state, and it is the one they assume is running. Before this it was read by `nextOffWaitlist` and written by nothing but the seed config, which meant every team a board waitlisted through the roster screen was unranked — so id order was not the *fallback* order but the only one, and ids are uuids.
+
+Two things it still is not. It is **not renumbered** when a team is promoted or dropped, so a live list has gaps in it and appending goes past the maximum rather than the count. And a board still cannot **reorder** what it has: there is no rank-editing path, only append. Reordering is a real gap, and it is deliberately not being filled ahead of the gate.
+
+The read-then-write is not in a transaction, so two board members waitlisting two teams at the same moment can share a rank. `nextOffWaitlist` breaks that tie by id, which is the old behavior applied to one pair instead of the whole list. A `unique(comp_id, waitlist_rank)` would turn the tie into a refusal, and a board told "could not waitlist that team" because a colleague clicked first is worse than two teams sharing rank 4.
 
 ### Scoring
 
