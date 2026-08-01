@@ -47,12 +47,15 @@
     {
       "bidCode": "A-101",
       "name": "Example Team One",
-      "school": "State University"
+      "school": "State University",
+      "rosterSize": 16,
+      "rooms": 4
     },
     {
       "bidCode": "B-202",
       "name": "Example Team Two",
-      "school": "City College"
+      "school": "City College",
+      "rosterSize": 23
     },
     {
       "bidCode": "C-303",
@@ -98,7 +101,10 @@
         "label": "Arrival day",
         "type": "select",
         "required": true,
-        "options": ["Friday", "Saturday morning"]
+        "options": [
+          "Friday",
+          "Saturday morning"
+        ]
       },
       {
         "id": "photo_consent",
@@ -107,5 +113,12 @@
         "required": false
       }
     ]
+  },
+  "feeSchedule": {
+    "perDancerCents": 7000,
+    "perRoomCents": 14000,
+    "depositCents": 10000,
+    "lateFeeCents": 2500,
+    "lateAfter": "2027-02-01"
   }
 }

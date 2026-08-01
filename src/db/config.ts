@@ -42,6 +42,8 @@ export type CompConfig = {
     /** Defaults to `competing`: a config written for a scoring demo describes a comp already run. */
     status?: TeamStatus;
     waitlistRank?: number;
+    /** Hotel rooms. Omitted means *not yet known*, which bills nothing and states a gap. */
+    rooms?: number;
   }[];
   judges: { name: string; email?: string }[];
   board: { name: string; email?: string }[];
@@ -56,6 +58,24 @@ export type CompConfig = {
    * that ADR removed a column to fix.
    */
   registration?: RegistrationConfig;
+  /**
+   * What the comp charges, in cents — the five numbers [INTAKE.md](../../docs/INTAKE.md) asks a
+   * treasurer for, authored as data the same way the rubric is.
+   *
+   * Absent means the comp bills nothing, which is not the same as billing zero: no schedule means
+   * no `charges` rows at all, and a screen that says so rather than one showing every team a $0
+   * balance it might believe.
+   */
+  feeSchedule?: FeeScheduleConfig;
+};
+
+export type FeeScheduleConfig = {
+  perDancerCents: number;
+  perRoomCents: number;
+  depositCents: number;
+  lateFeeCents: number;
+  /** ISO `YYYY-MM-DD`, or absent when the comp charges no late fee. */
+  lateAfter?: string;
 };
 
 const NORMALIZATIONS = ["raw", "zscore", "rank"] as const;
@@ -232,6 +252,7 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
       performanceOrder: optInt(t.performanceOrder, `teams[${i}].performanceOrder`) ?? i + 1,
       status,
       waitlistRank: optInt(t.waitlistRank, `teams[${i}].waitlistRank`),
+      rooms: optInt(t.rooms, `teams[${i}].rooms`),
     };
   });
   if (teams.length === 0) fail("teams", "at least one team");
@@ -295,6 +316,43 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     };
   })();
 
+  const feeSchedule = ((): FeeScheduleConfig | undefined => {
+    if (root.feeSchedule === undefined || root.feeSchedule === null) return undefined;
+    const f = record(root.feeSchedule, "feeSchedule");
+
+    // ADR-0002 stops being a convention here. A config saying 70.5 means $70.50 to whoever wrote it
+    // and 70.5 cents to `int`, and the difference is only ever discovered on a bank statement -- so
+    // it is refused at the door, naming the path, rather than rounded into a number nobody chose.
+    const cents = (key: keyof FeeScheduleConfig): number => {
+      const value = optInt(f[key], `feeSchedule.${key}`) ?? 0;
+      if (value < 0) fail(`feeSchedule.${key}`, "a value of zero or more");
+      return value;
+    };
+
+    const lateFeeCents = cents("lateFeeCents");
+    const lateAfter = optStr(f.lateAfter, "feeSchedule.lateAfter");
+
+    if (lateAfter !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(lateAfter)) {
+      fail("feeSchedule.lateAfter", "an ISO date (YYYY-MM-DD)");
+    }
+    // Each half is useless without the other, and a config carrying one is a board that meant to
+    // charge a late fee and will not find out it did not until nobody is charged one.
+    if (lateFeeCents > 0 && lateAfter === undefined) {
+      fail("feeSchedule.lateAfter", "a date, because lateFeeCents is set — a late fee with no date never applies");
+    }
+    if (lateAfter !== undefined && lateFeeCents === 0) {
+      fail("feeSchedule.lateFeeCents", "an amount, because lateAfter is set — a date with no fee charges nothing");
+    }
+
+    return {
+      perDancerCents: cents("perDancerCents"),
+      perRoomCents: cents("perRoomCents"),
+      depositCents: cents("depositCents"),
+      lateFeeCents,
+      lateAfter,
+    };
+  })();
+
   return {
     org: { name: str(org.name, "org.name"), slug: str(org.slug, "org.slug") },
     comp: {
@@ -314,5 +372,6 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     judges: judges.map(({ name, email }) => ({ name, email })),
     board,
     registration,
+    feeSchedule,
   };
 };
