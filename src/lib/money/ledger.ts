@@ -11,15 +11,16 @@
  * Nothing here routes money. Every row is hand-entered on a rail we record and do not move
  * (`PAYMENT_RAILS`), which is what lets the ledger close PRD §14's ~$5,000 gap without Stripe.
  */
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import type { Transaction } from "@/db";
 import { db, withTransaction } from "@/db";
 import { violatedConstraint } from "@/db/errors";
 import type { PaymentRail } from "@/db/schema";
-import { charges, MONEY_CONSTRAINTS, paymentAllocations, payments } from "@/db/schema";
+import { charges, MONEY_CONSTRAINTS, paymentAllocations, payments, teams } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
 import { listRosterForBoard } from "@/lib/auth/scope";
-import { remainingOnCharge } from "./balance";
+import { remainingOnCharge, unallocatedCents } from "./balance";
 import { formatCents } from "./format";
 
 export type PaymentInput = {
@@ -63,6 +64,36 @@ const refusal = (error: unknown): string | null => {
 };
 
 const UNKNOWN = "Could not record that payment. Nothing was saved — reload and try again.";
+
+/**
+ * The counter, then the row. Extracted so the ordering [ADR-0014] cares about has **one**
+ * definition — `recordPayment` and `allocatePayment` both go through here, and a future third
+ * caller cannot get it backwards by writing the pair out again.
+ *
+ * The counter moves by `allocated_cents + $n`, never by a total computed in JS: reading, adding and
+ * writing back is two acts another allocator can land between, whereas this is one atomic
+ * read-modify-write holding its own row lock. And it moves *first*, because that decides which
+ * constraint fires on a race — `payments_allocated_check` is the one whose sentence says something
+ * true about what happened.
+ */
+const applyAllocations = async (
+  tx: Transaction,
+  paymentId: string,
+  allocations: readonly { chargeId: string; amountCents: number }[],
+): Promise<void> => {
+  for (const allocation of allocations) {
+    await tx
+      .update(payments)
+      .set({ allocatedCents: sql`${payments.allocatedCents} + ${allocation.amountCents}` })
+      .where(eq(payments.id, paymentId));
+
+    await tx.insert(paymentAllocations).values({
+      paymentId,
+      chargeId: allocation.chargeId,
+      amountCents: allocation.amountCents,
+    });
+  }
+};
 
 /**
  * Records money and what it settled, in one act.
@@ -140,19 +171,7 @@ export const recordPayment = async (
 
       if (!payment) throw new Error("payment insert returned no row");
 
-      for (const allocation of allocations) {
-        // Counter first. See ordering (2) and (3) above.
-        await tx
-          .update(payments)
-          .set({ allocatedCents: sql`${payments.allocatedCents} + ${allocation.amountCents}` })
-          .where(eq(payments.id, payment.id));
-
-        await tx.insert(paymentAllocations).values({
-          paymentId: payment.id,
-          chargeId: allocation.chargeId,
-          amountCents: allocation.amountCents,
-        });
-      }
+      await applyAllocations(tx, payment.id, allocations);
 
       await recordAudit(
         {
@@ -187,16 +206,151 @@ export const recordPayment = async (
 };
 
 /**
- * What a team has paid that is not attached to any particular obligation — the remainder of a lump
- * whose allocations do not use it all. Counted as paid, because it is: the money arrived.
+ * Money that arrived and is not attached to any obligation, worst first.
+ *
+ * This replaces a per-team `unappliedCreditFor` that had no caller anywhere. Keeping both would be
+ * two definitions of "unapplied credit", which is the thing `remainingOnCharge` and
+ * `unallocatedCents` exist to prevent one directory over.
+ *
+ * Comp-scoped off the actor, and every `chargeId` the panel then offers comes from
+ * `listRosterForBoard` — so this is a read for a screen, not a fourth window.
  */
-export const unappliedCreditFor = async (compId: string, teamId: string): Promise<number> => {
-  const rows = await db
-    .select({ gross: payments.grossCents, allocated: payments.allocatedCents })
-    .from(payments)
-    .where(and(eq(payments.compId, compId), eq(payments.teamId, teamId)));
+export type OpenPayment = {
+  id: string;
+  teamId: string;
+  teamName: string;
+  bidCode: string;
+  rail: PaymentRail;
+  receivedAt: Date;
+  grossCents: number;
+  allocatedCents: number;
+  remainingCents: number;
+};
 
-  return rows.reduce((sum, row) => sum + (row.gross - row.allocated), 0);
+export const listOpenPayments = async (actor: BoardActor): Promise<OpenPayment[]> => {
+  const rows = await db
+    .select({
+      id: payments.id,
+      teamId: payments.teamId,
+      teamName: teams.name,
+      bidCode: teams.bidCode,
+      rail: payments.rail,
+      receivedAt: payments.receivedAt,
+      grossCents: payments.grossCents,
+      allocatedCents: payments.allocatedCents,
+    })
+    .from(payments)
+    .innerJoin(teams, eq(teams.id, payments.teamId))
+    .where(and(eq(payments.compId, actor.compId), sql`${payments.allocatedCents} < ${payments.grossCents}`))
+    .orderBy(desc(payments.receivedAt));
+
+  return rows.map((row) => ({
+    ...row,
+    remainingCents: unallocatedCents(row),
+  }));
+};
+
+/**
+ * Attaches an existing payment's remainder to obligations that exist now.
+ *
+ * The gap this closes is not cosmetic and does not go away once a form exists. `recordPayment`
+ * consumes its allocations inside the transaction that creates the payment, so the set was fixed at
+ * insert and permanent — and two ordinary sequences put money where it could never be attributed:
+ * a team pays a deposit to hold a slot while still `applied`, so `BILLABLE_STATUSES` means it has no
+ * charges and every allocation is refused; or a roster size changes later and `syncCharges` voids
+ * and re-inserts, leaving the allocation pointing at a row nobody can see. NCSU's $2,160 labelled
+ * "hotel, security deposit & reg fees" is the first case, and it is PRD §14's headline exhibit.
+ *
+ * **This is not a third `withTransaction` caller.** ADR-0012 names the unit as *the ledger* — "a
+ * payment row, its allocations and the counter that constrains them are one act" — and this writes
+ * exactly that invariant and no other. The broken half is a counter claiming money is spent against
+ * nothing, or an allocation with no counter behind it, which is precisely the drift `db:doctor`
+ * reports by id. Same module, same invariant, same two statements.
+ */
+export const allocatePayment = async (
+  actor: BoardActor,
+  paymentId: string,
+  allocations: readonly { chargeId: string; amountCents: number }[],
+): Promise<LedgerResult> => {
+  // Everything resolves before the pool opens: a refused form must not pay for a handshake.
+  const [payment] = await db
+    .select({
+      id: payments.id,
+      teamId: payments.teamId,
+      grossCents: payments.grossCents,
+      allocatedCents: payments.allocatedCents,
+    })
+    .from(payments)
+    // Comp scope comes from the where, not from a second definition of it.
+    .where(and(eq(payments.id, paymentId), eq(payments.compId, actor.compId)))
+    .limit(1);
+
+  if (!payment) return { ok: false, message: "That payment is not one of this comp's." };
+
+  const wanted = allocations.filter((a) => a.amountCents !== 0);
+  if (wanted.length === 0) return { ok: false, message: "Enter what this money settles." };
+
+  // The team comes from the payment row, which is already comp-scoped — not from the form. So a
+  // `paymentId` is not a second `teamId` claim, and the `chargeId` below still resolves one level
+  // down `listRosterForBoard`, which is the rule A3 established rather than a fourth window.
+  const roster = await listRosterForBoard(actor);
+  const team = roster.find((row) => row.id === payment.teamId);
+  if (!team) return { ok: false, message: "That payment's team is no longer in this comp." };
+
+  for (const allocation of wanted) {
+    if (allocation.amountCents < 0) {
+      return { ok: false, message: "An allocation cannot be negative. Record a refund instead." };
+    }
+    const charge = team.charges.find((row) => row.id === allocation.chargeId);
+    if (!charge) {
+      return { ok: false, message: "That charge is not one of this team's open obligations." };
+    }
+    const remaining = remainingOnCharge(charge);
+    if (allocation.amountCents > remaining) {
+      return {
+        ok: false,
+        message: `${formatCents(allocation.amountCents)} is more than is left on that ${charge.kind} charge (${formatCents(remaining)}).`,
+      };
+    }
+  }
+
+  const total = wanted.reduce((sum, a) => sum + a.amountCents, 0);
+  const available = unallocatedCents(payment);
+  if (total > available) {
+    return {
+      ok: false,
+      message: `That is more than is left of this payment (${formatCents(available)}).`,
+    };
+  }
+
+  try {
+    return await withTransaction(async (tx) => {
+      await applyAllocations(tx, payment.id, wanted);
+
+      await recordAudit(
+        {
+          compId: actor.compId,
+          actorKind: "board",
+          actorPersonId: actor.personId,
+          action: "allocation.apply",
+          entity: "payment",
+          entityId: payment.id,
+          before: { allocatedCents: payment.allocatedCents },
+          after: { allocatedCents: payment.allocatedCents + total, allocations: wanted },
+        },
+        tx,
+      );
+
+      return {
+        ok: true as const,
+        paymentId: payment.id,
+        allocatedCents: total,
+        creditCents: available - total,
+      };
+    });
+  } catch (error) {
+    return { ok: false, message: refusal(error) ?? UNKNOWN };
+  }
 };
 
 /**
