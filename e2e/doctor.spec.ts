@@ -157,6 +157,40 @@ test("db:doctor names a payment whose counter drifted from its allocations", () 
   expect(doctor().ok).toBe(true);
 });
 
+/**
+ * The cheapest branch in this file, and the one the drift check cannot cover. No index is dropped
+ * and no constraint is broken: the counter still agrees with the payment's live allocations, and
+ * what has gone is the charge underneath. If the doctor only ever compared those two numbers it
+ * would pass a database holding money attributed to an obligation that does not exist.
+ */
+test("db:doctor names an allocation left pointing at a voided charge", () => {
+  const comp = seed();
+
+  try {
+    const [paymentId, chargeId] = run(
+      "e2e/support/break-db.ts",
+      "orphan-allocation",
+      comp.compId,
+    )
+      .trim()
+      .split(" ");
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+    expect(health.output).toContain(paymentId);
+    expect(health.output).toContain(chargeId);
+    expect(health.output).toContain("has been voided");
+    expect(health.output).toContain("human must release it");
+
+    // A row a human has to decide about is not a row a seed script repairs.
+    expect(health.output).not.toContain("db:seed");
+  } finally {
+    run("e2e/support/break-db.ts", "unorphan", comp.compId);
+  }
+
+  expect(doctor().ok).toBe(true);
+});
+
 test("db:doctor fails a comp with no board link", () => {
   const comp = seed();
 
