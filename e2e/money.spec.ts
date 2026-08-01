@@ -170,3 +170,70 @@ test("a team that paid, dropped, and came back reads paid rather than owing", as
   // owing the whole bill again.
   expect(await balanceCents(page, "M-2")).toBe(0);
 });
+
+/**
+ * A9. The totals row is the one number a board carries into a meeting without re-deriving it, so it
+ * is asserted against the sum of the rows above it rather than against a constant — a summary that
+ * disagrees with its own rows is the ~$5,000 gap in miniature, arrived at honestly.
+ */
+test("the who-owes screen totals exactly the rows it shows", async ({ browser }) => {
+  const comp = seed();
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await expect(page.getByTestId("who-owes")).toBeVisible();
+
+  const rowTotal = await page
+    .locator("[data-testid^='owes-row-']")
+    .evaluateAll((rows) =>
+      rows.reduce((sum, row) => sum + Number(row.getAttribute("data-balance-cents")), 0),
+    );
+
+  const shown = Number(
+    await page.getByTestId("who-owes-total").getAttribute("data-balance-cents"),
+  );
+
+  expect(shown).toBe(rowTotal);
+  // The seeded comp has one accepted team owing its full bill, so this is not a vacuous zero.
+  expect(rowTotal).toBeGreaterThan(0);
+});
+
+test("a comp that bills nothing says so rather than showing an empty table", async ({ browser }) => {
+  const noFees = { ...CONFIG, org: { name: "No Fees Org", slug: "nofee-e2e-org" }, comp: { ...CONFIG.comp, slug: "nofee-e2e-comp" } };
+  delete (noFees as { feeSchedule?: unknown }).feeSchedule;
+
+  const config = tmp("nofee.json");
+  writeFileSync(config, JSON.stringify(noFees));
+  const out = tmp("seeded.json");
+  execFileSync("bunx", ["tsx", "src/db/seed-cli.ts", "--config", config, "--json", out], {
+    stdio: "pipe",
+  });
+  const comp = JSON.parse(readFileSync(out, "utf8")) as SeededComp;
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+  await page.goto(`/board/${comp.boardToken}/money`);
+
+  await expect(page.getByText("No team has been billed yet")).toBeVisible();
+  await expect(page.getByTestId("who-owes")).toHaveCount(0);
+});
+
+test("the who-owes CSV carries the same total the screen does", async ({ browser }) => {
+  const comp = seed();
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  await page.goto(`/board/${comp.boardToken}/money`);
+  const shown = Number(
+    await page.getByTestId("who-owes-total").getAttribute("data-balance-cents"),
+  );
+
+  const csv = await (await page.request.get(`/board/${comp.boardToken}/money/export`)).text();
+  const total = csv.split("\r\n").at(-1) ?? "";
+
+  expect(total).toContain("TOTAL");
+  // Dollars in the file, cents on the screen: the same number, formatted once, in one place.
+  const dollars = (shown / 100).toLocaleString("en-US", { minimumFractionDigits: 2 });
+  expect(total).toContain(dollars);
+});
