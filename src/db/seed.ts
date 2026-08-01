@@ -8,6 +8,7 @@ import {
   boardAssignments,
   comps,
   compRoles,
+  feeSchedules,
   judgeAssignments,
   orgs,
   people,
@@ -191,8 +192,22 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
       performanceOrder: team.performanceOrder ?? null,
       rosterSize: team.rosterSize ?? null,
       division: team.division ?? null,
+      rooms: team.rooms ?? null,
     })),
   );
+
+  // Comp-scoped, so the delete above already took the previous one with it (ADR-0013). Absent means
+  // the comp bills nothing -- not that it bills zero, which is why there is no default row.
+  if (config.feeSchedule) {
+    await db.insert(feeSchedules).values({
+      compId: comp.id,
+      perDancerCents: config.feeSchedule.perDancerCents,
+      perRoomCents: config.feeSchedule.perRoomCents,
+      depositCents: config.feeSchedule.depositCents,
+      lateFeeCents: config.feeSchedule.lateFeeCents,
+      lateAfter: config.feeSchedule.lateAfter ?? null,
+    });
+  }
 
   const judgePeople = await findOrCreatePeople(org.id, config.judges);
 

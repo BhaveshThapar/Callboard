@@ -1,7 +1,18 @@
-import { and, eq, isNull, inArray } from "drizzle-orm";
+import { and, eq, isNull, inArray, sum } from "drizzle-orm";
 import { db } from "@/db";
-import { boardAssignments, comps, judgeAssignments, people, SCOREABLE_STATUSES, teams } from "@/db/schema";
+import {
+  boardAssignments,
+  charges,
+  comps,
+  judgeAssignments,
+  paymentAllocations,
+  people,
+  SCOREABLE_STATUSES,
+  teams,
+} from "@/db/schema";
 import type { CustomAnswer, CustomField, TeamStatus } from "@/db/schema";
+import type { ChargeLineView, TeamBalance } from "@/lib/money/balance";
+import { teamBalance } from "@/lib/money/balance";
 import type { JudgeLabelView } from "./labels";
 import { judgeLabel } from "./labels";
 import { hashToken } from "./token";
@@ -69,6 +80,14 @@ export type RosterTeamView = BoardTeamView & {
    * thing that can say what it was.
    */
   customAnswers: Record<string, CustomAnswer> | null;
+  rooms: number | null;
+  /**
+   * Live charges only — a voided one is history, not an obligation. A3 in one line: the roster and
+   * what each team owes are one record, because the split between an acceptance doc and a Venmo
+   * thread is the thing that made "who has paid" unanswerable.
+   */
+  charges: ChargeLineView[];
+  balance: TeamBalance;
 };
 
 export type { JudgeLabelView } from "./labels";
@@ -221,27 +240,75 @@ export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]>
  * *judge beside a score*; it says nothing about a board seeing the person who filed an application,
  * and `JudgeTeamView` is a different type for exactly this reason.
  */
-export const listRosterForBoard = (actor: BoardActor): Promise<RosterTeamView[]> =>
-  db
-    .select({
-      id: teams.id,
-      bidCode: teams.bidCode,
-      performanceOrder: teams.performanceOrder,
-      name: teams.name,
-      school: teams.school,
-      status: teams.status,
-      waitlistRank: teams.waitlistRank,
-      rosterSize: teams.rosterSize,
-      auditionUrl: teams.auditionUrl,
-      waiverAcceptedAt: teams.waiverAcceptedAt,
-      contactName: people.name,
-      contactEmail: people.email,
-      customAnswers: teams.customAnswers,
-    })
-    .from(teams)
-    .leftJoin(people, eq(people.id, teams.contactPersonId))
-    .where(eq(teams.compId, actor.compId))
-    .orderBy(teams.status, teams.waitlistRank, teams.name);
+export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamView[]> => {
+  const [roster, live, allocated] = await Promise.all([
+    db
+      .select({
+        id: teams.id,
+        bidCode: teams.bidCode,
+        performanceOrder: teams.performanceOrder,
+        name: teams.name,
+        school: teams.school,
+        status: teams.status,
+        waitlistRank: teams.waitlistRank,
+        rosterSize: teams.rosterSize,
+        rooms: teams.rooms,
+        auditionUrl: teams.auditionUrl,
+        waiverAcceptedAt: teams.waiverAcceptedAt,
+        contactName: people.name,
+        contactEmail: people.email,
+        customAnswers: teams.customAnswers,
+      })
+      .from(teams)
+      .leftJoin(people, eq(people.id, teams.contactPersonId))
+      .where(eq(teams.compId, actor.compId))
+      .orderBy(teams.status, teams.waitlistRank, teams.name),
+
+    db
+      .select({
+        id: charges.id,
+        teamId: charges.teamId,
+        kind: charges.kind,
+        amountCents: charges.amountCents,
+        dueAt: charges.dueAt,
+      })
+      .from(charges)
+      .where(and(eq(charges.compId, actor.compId), isNull(charges.voidedAt)))
+      .orderBy(charges.kind),
+
+    // Grouped here rather than folded in JS, because one row per charge is the smallest thing that
+    // answers "how much of this obligation is settled" and the alternative ships every allocation.
+    db
+      .select({ chargeId: paymentAllocations.chargeId, paidCents: sum(paymentAllocations.amountCents) })
+      .from(paymentAllocations)
+      .innerJoin(charges, eq(charges.id, paymentAllocations.chargeId))
+      .where(and(eq(charges.compId, actor.compId), isNull(paymentAllocations.voidedAt)))
+      .groupBy(paymentAllocations.chargeId),
+  ]);
+
+  // `sum()` comes back as a string on a bigint-shaped aggregate, and Number() on it is the one place
+  // cents could leave integer space. It cannot here -- an allocation is an integer and so is a sum of
+  // them -- but the conversion is done once, in one place, rather than at each call site.
+  const paidByCharge = new Map(allocated.map((row) => [row.chargeId, Number(row.paidCents ?? 0)]));
+
+  const chargesByTeam = new Map<string, ChargeLineView[]>();
+  for (const charge of live) {
+    const lines = chargesByTeam.get(charge.teamId) ?? [];
+    lines.push({
+      id: charge.id,
+      kind: charge.kind,
+      amountCents: charge.amountCents,
+      dueAt: charge.dueAt,
+      paidCents: paidByCharge.get(charge.id) ?? 0,
+    });
+    chargesByTeam.set(charge.teamId, lines);
+  }
+
+  return roster.map((team) => {
+    const lines = chargesByTeam.get(team.id) ?? [];
+    return { ...team, charges: lines, balance: teamBalance(lines) };
+  });
+};
 
 export const resolveRosterTeamForBoard = async (
   actor: BoardActor,

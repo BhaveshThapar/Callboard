@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
 import type { CustomField, TeamStatus } from "@/db/schema";
 import type { RosterTeamView } from "@/lib/auth/scope";
+import { describeBalance, formatCents } from "@/lib/money/format";
 import { allowedFrom } from "@/lib/roster/transitions";
 import { setTeamStatusAction, setWaitlistRankAction } from "../actions";
 import { IDLE } from "../state";
@@ -18,6 +19,35 @@ const STATUS_TONE: Record<TeamStatus, string> = {
   competing: "bg-primary-light text-primary",
   dropped: "bg-hover text-subtle",
 };
+
+/**
+ * A3, on the screen: the roster row and what the team owes are one record. A team with no charges
+ * reads "—" rather than $0.00, because a comp that bills nothing and a team that owes nothing are
+ * different facts and only one of them is about the team.
+ */
+function BalanceCell({ team }: { team: RosterTeamView }) {
+  if (team.charges.length === 0 && team.balance.paidCents === 0) {
+    return <span className="text-caption text-subtle">—</span>;
+  }
+
+  const { balanceCents, owedCents, paidCents } = team.balance;
+
+  return (
+    <div data-testid={`roster-balance-${team.bidCode}`} data-balance-cents={balanceCents}>
+      <span
+        className={cx(
+          "tabular font-medium",
+          balanceCents > 0 ? "text-heading" : balanceCents < 0 ? "text-primary" : "text-subtle",
+        )}
+      >
+        {describeBalance(balanceCents)}
+      </span>
+      <span className="block text-caption text-subtle">
+        {formatCents(paidCents)} of {formatCents(owedCents)}
+      </span>
+    </div>
+  );
+}
 
 /**
  * What the team actually submitted — the evidence the accept/waitlist/drop decision is made on.
@@ -132,6 +162,7 @@ export function RosterTable({
             <th className={cx(eyebrowClass, "pb-2")}>Bid</th>
             <th className={cx(eyebrowClass, "pb-2")}>Dancers</th>
             <th className={cx(eyebrowClass, "pb-2")}>Application</th>
+            <th className={cx(eyebrowClass, "pb-2")}>Balance</th>
             <th className={cx(eyebrowClass, "pb-2")}>Status</th>
             {!locked && <th className={cx(eyebrowClass, "pb-2")}>Move to</th>}
           </tr>
@@ -163,6 +194,9 @@ export function RosterTable({
               <td className="tabular py-2.5 pr-3 text-muted">{team.rosterSize ?? "—"}</td>
               <td className="py-2.5 pr-3">
                 <ApplicationCell team={team} fields={fields} />
+              </td>
+              <td className="py-2.5 pr-3">
+                <BalanceCell team={team} />
               </td>
               <td className="py-2.5 pr-3">
                 <span className={cx(pillClass, STATUS_TONE[team.status])}>{team.status}</span>

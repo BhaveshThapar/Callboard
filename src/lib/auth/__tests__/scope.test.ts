@@ -2,7 +2,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { judgeLabel } from "../labels";
 import type { JudgeLabelView } from "../labels";
 import type { PublicComp, PublicPlacement, PublicTeam } from "@/lib/comp/public";
-import type { BoardJudgeView, BoardTeamView, JudgeTeamView } from "../scope";
+import type { BoardJudgeView, BoardTeamView, JudgeTeamView, RosterTeamView } from "../scope";
 
 /**
  * Both directions of blindness are enforced by the shape of a type rather than by a filter someone
@@ -20,6 +20,22 @@ describe("the projections", () => {
 
   it("gives the board the team names the judge cannot have", () => {
     expectTypeOf<BoardTeamView>().toHaveProperty("name");
+  });
+
+  // A judge who can see which teams are behind on payment knows something about a team, and knowing
+  // anything about a team beside its bid code is what ADR-0008 exists to prevent. A3 widens the
+  // *roster* window only; the scoring windows are a different question and must stay one.
+  it("gives a judge no way to learn which teams have paid", () => {
+    expectTypeOf<JudgeTeamView>().not.toHaveProperty("balance");
+    expectTypeOf<JudgeTeamView>().not.toHaveProperty("charges");
+    expectTypeOf<BoardTeamView>().not.toHaveProperty("balance");
+    expectTypeOf<BoardTeamView>().not.toHaveProperty("charges");
+  });
+
+  it("joins the roster to what each team owes, which is A3", () => {
+    expectTypeOf<RosterTeamView>().toHaveProperty("balance");
+    expectTypeOf<RosterTeamView>().toHaveProperty("charges");
+    expectTypeOf<RosterTeamView>().toHaveProperty("name");
   });
 
   it("gives the board no way to name a judge beside a score", () => {
