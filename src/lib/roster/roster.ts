@@ -1,11 +1,12 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, withTransaction } from "@/db";
 import type { TeamStatus } from "@/db/schema";
-import { teams } from "@/db/schema";
+import { BILLABLE_STATUSES, teams } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
 import { resolveRosterTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
+import { feeScheduleFor, syncCharges, voidChargesFor } from "@/lib/money/charges";
 import {
   canTransition,
   dropFreesASlot,
@@ -21,6 +22,14 @@ export type RosterChange =
 export type RosterMove = { ok: true } | { ok: false; message: string };
 
 const LOCKED = "Results are locked. The roster can no longer change.";
+
+const BILLABLE: readonly TeamStatus[] = BILLABLE_STATUSES;
+
+/**
+ * Today, as an ISO date, resolved once per roster move and passed into the pure fee engine. The
+ * clock is read *here* rather than there, which is what keeps `src/lib/fees/` reproducible.
+ */
+const today = (): string => new Date().toISOString().slice(0, 10);
 
 /**
  * The rank for a team joining this comp's waitlist. Read-then-write, and deliberately not in a
@@ -79,53 +88,43 @@ export const setTeamStatus = async (
     return { ok: false, message: `A team that is ${from} cannot become ${to}.` };
   }
 
-  // A team that never held a slot frees none, so nothing is promoted and one statement will do.
-  if (!(to === "dropped" && dropFreesASlot(from))) {
-    await db
-      .update(teams)
-      .set({
-        status: to,
-        waitlistRank: to === "waitlisted" ? await appendToWaitlist(actor.compId) : null,
-      })
-      .where(and(eq(teams.id, teamId), eq(teams.compId, actor.compId)));
+  const freesASlot = to === "dropped" && dropFreesASlot(from);
+  const waitlistRank = to === "waitlisted" ? await appendToWaitlist(actor.compId) : null;
 
-    await recordAudit({
-      compId: actor.compId,
-      actorKind: "board",
-      actorPersonId: actor.personId,
-      action: "team.status",
-      entity: "team",
-      entityId: teamId,
-      before: { status: from },
-      after: { status: to },
-    });
-
-    return { ok: true, promoted: null };
-  }
+  // Read before the transaction opens: it is comp-level, unchanging for the duration of this move,
+  // and holding a WebSocket open across it buys nothing. Null means the comp bills nothing, which
+  // is the pre-money behaviour exactly -- no schedule, no charges, no billing work below.
+  const schedule = await feeScheduleFor(actor.compId);
+  const asOf = today();
 
   /**
-   * The drop frees a slot, so the waitlist moves — and the two have to move together. This is the
-   * write ADR-0012 exists for: half of it is a comp that has lost a team and not replaced it, and
-   * the other half is a comp with one more accepted team than it has slots. Both are states a human
-   * would have to find and repair by hand, which is the reconciliation problem this product is
-   * being sold to end.
+   * Everything below is one transaction, and the non-transactional fast path is gone.
    *
-   * The waitlist is read `for update` inside the transaction, so two board members dropping two
-   * different teams at the same moment cannot both promote the same team into two slots.
+   * It used to be defensible: a move that promotes nobody was one statement, and one statement is
+   * atomic without asking. Obligations end that. `applied -> accepted` is now *"the team is accepted
+   * **and** owes what the schedule says"*, an invariant spanning two statements, and half of it is
+   * an accepted team owing nothing -- the exact orphan A3 exists to prevent, discovered in March by
+   * a treasurer rather than in September by us.
+   *
+   * So this is ADR-0012's second caller doing what ADR-0012 described, and the guards above stay
+   * *outside* it: the lock check and the claim check reject without opening a pool, because a
+   * WebSocket handshake is expensive and a refused move must not pay for one.
    */
   return withTransaction(async (tx) => {
-    const waitlisted = await tx
-      .select({ id: teams.id, name: teams.name, waitlistRank: teams.waitlistRank })
-      .from(teams)
-      .where(and(eq(teams.compId, actor.compId), eq(teams.status, "waitlisted")))
-      .for("update");
+    const waitlisted = freesASlot
+      ? await tx
+          .select({ id: teams.id, name: teams.name, waitlistRank: teams.waitlistRank })
+          .from(teams)
+          .where(and(eq(teams.compId, actor.compId), eq(teams.status, "waitlisted")))
+          .for("update")
+      : [];
 
-    const promotedTeamId = nextOffWaitlist(waitlisted);
+    const promotedTeamId = freesASlot ? nextOffWaitlist(waitlisted) : null;
     const promoted = waitlisted.find((t) => t.id === promotedTeamId) ?? null;
 
     await tx
       .update(teams)
-      .set({ status: "dropped", waitlistRank: null })
+      .set({ status: to, waitlistRank })
       .where(and(eq(teams.id, teamId), eq(teams.compId, actor.compId)));
 
     await recordAudit(
@@ -137,16 +136,62 @@ export const setTeamStatus = async (
         entity: "team",
         entityId: teamId,
         before: { status: from },
-        after: { status: "dropped" },
+        after: { status: to },
       },
       tx,
     );
+
+    /**
+     * The obligation half, in the same act as the status half.
+     *
+     * `-> dropped` voids: an obligation that outlives the team holding it is the orphan a treasurer
+     * finds in April. Its allocations are untouched, which is what makes a team that paid and then
+     * dropped read *the org owes you*, and what makes one that comes back read **paid, not owing** —
+     * `charges_live_kind_unique` is partial on `voided_at is null`, so nothing blocks the regenerate
+     * and nothing resurrects the old rows.
+     *
+     * `-> billable` generates. `accepted -> competing` regenerates and is a no-op by construction,
+     * because `planCharges` keys on `(teamId, kind)` and the schedule has not changed — asserted in
+     * the unit tests rather than assumed here.
+     */
+    if (schedule) {
+      if (BILLABLE.includes(to)) {
+        await syncCharges(tx, {
+          compId: actor.compId,
+          schedule,
+          teams: [{ teamId, rosterSize: team.rosterSize, rooms: team.rooms }],
+          asOf,
+          reason: `team ${to}`,
+        });
+      } else {
+        await voidChargesFor(tx, actor.compId, teamId, `team ${to}`);
+      }
+    }
 
     if (promoted) {
       await tx
         .update(teams)
         .set({ status: "accepted", waitlistRank: null })
         .where(and(eq(teams.id, promoted.id), eq(teams.compId, actor.compId)));
+
+      // The promoted team's obligations are generated in the same act that gave it the slot. A
+      // promotion that moved a team and not its bill is the reconciliation gap in miniature: the
+      // acceptance doc says one thing and the money says another, which is PRD §14.
+      if (schedule) {
+        const [row] = await tx
+          .select({ rosterSize: teams.rosterSize, rooms: teams.rooms })
+          .from(teams)
+          .where(eq(teams.id, promoted.id))
+          .limit(1);
+
+        await syncCharges(tx, {
+          compId: actor.compId,
+          schedule,
+          teams: [{ teamId: promoted.id, rosterSize: row?.rosterSize ?? null, rooms: row?.rooms ?? null }],
+          asOf,
+          reason: "promoted off the waitlist",
+        });
+      }
 
       await recordAudit(
         {

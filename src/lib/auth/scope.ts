@@ -6,6 +6,7 @@ import {
   comps,
   judgeAssignments,
   paymentAllocations,
+  payments,
   people,
   SCOREABLE_STATUSES,
   teams,
@@ -241,7 +242,7 @@ export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]>
  * and `JudgeTeamView` is a different type for exactly this reason.
  */
 export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamView[]> => {
-  const [roster, live, allocated] = await Promise.all([
+  const [roster, live, allocated, paid] = await Promise.all([
     db
       .select({
         id: teams.id,
@@ -284,12 +285,22 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
       .innerJoin(charges, eq(charges.id, paymentAllocations.chargeId))
       .where(and(eq(charges.compId, actor.compId), isNull(paymentAllocations.voidedAt)))
       .groupBy(paymentAllocations.chargeId),
+
+    // A team's balance is driven by every cent that arrived, not by what is allocated to its *live*
+    // charges. Deriving it from allocations loses the money behind any charge later voided, which
+    // bills a reinstated team twice for what it has already paid. See `teamBalance`.
+    db
+      .select({ teamId: payments.teamId, paidCents: sum(payments.grossCents) })
+      .from(payments)
+      .where(eq(payments.compId, actor.compId))
+      .groupBy(payments.teamId),
   ]);
 
   // `sum()` comes back as a string on a bigint-shaped aggregate, and Number() on it is the one place
   // cents could leave integer space. It cannot here -- an allocation is an integer and so is a sum of
   // them -- but the conversion is done once, in one place, rather than at each call site.
   const paidByCharge = new Map(allocated.map((row) => [row.chargeId, Number(row.paidCents ?? 0)]));
+  const paidByTeam = new Map(paid.map((row) => [row.teamId, Number(row.paidCents ?? 0)]));
 
   const chargesByTeam = new Map<string, ChargeLineView[]>();
   for (const charge of live) {
@@ -306,7 +317,7 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
 
   return roster.map((team) => {
     const lines = chargesByTeam.get(team.id) ?? [];
-    return { ...team, charges: lines, balance: teamBalance(lines) };
+    return { ...team, charges: lines, balance: teamBalance(lines, paidByTeam.get(team.id) ?? 0) };
   });
 };
 
