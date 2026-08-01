@@ -21,6 +21,14 @@ export type Observed = {
   forkGuaranteeEnforced: boolean;
   /** Comps whose run chain does not have exactly one root. Only ever non-empty above. */
   forkedComps: { compId: string; roots: number }[];
+  /** Every constraint in `MONEY_CONSTRAINTS` exists: an over-allocation is unrepresentable. */
+  moneyGuaranteeEnforced: boolean;
+  /**
+   * Payments whose `allocated_cents` disagrees with the sum of their live allocations — ADR-0014's
+   * named residual. The database enforces `allocated <= gross`, not `allocated = sum(...)`, so this
+   * is the half that has to be *found* rather than refused.
+   */
+  driftingPayments: { paymentId: string; allocatedCents: number; allocatedSum: number }[];
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
@@ -57,6 +65,42 @@ const chainProblems = (observed: Observed): string[] => {
   return problems;
 };
 
+/**
+ * Whether the money tables can still hold a state a treasurer cannot act on, and whether one
+ * already does.
+ *
+ * The same two-part shape as `chainProblems`, and for the same reason. `MONEY_CONSTRAINTS` makes
+ * over-allocation, a broken `net = gross - fee`, a duplicate obligation and a replayed payment all
+ * *unrepresentable* — but only on a database that actually carries them, and the code may not
+ * assume it is the database the code intended.
+ *
+ * The drift check is the half no constraint can do. ADR-0014 accepted a named residual: the CHECK
+ * constrains the counter, not the sum it stands for, so anything writing an allocation without
+ * moving the counter creates a disagreement. Refusing it is impossible; finding it is not, and a
+ * disagreement someone is shown is the whole difference between this and a number that is silently
+ * wrong. Reseeding fixes neither, and is not offered for either.
+ */
+const moneyProblems = (observed: Observed): string[] => {
+  const problems: string[] = [];
+
+  if (!observed.moneyGuaranteeEnforced) {
+    problems.push(
+      "a payment can still be allocated past what was paid: the money constraints are missing. " +
+        "This database predates migration 0009 — apply it with 'bun run db:migrate'.",
+    );
+  }
+
+  for (const { paymentId, allocatedCents, allocatedSum } of observed.driftingPayments) {
+    problems.push(
+      `payment ${paymentId} says ${allocatedCents} cents are allocated but its live allocations ` +
+        `sum to ${allocatedSum}. Something wrote an allocation without moving the counter; a human ` +
+        "must decide which figure is true before the balance it feeds can be trusted.",
+    );
+  }
+
+  return problems;
+};
+
 export const summarizeHealth = (
   observed: Observed,
   expected: { judges: number; teams: number },
@@ -64,11 +108,15 @@ export const summarizeHealth = (
   if (!observed.compFound) {
     return {
       ok: false,
-      problems: [...chainProblems(observed), "comp not seeded — run 'bun run db:seed'"],
+      problems: [
+        ...chainProblems(observed),
+        ...moneyProblems(observed),
+        "comp not seeded — run 'bun run db:seed'",
+      ],
     };
   }
 
-  const problems: string[] = chainProblems(observed);
+  const problems: string[] = [...chainProblems(observed), ...moneyProblems(observed)];
 
   if (observed.boardAssignments === 0) {
     problems.push(`no board link for the demo comp — ${RESEED}`);

@@ -64,6 +64,13 @@
       "when": 1785531525571,
       "tag": "0008_happy_the_fury",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785545976619,
+      "tag": "0009_panoramic_hobgoblin",
+      "breakpoints": true
     }
   ]
 }

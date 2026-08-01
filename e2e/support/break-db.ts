@@ -4,7 +4,7 @@ config({ path: ".env.local", quiet: true });
 
 // Imported after dotenv, because `@/db` reads DATABASE_URL when it loads.
 const { db } = await import("@/db");
-const { boardAssignments, tabRuns } = await import("@/db/schema");
+const { boardAssignments, payments, tabRuns, teams } = await import("@/db/schema");
 const { eq, sql } = await import("drizzle-orm");
 const { lockResults } = await import("@/lib/comp/tab");
 
@@ -100,6 +100,72 @@ switch (command) {
   case "unboard": {
     await db.delete(boardAssignments).where(eq(boardAssignments.compId, need("unboard")));
     console.log("unboarded");
+    break;
+  }
+
+  /**
+   * A CHECK constraint's own definition, straight from Postgres, with the table it sits on.
+   * `pg_get_indexdef` carries its table inside the DDL; `pg_get_constraintdef` does not, so the
+   * table is carried alongside. Same discipline as `index-def`: the DDL is captured rather than
+   * written down again, so `MONEY_CONSTRAINTS` stays the one place it is named.
+   */
+  case "constraint-def": {
+    const result = await db.execute<{ tbl: string; def: string }>(
+      sql`select conrelid::regclass::text as tbl, pg_get_constraintdef(oid) as def
+            from pg_constraint where conname = ${need("constraint-def")}`,
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error(`no such constraint: ${argument}`);
+    console.log(`${row.tbl}|${argument}|${row.def}`);
+    break;
+  }
+
+  case "drop-constraint": {
+    const [table, name] = need("drop-constraint").split("|");
+    await db.execute(sql.raw(`alter table ${table} drop constraint if exists ${name}`));
+    console.log("dropped");
+    break;
+  }
+
+  case "restore-constraint": {
+    const [table, name, def] = need("restore-constraint").split("|");
+    await db.execute(sql.raw(`alter table ${table} add constraint ${name} ${def}`));
+    console.log("restored");
+    break;
+  }
+
+  /**
+   * A payment whose counter claims money is spoken for that no allocation accounts for -- ADR-0014's
+   * named residual, reached the way it would actually be reached: a write that moved the counter and
+   * never inserted the row, or a hand-typed allocation that skipped the counter.
+   *
+   * No constraint is broken to do this, and that is the point. `payments_allocated_check` permits it
+   * (216000 <= 216000); the database enforces `allocated <= gross`, not `allocated = sum(...)`. The
+   * amount is NCSU's $2,160 lump, which is the shape this whole table exists for.
+   */
+  case "drift-payment": {
+    const compId = need("drift-payment");
+    const [team] = await db.select({ id: teams.id }).from(teams).where(eq(teams.compId, compId)).limit(1);
+    if (!team) throw new Error(`comp ${compId} has no teams`);
+    const [row] = await db
+      .insert(payments)
+      .values({
+        compId,
+        teamId: team.id,
+        rail: "venmo",
+        grossCents: 216000,
+        feeCents: 0,
+        netCents: 216000,
+        allocatedCents: 216000,
+      })
+      .returning({ id: payments.id });
+    console.log(row.id);
+    break;
+  }
+
+  case "undrift": {
+    await db.delete(payments).where(eq(payments.compId, need("undrift")));
+    console.log("cleared");
     break;
   }
 

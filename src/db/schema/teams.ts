@@ -22,6 +22,13 @@ export type TeamStatus = (typeof TEAM_STATUSES)[number];
 export const SCOREABLE_STATUSES = ["accepted", "competing"] as const;
 
 /**
+ * The statuses that owe money. It equals `SCOREABLE_STATUSES` today and is deliberately **not** an
+ * alias of it: they answer different questions, and a comp that decided to bill at `applied` would
+ * otherwise start handing applicants places in the ranking.
+ */
+export const BILLABLE_STATUSES = ["accepted", "competing"] as const;
+
+/**
  * One definition, because two things have to agree on the string and neither can derive it: the
  * index itself, and `apply`, which retries when a concurrent application takes the bid code it was
  * about to use. Same discipline as `CHAIN_INDEXES` in `./scores`, and for the same reason — the
@@ -43,6 +50,12 @@ export const teams = pgTable(
     status: text("status").$type<TeamStatus>().notNull().default("applied"),
     waitlistRank: integer("waitlist_rank"),
     rosterSize: integer("roster_size"),
+    /**
+     * Hotel rooms, for a comp whose schedule bills per room. Null means *not yet known*, which is
+     * not zero: the generator must emit no hotel charge and a stated gap rather than a $0 one. A $0
+     * hotel charge is a lie a treasurer will believe, and will find in April.
+     */
+    rooms: integer("rooms"),
     division: text("division"),
     performanceOrder: integer("performance_order"),
     /** Who registered this team. `people` is per-org, so a captain across two comps is one person. */
