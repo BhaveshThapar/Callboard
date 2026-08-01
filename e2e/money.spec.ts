@@ -237,3 +237,47 @@ test("the who-owes CSV carries the same total the screen does", async ({ browser
   const dollars = (shown / 100).toLocaleString("en-US", { minimumFractionDigits: 2 });
   expect(total).toContain(dollars);
 });
+
+const deposit = (...args: string[]): string =>
+  execFileSync("bunx", ["tsx", "e2e/support/deposit.ts", ...args], { encoding: "utf8" }).trim();
+
+/**
+ * A7. `advanceDeposit` refuses a second ending in JavaScript, which is right for a board that clicks
+ * twice — but the read and the insert are two acts on neon-http, so two board members can land
+ * between them and the code cannot see it. The claim under test is that the **index** refuses it
+ * anyway, from a path that never asked, which is the chain-index argument applied to money.
+ */
+test("a deposit ends once, and the database is what says so", () => {
+  const comp = seed();
+
+  // M-2 is seeded accepted, so it holds a live deposit charge.
+  expect(deposit("state", comp.compId, "M-2")).toBe("held");
+
+  expect(deposit("append", comp.compId, "M-2", "refund_pending")).toBe("appended");
+  expect(deposit("append", comp.compId, "M-2", "refunded")).toBe("appended");
+  expect(deposit("state", comp.compId, "M-2")).toBe("refunded");
+
+  // The second ending, written straight at the database with no in-process guard in the way.
+  expect(deposit("append", comp.compId, "M-2", "refunded")).toBe(
+    "refused:deposit_events_terminal_unique",
+  );
+  // Forfeiting an already-refunded deposit is the same mistake wearing a different word.
+  expect(deposit("append", comp.compId, "M-2", "forfeited")).toBe(
+    "refused:deposit_events_terminal_unique",
+  );
+
+  // A retry loop is not an ending, so it stays representable however many times it happens.
+  expect(deposit("state", comp.compId, "M-2")).toBe("refunded");
+});
+
+test("a bounced refund can be retried, because the money is still in the account", () => {
+  const comp = seed();
+
+  expect(deposit("append", comp.compId, "M-2", "refund_pending")).toBe("appended");
+  expect(deposit("append", comp.compId, "M-2", "refund_failed")).toBe("appended");
+  expect(deposit("append", comp.compId, "M-2", "held")).toBe("appended");
+  expect(deposit("append", comp.compId, "M-2", "refund_pending")).toBe("appended");
+  expect(deposit("append", comp.compId, "M-2", "refunded")).toBe("appended");
+
+  expect(deposit("state", comp.compId, "M-2")).toBe("refunded");
+});

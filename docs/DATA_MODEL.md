@@ -150,6 +150,14 @@ The unbundler. NCSU sent one payment of $2,160 labeled "hotel, security deposit 
 
 Without this table you get the kill exhibit from PRD §14: a season-summary sheet reading **$2,837.47** next to a hand-typed note saying *"true amount around 8k."*
 
+**`deposit_events`** — `id`, `seq`, `comp_id`, `charge_id`, `state`, `reason`, `created_by_person_id`, `created_at`
+
+`state` ∈ `held | refund_pending | refunded | forfeited | refund_failed`. What happened to a refundable deposit, one row per transition — the `tab_runs` chain applied to a smaller question. Nothing is ever updated: current state is `max(seq)`'s row, and the history is the rows themselves rather than something reconstructed from the audit log.
+
+**A refund is not a negative payment.** `payments_gross_check` forbids one deliberately: a negative gross makes `allocated_cents <= gross_cents` uninterpretable, and that ceiling is the single thing [ADR-0014](decisions/0014-the-allocation-counter.md) bought with a denormalized column.
+
+`deposit_events_terminal_unique` is partial over `('refunded','forfeited')` and refuses a **second ending**. A double-clicked refund button is the realistic way a deposit is returned twice, and the check and the insert are two acts on neon-http — so the index is what refuses it, not a transaction. `refund_failed` is deliberately **not** terminal: a bounced ACH return is retryable, and calling it an ending would strand the money in a state the product cannot leave.
+
 **Everything is `integer` cents.** Never a float, never a `numeric` read into a JS `number` for arithmetic. See [ADR-0002](decisions/0002-money-as-cents-and-allocations.md).
 
 ---

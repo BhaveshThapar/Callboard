@@ -11,6 +11,8 @@ import {
 } from "drizzle-orm/pg-core";
 import type { ChargeKind } from "@/lib/fees/types";
 import { CHARGE_KINDS } from "@/lib/fees/types";
+import type { DepositState } from "@/lib/money/deposit";
+import { DEPOSIT_STATES, TERMINAL_STATES } from "@/lib/money/deposit";
 import { comps, people } from "./orgs";
 import { teams } from "./teams";
 
@@ -44,6 +46,8 @@ export const MONEY_CONSTRAINTS = {
   externalRef: "payments_external_ref_unique",
   /** One live allocation per (payment, charge). */
   liveAllocation: "payment_allocations_live_unique",
+  /** A deposit ends once. A double-clicked refund button is how it would end twice. */
+  depositTerminal: "deposit_events_terminal_unique",
 } as const;
 
 export const MONEY_CONSTRAINT_NAMES: readonly string[] = Object.values(MONEY_CONSTRAINTS);
@@ -207,5 +211,52 @@ export const paymentAllocations = pgTable(
     uniqueIndex(MONEY_CONSTRAINTS.liveAllocation)
       .on(t.paymentId, t.chargeId)
       .where(sql`${t.voidedAt} is null`),
+  ],
+);
+
+/**
+ * What happened to a refundable deposit, one row per transition — the `tab_runs` chain applied to a
+ * smaller question. Nothing is ever updated: the current state is `max(seq)`'s row and the history
+ * is the rows themselves, so "who refunded this and when" is answerable without reconstructing it
+ * from an audit log.
+ *
+ * A refund is deliberately **not** a negative `payments` row: negative gross would make
+ * `allocated_cents <= gross_cents` uninterpretable, and that ceiling is what ADR-0014 bought.
+ *
+ * One INSERT plus one audit row, so this stays on `db` with no transaction. There is no invariant
+ * spanning statements here — the *index* refuses a second ending, which is the chain-index argument
+ * rather than the `withTransaction` one.
+ */
+export const depositEvents = pgTable(
+  "deposit_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** Orders the chain. `created_at` cannot: two events in one transaction share it. */
+    seq: integer("seq").generatedAlwaysAsIdentity(),
+    compId: uuid("comp_id")
+      .notNull()
+      .references(() => comps.id, { onDelete: "cascade" }),
+    /** The `kind = 'deposit'` charge this is about. */
+    chargeId: uuid("charge_id")
+      .notNull()
+      .references(() => charges.id, { onDelete: "cascade" }),
+    state: text("state").$type<DepositState>().notNull(),
+    reason: text("reason"),
+    /** Every board action is attributed. Returning money is emphatically a board action. */
+    createdByPersonId: uuid("created_by_person_id").references(() => people.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check(
+      "deposit_events_state_check",
+      sql`${t.state} in ${sql.raw(`(${DEPOSIT_STATES.map((s) => `'${s}'`).join(",")})`)}`,
+    ),
+    // Partial over the endings only, so a deposit may pass through `refund_pending` and
+    // `refund_failed` as often as reality demands and still finish exactly once.
+    uniqueIndex(MONEY_CONSTRAINTS.depositTerminal)
+      .on(t.chargeId)
+      .where(sql`${t.state} in ${sql.raw(`(${TERMINAL_STATES.map((s) => `'${s}'`).join(",")})`)}`),
   ],
 );
