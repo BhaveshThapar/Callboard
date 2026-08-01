@@ -34,12 +34,21 @@ export default async function RosterPage({ params }: { params: Promise<{ token: 
             <p className={eyebrowClass}>{actor.compName}</p>
             <h1 className="mt-1 text-title font-bold text-heading">Registration</h1>
           </div>
-          <Link
-            href={`/board/${token}`}
-            className="text-caption text-muted underline underline-offset-2 hover:text-primary"
-          >
-            Scoring →
-          </Link>
+          <div className="flex items-center gap-4">
+            <Link
+              href={`/board/${token}/money`}
+              data-testid="money-link"
+              className="text-caption text-muted underline underline-offset-2 hover:text-primary"
+            >
+              Who owes what →
+            </Link>
+            <Link
+              href={`/board/${token}`}
+              className="text-caption text-muted underline underline-offset-2 hover:text-primary"
+            >
+              Scoring →
+            </Link>
+          </div>
         </header>
 
         <RosterTable token={token} roster={roster} locked={locked !== null} fields={fields} />

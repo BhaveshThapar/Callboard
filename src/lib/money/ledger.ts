@@ -19,6 +19,8 @@ import { charges, MONEY_CONSTRAINTS, paymentAllocations, payments } from "@/db/s
 import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
 import { listRosterForBoard } from "@/lib/auth/scope";
+import { remainingOnCharge } from "./balance";
+import { formatCents } from "./format";
 
 export type PaymentInput = {
   teamId: string;
@@ -96,8 +98,21 @@ export const recordPayment = async (
       return { ok: false, message: "An allocation cannot be negative. Record a refund instead." };
     }
     // The chargeId claim, resolved one level down the read that produced the form.
-    if (!team.charges.some((charge) => charge.id === allocation.chargeId)) {
+    const charge = team.charges.find((row) => row.id === allocation.chargeId);
+    if (!charge) {
       return { ok: false, message: "That charge is not one of this team's open obligations." };
+    }
+    // A fat-finger refusal, and deliberately **not** a constraint. Over-settling one obligation
+    // while under-settling another does not move `paid` — that is gross-based — so this is an
+    // attribution error, not a balance error, and making the database enforce it would mean a
+    // second denormalized counter on `charges`: ADR-0014's bargain paid twice for a wrong label
+    // rather than a wrong number. It sits here because here is where a typed digit arrives.
+    const remaining = remainingOnCharge(charge);
+    if (allocation.amountCents > remaining) {
+      return {
+        ok: false,
+        message: `${formatCents(allocation.amountCents)} is more than is left on that ${charge.kind} charge (${formatCents(remaining)}).`,
+      };
     }
   }
 
