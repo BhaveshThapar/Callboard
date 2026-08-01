@@ -72,7 +72,7 @@ The spine, and the registration lead's pain. Roster and money live in one record
 
 ---
 
-## Phase 02 — v1 · Module A · Payments · **A6–A9 authorized · A5x gated**
+## Phase 02 — v1 · Module A · Payments · **A6–A9 live · A5x gated**
 
 The treasurer's pain, and why the ledger disagrees with the bank by ~$5,000 today. Callboard **never holds funds and never touches the org's tax status** — and today it does not move money at all: every `payments` row is hand-entered, on a rail we record and do not route. Every amount is integer cents.
 
@@ -85,9 +85,9 @@ The treasurer's pain, and why the ledger disagrees with the bank by ~$5,000 toda
 | **A5b** | Nonprofit card rate | Support the verified-nonprofit rate (2.2% + $0.30) in connected-account setup. Most host orgs qualify. | A5 | PRD A5b |
 | **A5c** | Optional surcharge pass-through | Per comp, pass the processing fee to the paying team, disclosed at checkout (≤3%). The honest answer to "won't we net less than we charge?" | A5 | PRD A5c |
 | **A6** | Fee schedule engine | **Live.** Per-dancer, per-room, deposit, late fee → each team's exact total. Pure and ESLint-fenced, so a bill is a function of the schedule and the roster and nothing else; `asOf` is passed in, because a module that read the clock would bill differently on Tuesday. A component the comp does not charge produces **no line**, not a $0 one, and an unknown room count produces a stated gap rather than a $0 hotel charge a treasurer would believe. | — | `fee_schedules`, `charges`, `src/lib/fees/` |
-| **A7** | Receipts + refund state machine | Refundable deposits need a clean state machine. ACH and card refunds differ in timing and retained fees; the ledger reflects what came back. | A6 | `charges.kind` |
-| **A8** | Fee-aware ledger | gross / fee / net as three integers per payment, allocated to charges. A $100 deposit arriving as $97.01 is a recorded cost, not a hole. Lumps unbundle via allocations. | A6 | ADR-0002, `payment_allocations` |
-| **A9** | Who-owes / who-paid dashboard | Applied / accepted / paid / outstanding, per team, one screen, rail-labeled. The headline metric: hours → under a minute. | A2, A6, A8 | PRD A9 |
+| **A7** | Refund state machine | **Live.** A refund is *not* a negative payment — negative gross would make `allocated_cents <= gross_cents` uninterpretable, and that ceiling is what ADR-0014 bought. So a deposit's fate is its own append-only chain, `deposit_events`, modelled on `tab_runs`: one row per transition ordered by `seq`, state is `max(seq)`'s row, and `deposit_events_terminal_unique` refuses a **second ending** — a double-clicked refund button being the realistic way a deposit is returned twice. `refund_failed` is deliberately not terminal: a bounced ACH return is retryable, and calling it an ending would strand money in a state the product cannot leave. Receipts are **not** built. | A6 | ADR-0014, `deposit_events` |
+| **A8** | Fee-aware ledger | **Live.** gross / fee / net as three integers per payment, allocated to charges. A $100 deposit arriving as $97.01 is a recorded cost, not a hole; NCSU's $2,160 unbundles across three obligations. The second and last sanctioned `withTransaction` caller, and the third reader of `violatedConstraint` — a money constraint is a sentence for a treasurer. Every row is hand-entered on a rail we record and do not route. | A6 | ADR-0002, ADR-0014, `payment_allocations` |
+| **A9** | Who-owes / who-paid dashboard | **Live.** Per team, one screen, debtors first, with a CSV a treasurer opens beside a bank statement. The totals row is asserted in e2e against the sum of the rows it displays, because a summary that disagrees with its own rows is the ~$5,000 gap in miniature. A team that was never billed is omitted rather than shown settled. The headline metric: hours → under a minute. | A2, A6, A8 | PRD A9 |
 | **A10** | One-click late-payer reminders | Replaces manual per-team texting; fires off payment status through the comms layer. | A9, comms | PRD A10 |
 | **A11** | Google Drive import (on-ramp) | One-directional, onboarding only: ingest roster and prior-year Gita. Kills the "we already have it in Sheets" objection. Drive is never the backend. | — | PRD A11 |
 
