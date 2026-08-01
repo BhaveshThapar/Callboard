@@ -48,7 +48,24 @@ export function UnattributedCredit({
   const [chosen, setChosen] = useState<string | null | undefined>(undefined);
   const open = chosen === undefined ? payments[0]?.id : chosen;
 
-  if (payments.length === 0) return null;
+  /**
+   * Attaching the *last* of a payment's credit empties this list, and returning `null` on an empty
+   * list would unmount the confirmation along with it — you finish the job and the screen goes
+   * blank. So an empty list still renders once there is something to say.
+   */
+  if (payments.length === 0) {
+    if (!state.message) return null;
+    return (
+      <div className={cardClass} data-testid="unattributed">
+        <h2 className="text-card font-semibold text-heading">
+          Everything that arrived is attached
+        </h2>
+        <p role="status" data-testid="apply-message" className="mt-1 text-caption text-muted">
+          {state.message}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className={cardClass} data-testid="unattributed">

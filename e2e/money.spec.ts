@@ -169,6 +169,63 @@ test("a team that paid, dropped, and came back reads paid rather than owing", as
   // Charges regenerated at the same amounts; the old allocations still count. Owing zero, not
   // owing the whole bill again.
   expect(await balanceCents(page, "M-2")).toBe(0);
+
+  /**
+   * The half this test could not see, because it only ever asserted the balance — which is correct
+   * at every step above and stays correct now. Voiding a charge used to leave its allocation live,
+   * pointing at a row nobody can read: money that reported as fully attributed and was attributed
+   * to nothing. `db:doctor` agreed it was fine, because the counter and the live allocations still
+   * summed the same.
+   *
+   * Releasing on void makes it findable again, and the panel is where a treasurer finds it.
+   */
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await expect(page.getByTestId("unattributed-total")).toHaveText(
+    `$${(owed! / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+  );
+
+  // And re-attaching it still moves no balance: attribution says what money was for, nothing more.
+  await page.getByTestId("apply-M-2-registration").fill("1400.00");
+  await page.getByTestId("apply-M-2-hotel").fill("700.00");
+  await page.getByTestId("apply-M-2-deposit").fill("100.00");
+  await page.getByTestId("apply-submit-M-2").click();
+  await expect(page.getByTestId("apply-message")).toContainText("All of it is now attached");
+  await expect(page.getByTestId("owes-row-M-2")).toHaveAttribute("data-balance-cents", "0");
+});
+
+/**
+ * The other void path, and the commonest one: a roster size changes, so `syncCharges` voids the
+ * registration charge and inserts a new one at the new amount. The payment that settled the old
+ * charge must not vanish with it.
+ */
+test("changing a roster size releases the money attached to the charge it replaces", async ({
+  browser,
+}) => {
+  const comp = seed();
+  const page = await boardPage(browser, comp.boardToken);
+
+  const owed = await balanceCents(page, "M-2");
+  execFileSync("bunx", ["tsx", "e2e/support/pay.ts", comp.compId, "M-2", String(owed)], {
+    stdio: "pipe",
+  });
+
+  await roster(page, comp.boardToken);
+  expect(await balanceCents(page, "M-2")).toBe(0);
+
+  // A drop and an un-drop is the cheapest way to make `syncCharges` void and re-insert from the
+  // product path; the roster edit form is registration's, not money's.
+  await move(page, "M-2", "dropped");
+
+  await page.goto(`/board/${comp.boardToken}/money`);
+  // Nothing is owed and the money is now visible as unattached rather than silently orphaned.
+  await expect(page.getByTestId("owes-row-M-2")).toHaveAttribute(
+    "data-balance-cents",
+    String(-owed!),
+  );
+  await expect(page.getByTestId("open-payment-M-2")).toHaveAttribute(
+    "data-remaining-cents",
+    String(owed),
+  );
 });
 
 /**

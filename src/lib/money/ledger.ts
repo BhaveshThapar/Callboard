@@ -11,7 +11,7 @@
  * Nothing here routes money. Every row is hand-entered on a rail we record and do not move
  * (`PAYMENT_RAILS`), which is what lets the ledger close PRD §14's ~$5,000 gap without Stripe.
  */
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Transaction } from "@/db";
 import { db, withTransaction } from "@/db";
 import { violatedConstraint } from "@/db/errors";
@@ -351,6 +351,78 @@ export const allocatePayment = async (
   } catch (error) {
     return { ok: false, message: refusal(error) ?? UNKNOWN };
   }
+};
+
+/**
+ * Releases every live allocation pointing at charges that are being voided, in the caller's own act.
+ *
+ * The quiet half of the attribution problem, and it fires on the most common event of a
+ * registration season. `syncCharges` voids and re-inserts whenever an amount changes and
+ * `voidChargesFor` voids everything on a drop — and the allocation rows stayed live, pointing at
+ * rows nobody can see. Nothing caught it: `db:doctor`'s drift query compares `allocated_cents` to
+ * the sum of live *allocations*, and those still agreed perfectly. The money read as fully
+ * attributed and was attributed to nothing, `unallocatedCents` reported 0 for it, and the
+ * unattributed-credit panel could not find it either.
+ *
+ * **This changes no balance.** `paid` is the sum of gross, so a release moves money from "attached
+ * to a dead obligation" to "unattached", and the who-owes totals do not move. What changes is that
+ * the money becomes findable again.
+ *
+ * Takes the caller's `Writer` rather than opening its own transaction, so it composes inside
+ * `setTeamStatus`'s existing one — the same invariant ADR-0012 already justified, with one more
+ * statement inside it. It is **not** a new `withTransaction` caller.
+ */
+export const releaseAllocationsForCharges = async (
+  writer: Transaction | typeof db,
+  chargeIds: readonly string[],
+): Promise<number> => {
+  if (chargeIds.length === 0) return 0;
+
+  const live = await writer
+    .select({
+      id: paymentAllocations.id,
+      paymentId: paymentAllocations.paymentId,
+      amountCents: paymentAllocations.amountCents,
+    })
+    .from(paymentAllocations)
+    .where(
+      and(
+        inArray(paymentAllocations.chargeId, [...chargeIds]),
+        isNull(paymentAllocations.voidedAt),
+      ),
+    );
+
+  if (live.length === 0) return 0;
+
+  await writer
+    .update(paymentAllocations)
+    .set({ voidedAt: new Date() })
+    .where(
+      and(
+        inArray(
+          paymentAllocations.id,
+          live.map((row) => row.id),
+        ),
+        isNull(paymentAllocations.voidedAt),
+      ),
+    );
+
+  // One statement per payment rather than per allocation, and by the same atomic increment that
+  // moved the counter up — so `allocated = sum(live allocations)` stays true and the doctor stays
+  // quiet, which is the whole point of doing this rather than leaving the rows behind.
+  const byPayment = new Map<string, number>();
+  for (const row of live) {
+    byPayment.set(row.paymentId, (byPayment.get(row.paymentId) ?? 0) + row.amountCents);
+  }
+
+  for (const [paymentId, released] of byPayment) {
+    await writer
+      .update(payments)
+      .set({ allocatedCents: sql`${payments.allocatedCents} - ${released}` })
+      .where(eq(payments.id, paymentId));
+  }
+
+  return live.length;
 };
 
 /**
