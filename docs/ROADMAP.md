@@ -48,16 +48,16 @@ Ship target: live for the **January–March 2027** season.
 
 **Module A — Registration + Payments.** The spine, and the treasurer's pain.
 
-> **A1 and A2 shipped in July 2026, before this gate cleared**, at the founder's direction and against the PRD's own advice. That is recorded rather than tidied away: the public registration form is live, and so is the application → acceptance → waitlist lifecycle, whose drop-and-promotion lands in a single transaction ([ADR-0012](decisions/0012-transactions-for-writes-that-span-statements.md)) and whose roster freezes at the lock. What A2 does **not** do is the half its own description promises — it does not reconcile balances, because there are no `charges`. **The line now holds at A3.** Everything below is still gated, and Track 1 is still 0/10 conversations and 0/3 signatures.
+> **A1 and A2 shipped in July 2026 and the money spine followed on July 31 – August 1**, all of it before this gate cleared, at the founder's direction and against the PRD's own advice. That is recorded rather than tidied away. **The line now holds at Stripe** (A5–A5c): the ~$5,000 gap is closed by the *ledger* on hand-entered `rail: 'venmo'` rows, so routing buys ingestion rather than correctness, and whether a student board wants card rails is a question for the founding partners. Everything else below is still gated, and Track 1 is still 0/10 conversations and 0/3 signatures.
 
-- ~~Configurable registration form; application → acceptance → waitlist workflow (A1, A2)~~ — **shipped July 2026, ahead of the gate.** Balance reconciliation is *not* included; it needs `charges`.
-- Roster and payment status joined by design (A3) — **authorized July 31, 2026** along with the rest of the money spine (A6–A9), ahead of the gate. `charges` land in migration `0009`.
-- Team submission portal for post-acceptance materials (A4)
-- Stripe Connect Standard, ACH-first, nonprofit rate, optional surcharge (A5, A5a–c)
-- Fee schedule engine; exact per-team totals (A6)
-- Receipts, refunds, deposit state (A7)
-- Fee-aware gross/net ledger (A8)
-- One-screen dashboard: applied / accepted / paid / outstanding (A9)
+- ~~Configurable registration form; application → acceptance → waitlist workflow (A1, A2)~~ — **shipped July 2026, ahead of the gate.**
+- ~~Roster and payment status joined by design (A3)~~ — **shipped July 31, 2026**, ahead of the gate. `charges` landed in migration `0009`.
+- Team submission portal for post-acceptance materials (A4) — blocked on a third actor kind and a link-minting path ([ADR-0011](decisions/0011-nothing-mints-a-link.md)), which is a decision rather than an oversight
+- Stripe Connect Standard, ACH-first, nonprofit rate, optional surcharge (A5, A5a–c) — **where the line now holds**
+- ~~Fee schedule engine; exact per-team totals (A6)~~ — **shipped July 31, 2026.** Pure and ESLint-fenced; `asOf` is passed in
+- ~~Refunds and deposit state (A7)~~ — **shipped August 1, 2026** as an append-only `deposit_events` chain with a terminal index, driven from the board's deposit table. **Receipts are not built** — they need a delivery channel, which is the comms engine
+- ~~Fee-aware gross/net ledger (A8)~~ — **shipped August 1, 2026**, including attaching a lump to obligations that did not exist when it arrived
+- ~~One-screen dashboard: applied / accepted / paid / outstanding (A9)~~ — **shipped August 1, 2026**
 - One-click reminders to late payers (A10)
 - Google Drive import as the on-ramp (A11)
 

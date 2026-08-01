@@ -1,6 +1,6 @@
 # ADR-0002 — Money is integer cents, and payments allocate to charges
 
-**Status:** accepted · July 9, 2026 · *schema designed, not migrated*
+**Status:** accepted · July 9, 2026 · *migrated in `0009`, July 31, 2026; see [ADR-0014](0014-the-allocation-counter.md)*
 
 ## Context
 
