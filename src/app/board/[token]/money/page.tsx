@@ -4,9 +4,12 @@ import { Wordmark } from "@/components/Wordmark";
 import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
 import { listRosterForBoard, resolveBoardActor } from "@/lib/auth/scope";
 import { describeBalance, formatCents } from "@/lib/money/format";
-import { whoOwes } from "@/lib/money/who-owes";
+import { listOpenPayments } from "@/lib/money/ledger";
+import { summarizeOpenPayments, whoOwes } from "@/lib/money/who-owes";
 import type { PayableTeam } from "./RecordPayment";
 import { RecordPayment } from "./RecordPayment";
+import type { OpenPaymentView } from "./UnattributedCredit";
+import { UnattributedCredit } from "./UnattributedCredit";
 
 export const dynamic = "force-dynamic";
 
@@ -24,8 +27,29 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
   const actor = await resolveBoardActor(token);
   if (!actor) notFound();
 
-  const roster = await listRosterForBoard(actor);
+  const [roster, openPayments] = await Promise.all([
+    listRosterForBoard(actor),
+    listOpenPayments(actor),
+  ]);
   const report = whoOwes(roster);
+  const credit = summarizeOpenPayments(openPayments);
+
+  const chargesByTeam = new Map(roster.map((team) => [team.id, team.charges]));
+  const openViews: OpenPaymentView[] = openPayments.map((payment) => ({
+    id: payment.id,
+    teamName: payment.teamName,
+    bidCode: payment.bidCode,
+    rail: payment.rail,
+    receivedAt: payment.receivedAt.toISOString().slice(0, 10),
+    grossCents: payment.grossCents,
+    remainingCents: payment.remainingCents,
+    charges: (chargesByTeam.get(payment.teamId) ?? []).map((charge) => ({
+      id: charge.id,
+      kind: charge.kind,
+      amountCents: charge.amountCents,
+      paidCents: charge.paidCents,
+    })),
+  }));
 
   // Every team, not only the billed ones: a team paying a deposit to hold a slot is `applied` and
   // has no charges yet, and that is the normal order of events rather than an edge case.
@@ -77,6 +101,14 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
           </div>
         )}
 
+        <div className="mb-6">
+          <UnattributedCredit
+            token={token}
+            payments={openViews}
+            totalRemainingCents={credit.totalRemainingCents}
+          />
+        </div>
+
         {report.rows.length === 0 ? (
           <div className={cardClass}>
             <p className="text-body text-muted">
@@ -117,6 +149,20 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
                     <td className="py-2.5 pr-3">
                       <span className="font-medium text-heading">{row.name}</span>
                       <span className="block text-caption text-subtle">{row.bidCode}</span>
+                      {/* `paidCents` per charge was computed by `listRosterForBoard` and rendered
+                          by nothing, which left "is the security deposit paid?" unanswerable — and
+                          that is the question A7's whole refund chain sits on top of. */}
+                      {(chargesByTeam.get(row.teamId) ?? []).map((charge) => (
+                        <span
+                          key={charge.id}
+                          data-testid={`charge-${row.bidCode}-${charge.kind}`}
+                          data-paid-cents={charge.paidCents}
+                          className="block text-micro text-subtle"
+                        >
+                          {charge.kind.replace("_", " ")}: {formatCents(charge.paidCents)} of{" "}
+                          {formatCents(charge.amountCents)}
+                        </span>
+                      ))}
                     </td>
                     <td className="py-2.5 pr-3">
                       <span className={cx(pillClass, "bg-hover text-muted")}>{row.status}</span>

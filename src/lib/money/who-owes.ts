@@ -72,6 +72,25 @@ export const whoOwes = (roster: readonly RosterTeamView[]): WhoOwes => {
 };
 
 /**
+ * How much arrived that nobody has said the purpose of.
+ *
+ * Lives beside `whoOwes` because it answers the same screen's second question, and is pure for the
+ * same reason: the total a board reads has to be arithmetic over exactly the rows beneath it.
+ *
+ * A fully attached payment is **excluded**, not shown as $0 — the same rule as a team that was never
+ * billed. A list of things needing attention should contain only things needing attention.
+ */
+export const summarizeOpenPayments = (
+  payments: readonly { remainingCents: number }[],
+): { count: number; totalRemainingCents: number } => {
+  const open = payments.filter((payment) => payment.remainingCents > 0);
+  return {
+    count: open.length,
+    totalRemainingCents: open.reduce((sum, payment) => sum + payment.remainingCents, 0),
+  };
+};
+
+/**
  * The same rows as a file, through the existing `toCsv`. Dollars rather than cents, because this is
  * an edge — a treasurer opens it in a spreadsheet beside a bank statement, and cents would have to
  * be converted by hand, which is the arithmetic this product exists to remove.
