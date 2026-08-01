@@ -201,12 +201,19 @@ export function LiveBoard({
           )}
         </div>
 
-        <div className="mt-7 border-t border-border-soft pt-5">
+        <div className="mt-7 flex flex-wrap gap-4 border-t border-border-soft pt-5">
           <a
             href={`/board/${token}/roster`}
             className="text-caption text-muted underline underline-offset-2 hover:text-primary"
           >
             Registration →
+          </a>
+          <a
+            href={`/board/${token}/money`}
+            data-testid="money-link"
+            className="text-caption text-muted underline underline-offset-2 hover:text-primary"
+          >
+            Who owes what →
           </a>
         </div>
 

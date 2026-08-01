@@ -9,10 +9,13 @@ import {
   CHAIN_INDEX_NAMES,
   deductions,
   judgeAssignments,
+  PAYMENT_RAILS,
   TEAM_STATUSES,
 } from "@/db/schema";
-import type { TeamStatus } from "@/db/schema";
+import type { PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
+import { formatCents, parseDollars } from "@/lib/money/format";
+import { recordPayment } from "@/lib/money/ledger";
 import { setTeamStatus, setWaitlistRank } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
@@ -395,6 +398,80 @@ export const setWaitlistRankAction = async (
 
   revalidatePath(`/board/${token}/roster`);
   return { status: "ok", message: "Waitlist reordered." };
+};
+
+/**
+ * A8, reachable at last. The ledger shipped with `recordPayment` and nothing calling it, so a board
+ * could generate what a team owes (`setTeamStatus` → `syncCharges`) and had no instrument to say a
+ * cent of it had arrived — every accepted team a permanent debtor, and the CSV a treasurer opens
+ * beside a bank statement reporting the whole season unpaid.
+ *
+ * Nothing here validates money. The dollars-to-cents edge is `parseDollars` and every refusal past
+ * it is `recordPayment`'s, whose sentences already come from `violatedConstraint` rather than from a
+ * driver message. This parses a form and delegates.
+ */
+export const recordPaymentAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const teamId = String(formData.get("teamId") ?? "");
+  const rail = String(formData.get("rail") ?? "");
+  const externalRef = String(formData.get("externalRef") ?? "").trim();
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (!teamId) return { status: "error", message: "Pick a team." };
+  if (!PAYMENT_RAILS.includes(rail as PaymentRail)) {
+    return { status: "error", message: "That is not a payment rail." };
+  }
+
+  const grossCents = parseDollars(String(formData.get("gross") ?? ""));
+  if (grossCents === null) {
+    return { status: "error", message: "Enter the amount as dollars and cents, like 2160.00." };
+  }
+
+  const feeInput = String(formData.get("fee") ?? "").trim();
+  const feeCents = feeInput === "" ? 0 : parseDollars(feeInput);
+  if (feeCents === null) {
+    return { status: "error", message: "Enter the processing fee as dollars and cents, or leave it blank." };
+  }
+
+  // Every `allocation-<chargeId>` field the form rendered. A blank one is not an allocation, which
+  // is what lets a treasurer record a lump against one obligation and leave the rest for later.
+  const allocations: { chargeId: string; amountCents: number }[] = [];
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith("allocation-")) continue;
+    const raw = String(value).trim();
+    if (raw === "") continue;
+
+    const amountCents = parseDollars(raw);
+    if (amountCents === null) {
+      return { status: "error", message: "Enter each allocation as dollars and cents, or leave it blank." };
+    }
+    allocations.push({ chargeId: key.slice("allocation-".length), amountCents });
+  }
+
+  const result = await recordPayment(actor, {
+    teamId,
+    rail: rail as PaymentRail,
+    grossCents,
+    feeCents,
+    externalRef: externalRef === "" ? undefined : externalRef,
+    allocations,
+  });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/money`);
+  revalidatePath(`/board/${token}/roster`);
+  return {
+    status: "ok",
+    message:
+      result.creditCents > 0
+        ? `Recorded. ${formatCents(result.creditCents)} of it is not attached to anything yet.`
+        : "Recorded.",
+  };
 };
 
 export const addDeductionAction = async (

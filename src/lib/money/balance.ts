@@ -50,3 +50,21 @@ export const teamBalance = (
   const owedCents = charges.reduce((sum, charge) => sum + charge.amountCents, 0);
   return { owedCents, paidCents, balanceCents: owedCents - paidCents };
 };
+
+/**
+ * What is still unsettled on one obligation, and what is still unattached on one payment.
+ *
+ * Both are one subtraction, and both exist so the entry form's readout, the ledger's refusal, and
+ * the unattributed-credit panel cannot drift apart into three definitions of "what is left".
+ *
+ * **Neither clamps at zero**, for `teamBalance`'s reason: a negative is information. A charge whose
+ * allocations exceed it has been over-attributed, and that is a thing to be able to see rather than
+ * a thing to round away.
+ */
+export const remainingOnCharge = (charge: ChargeLineView): number =>
+  charge.amountCents - charge.paidCents;
+
+export const unallocatedCents = (payment: {
+  grossCents: number;
+  allocatedCents: number;
+}): number => payment.grossCents - payment.allocatedCents;

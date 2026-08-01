@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChargeLineView } from "../balance";
-import { teamBalance } from "../balance";
+import { remainingOnCharge, teamBalance, unallocatedCents } from "../balance";
 
 const charge = (id: string, amountCents: number, paidCents = 0): ChargeLineView => ({
   id,
@@ -63,5 +63,36 @@ describe("teamBalance", () => {
     const balance = teamBalance([charge("dep", 10_000, 9_701)], 9_701);
     expect(balance.balanceCents).toBe(299);
     expect(Number.isInteger(balance.balanceCents)).toBe(true);
+  });
+});
+
+describe("remainingOnCharge", () => {
+  it("is the whole charge when nothing has been attached", () => {
+    expect(remainingOnCharge(charge("reg", 112_000))).toBe(112_000);
+  });
+
+  it("is zero when the obligation is settled", () => {
+    expect(remainingOnCharge(charge("dep", 10_000, 10_000))).toBe(0);
+  });
+
+  it("goes negative rather than clamping, so an over-attribution is visible", () => {
+    // The database does not refuse this — `allocated <= gross` is per payment, not per charge —
+    // so the number that shows it must survive rather than be rounded up to zero.
+    expect(remainingOnCharge(charge("dep", 10_000, 100_000))).toBe(-90_000);
+  });
+});
+
+describe("unallocatedCents", () => {
+  it("is what is left of a lump", () => {
+    // NCSU's $2,160 with $1,600 attached.
+    expect(unallocatedCents({ grossCents: 216_000, allocatedCents: 160_000 })).toBe(56_000);
+  });
+
+  it("is zero for a fully attached payment", () => {
+    expect(unallocatedCents({ grossCents: 178_000, allocatedCents: 178_000 })).toBe(0);
+  });
+
+  it("is the whole payment when nothing was said about it", () => {
+    expect(unallocatedCents({ grossCents: 216_000, allocatedCents: 0 })).toBe(216_000);
   });
 });
