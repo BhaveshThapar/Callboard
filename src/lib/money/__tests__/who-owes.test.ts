@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { RosterTeamView } from "@/lib/auth/scope";
 import { teamBalance } from "../balance";
-import { toWhoOwesCsv, whoOwes } from "../who-owes";
+import { summarizeOpenPayments, toWhoOwesCsv, whoOwes } from "../who-owes";
 
 const team = (
   bidCode: string,
@@ -120,5 +120,32 @@ describe("toWhoOwesCsv", () => {
 
     expect(lines.at(-1)).toContain("TOTAL");
     expect(lines.at(-1)).toContain("$1,000.00");
+  });
+});
+
+describe("summarizeOpenPayments", () => {
+  it("is nothing when every payment is fully attributed", () => {
+    expect(summarizeOpenPayments([])).toEqual({ count: 0, totalRemainingCents: 0 });
+  });
+
+  it("adds up exactly the remainders it lists", () => {
+    // NCSU's $560 leftover, a $100 deposit paid before acceptance, and $12.50 of odd change.
+    const summary = summarizeOpenPayments([
+      { remainingCents: 56_000 },
+      { remainingCents: 10_000 },
+      { remainingCents: 1_250 },
+    ]);
+
+    expect(summary).toEqual({ count: 3, totalRemainingCents: 67_250 });
+  });
+
+  /**
+   * A fully attached payment is excluded rather than shown as $0 — the same rule `whoOwes` applies
+   * to a team that was never billed. A list of things needing attention that contains things not
+   * needing attention is a list a treasurer stops reading.
+   */
+  it("omits a settled payment instead of listing it at zero", () => {
+    const summary = summarizeOpenPayments([{ remainingCents: 0 }, { remainingCents: 56_000 }]);
+    expect(summary).toEqual({ count: 1, totalRemainingCents: 56_000 });
   });
 });

@@ -239,6 +239,84 @@ test("the money screen is reachable by clicking, not by knowing the URL", async 
   await expect(page.getByTestId("record-payment")).toBeVisible();
 });
 
+/**
+ * The case worth the most in this file, run in the order it actually happens to a treasurer.
+ *
+ * NCSU sent one $2,160 Venmo labelled "hotel, security deposit & reg fees" — PRD §14's headline
+ * exhibit — and a team paying to hold a slot pays *before* it is accepted, when
+ * `BILLABLE_STATUSES` means it has no obligations to attach to. Until `allocatePayment` existed
+ * that money could be recorded and then never attributed by any path, because `recordPayment`
+ * fixed a payment's allocation set at insert.
+ *
+ * The load-bearing assertion is step 6: **attributing money must not move a balance.** `paid` is
+ * the sum of gross, so saying what a payment was for is a statement about attribution and about
+ * nothing else. If that number moves, the fix has reintroduced the bug it was written to close.
+ */
+test("a lump paid before acceptance is attributed after it, and attributing it moves no balance", async ({
+  browser,
+}) => {
+  const comp = seed();
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  await money(page, comp.boardToken);
+
+  // 1. M-1 is `applied`. The money arrives with nothing to attach it to.
+  await pay(page, "M-1", { gross: "2160.00", rail: "ach" });
+  await expect(owedRow(page, "M-1")).toHaveAttribute("data-balance-cents", "-216000");
+  await expect(page.getByTestId("unattributed-total")).toHaveText("$2,160.00");
+
+  // 2. Accepting it generates $1,120 + $560 + $100. The balance moves; the money does not.
+  await accept(page, comp.boardToken, "M-1");
+  await money(page, comp.boardToken);
+  await expect(owedRow(page, "M-1")).toHaveAttribute("data-balance-cents", "-38000");
+  await expect(page.getByTestId("unattributed-total")).toHaveText("$2,160.00");
+
+  // 3. Now it can be said what the lump was for.
+  await page.getByTestId("apply-M-1-registration").fill("1120.00");
+  await page.getByTestId("apply-M-1-hotel").fill("560.00");
+  await page.getByTestId("apply-M-1-deposit").fill("100.00");
+  await page.getByTestId("apply-submit-M-1").click();
+  await expect(page.getByTestId("apply-message")).toContainText("$380.00");
+
+  // 4. $380 of the lump remains unexplained, and the panel still says so.
+  await expect(page.getByTestId("unattributed-total")).toHaveText("$380.00");
+
+  // 5. Every obligation now reads settled -- the question A7's refund chain sits on top of.
+  await expect(page.getByTestId("charge-M-1-deposit")).toHaveAttribute("data-paid-cents", "10000");
+  await expect(page.getByTestId("charge-M-1-registration")).toHaveAttribute(
+    "data-paid-cents",
+    "112000",
+  );
+
+  // 6. And the balance did not move. This is the assertion the whole change is judged by.
+  await expect(owedRow(page, "M-1")).toHaveAttribute("data-balance-cents", "-38000");
+});
+
+test("the same payment cannot be applied to the same charge twice", async ({ browser }) => {
+  const comp = seed();
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  await money(page, comp.boardToken);
+
+  // M-2 is accepted in the seed: 20 x $70 + 5 x $140 + $100 = $2,200.
+  await pay(page, "M-2", { gross: "2200.00" });
+
+  await page.getByTestId("apply-M-2-registration").fill("500.00");
+  await page.getByTestId("apply-submit-M-2").click();
+  await expect(page.getByTestId("apply-message")).toContainText("Applied");
+
+  // $900 is still left on the $1,400 registration charge, so the in-process guard has nothing to
+  // say -- what refuses this is `payment_allocations_live_unique`, read by constraint name.
+  await page.getByTestId("apply-M-2-registration").fill("400.00");
+  await page.getByTestId("apply-submit-M-2").click();
+
+  const message = page.getByTestId("apply-message");
+  await expect(message).toContainText("already applied to that charge");
+  await expect(message).not.toContainText("Failed query");
+});
+
 test("another team's charge is refused, because a chargeId on a form is a claim", async ({
   browser,
 }) => {

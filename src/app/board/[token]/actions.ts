@@ -15,7 +15,7 @@ import {
 import type { PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { formatCents, parseDollars } from "@/lib/money/format";
-import { recordPayment } from "@/lib/money/ledger";
+import { allocatePayment, recordPayment } from "@/lib/money/ledger";
 import { setTeamStatus, setWaitlistRank } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
@@ -471,6 +471,52 @@ export const recordPaymentAction = async (
       result.creditCents > 0
         ? `Recorded. ${formatCents(result.creditCents)} of it is not attached to anything yet.`
         : "Recorded.",
+  };
+};
+
+/**
+ * Attaching a lump to the obligations it turned out to be for, after the fact.
+ *
+ * The reason this is a separate action rather than an edit to the one above: a payment's purpose is
+ * often learned later. NCSU's $2,160 arrived labelled "hotel, security deposit & reg fees" and had
+ * to be unbundled by hand; a team that pays a deposit to hold a slot has no charges to attach it to
+ * until it is accepted. Neither is reachable from the entry form, however good the form is.
+ */
+export const allocatePaymentAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const paymentId = String(formData.get("paymentId") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+  if (!paymentId) return { status: "error", message: "Pick a payment." };
+
+  const allocations: { chargeId: string; amountCents: number }[] = [];
+  for (const [key, value] of formData.entries()) {
+    if (!key.startsWith("apply-")) continue;
+    const raw = String(value).trim();
+    if (raw === "") continue;
+
+    const amountCents = parseDollars(raw);
+    if (amountCents === null) {
+      return { status: "error", message: "Enter each amount as dollars and cents, or leave it blank." };
+    }
+    allocations.push({ chargeId: key.slice("apply-".length), amountCents });
+  }
+
+  const result = await allocatePayment(actor, paymentId, allocations);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/money`);
+  revalidatePath(`/board/${token}/roster`);
+  return {
+    status: "ok",
+    message:
+      result.creditCents > 0
+        ? `Applied. ${formatCents(result.creditCents)} is still unattached.`
+        : "Applied. All of it is now attached.",
   };
 };
 
