@@ -13,6 +13,8 @@ const healthy: Observed = {
   teams: 8,
   forkGuaranteeEnforced: true,
   forkedComps: [],
+  moneyGuaranteeEnforced: true,
+  driftingPayments: [],
 };
 
 const unseeded: Observed = {
@@ -26,6 +28,8 @@ const unseeded: Observed = {
   teams: 0,
   forkGuaranteeEnforced: true,
   forkedComps: [],
+  moneyGuaranteeEnforced: true,
+  driftingPayments: [],
 };
 
 const expected = { judges: 3, teams: 8 };
@@ -125,5 +129,58 @@ describe("summarizeHealth", () => {
   it("passes a healthy database whose comp has never been locked", () => {
     const health = summarizeHealth({ ...healthy, forkedComps: [] }, expected);
     expect(health.ok).toBe(true);
+  });
+
+  it("reports missing money constraints, and names the migration rather than a reseed", () => {
+    const health = summarizeHealth({ ...healthy, moneyGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const money = health.problems.find((p) => p.includes("allocated past"));
+    expect(money).toMatch(/predates migration 0009/);
+    expect(money).toMatch(/db:migrate/);
+    // Reseeding does not create a constraint, so it must not be offered as the remedy.
+    expect(money).not.toMatch(/db:seed/);
+  });
+
+  // ADR-0014's named residual: the CHECK constrains the counter, not the sum it stands for. This is
+  // the half that can only be found, and finding it is the reason the trade was acceptable at all.
+  it("reports a payment whose counter drifted from its live allocations, by id", () => {
+    const health = summarizeHealth(
+      {
+        ...healthy,
+        driftingPayments: [{ paymentId: "pay-9", allocatedCents: 216000, allocatedSum: 0 }],
+      },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const drift = health.problems.find((p) => p.includes("pay-9"));
+    expect(drift).toMatch(/216000 cents are allocated/);
+    expect(drift).toMatch(/sum to 0/);
+    expect(drift).toMatch(/human must decide/);
+    expect(drift).not.toMatch(/db:seed/);
+  });
+
+  // Same argument as the chain indexes: a database without the money constraints is missing them
+  // whether or not a demo has been seeded onto it, and `db:seed` will not add them.
+  it("reports missing money constraints even when the comp is not seeded", () => {
+    const health = summarizeHealth({ ...unseeded, moneyGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems).toHaveLength(2);
+    expect(health.problems[0]).toMatch(/allocated past/);
+    expect(health.problems[1]).toMatch(/comp not seeded/);
+  });
+
+  it("does not confuse a chain problem with a money problem", () => {
+    const health = summarizeHealth(
+      { ...healthy, forkGuaranteeEnforced: false, moneyGuaranteeEnforced: false },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems).toHaveLength(2);
+    expect(health.problems[0]).toMatch(/can still fork/);
+    expect(health.problems[1]).toMatch(/allocated past/);
   });
 });

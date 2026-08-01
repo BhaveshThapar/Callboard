@@ -12,6 +12,51 @@ const NO_CLASS = {
   message: "Functional. Use a function and a type.",
 };
 
+/**
+ * A directory whose output must be a function of its input alone: no database, no clock, no
+ * randomness. Two of these exist and both are load-bearing — `src/lib/tabulation/`, so a locked run
+ * reproduces a year later from its own frozen row, and `src/lib/fees/schedule.ts`, so what a team
+ * owes is a function of the schedule and the roster rather than of the day it was asked.
+ *
+ * This is a helper rather than two hand-written blocks because of a flat-config footgun: a later
+ * `no-restricted-syntax` entry *replaces* an earlier one instead of merging into it, so the shared
+ * selectors have to be re-declared inside every zone. Written twice by hand, the second copy is one
+ * refactor away from silently losing the enum and class bans. Written once here, it cannot.
+ */
+const pureZone = (files, why) => ({
+  files,
+  rules: {
+    "no-restricted-imports": [
+      "error",
+      {
+        patterns: [
+          {
+            group: ["@/db", "@/db/*", "**/db/*", "drizzle-orm", "drizzle-orm/*"],
+            message: why,
+          },
+        ],
+      },
+    ],
+    "no-restricted-syntax": [
+      "error",
+      NO_ENUM,
+      NO_CLASS,
+      {
+        selector: "MemberExpression[object.name='Date'][property.name='now']",
+        message: `${why} Pass the time in as an input instead.`,
+      },
+      {
+        selector: "NewExpression[callee.name='Date']",
+        message: `${why} Pass the time in as an input instead.`,
+      },
+      {
+        selector: "MemberExpression[object.name='Math'][property.name='random']",
+        message: why,
+      },
+    ],
+  },
+});
+
 const config = [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {
@@ -31,47 +76,14 @@ const config = [
       "no-restricted-syntax": ["error", NO_ENUM, NO_CLASS],
     },
   },
-  {
-    // `src/lib/tabulation/` is pure: it takes a `TabulationInput` and returns a `TabulationResult`,
-    // and that is what lets a locked run reproduce a year later from its own frozen row. Until now
-    // the rule was prose in CLAUDE.md -- `import { db } from "@/db"` here passed lint and typecheck,
-    // and `reproducibility.test.ts` only catches an impurity that happens to change the result.
-    files: ["src/lib/tabulation/**/*.ts"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          patterns: [
-            {
-              group: ["@/db", "@/db/*", "**/db/*", "drizzle-orm", "drizzle-orm/*"],
-              message:
-                "src/lib/tabulation/ is pure. It takes a TabulationInput and returns a TabulationResult; reading the database here is what makes a locked result unreproducible.",
-            },
-          ],
-        },
-      ],
-      // This block *replaces* `no-restricted-syntax` rather than merging into it, so the shared
-      // selectors are repeated here on purpose: drop them and the enum and class bans quietly stop
-      // applying to exactly the directory that most needs them.
-      "no-restricted-syntax": [
-        "error",
-        NO_ENUM,
-        NO_CLASS,
-        {
-          selector: "MemberExpression[object.name='Date'][property.name='now']",
-          message: "src/lib/tabulation/ is pure. Pass the time in on TabulationInput instead.",
-        },
-        {
-          selector: "NewExpression[callee.name='Date']",
-          message: "src/lib/tabulation/ is pure. Pass the time in on TabulationInput instead.",
-        },
-        {
-          selector: "MemberExpression[object.name='Math'][property.name='random']",
-          message: "src/lib/tabulation/ is pure. A tabulation that cannot be replayed is not a result.",
-        },
-      ],
-    },
-  },
+  pureZone(
+    ["src/lib/tabulation/**/*.ts"],
+    "src/lib/tabulation/ is pure. It takes a TabulationInput and returns a TabulationResult; reading the world here is what makes a locked result unreproducible.",
+  ),
+  pureZone(
+    ["src/lib/fees/**/*.ts"],
+    "src/lib/fees/ is pure. What a team owes must be a function of the schedule and the roster; reading the world here makes a bill unexplainable to the treasurer holding it.",
+  ),
 ];
 
 export default config;

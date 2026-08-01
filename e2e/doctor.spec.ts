@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { MONEY_CONSTRAINTS } from "../src/db/schema/money";
 import { CHAIN_INDEXES } from "../src/db/schema/scores";
 
 /**
@@ -99,6 +100,58 @@ test("db:doctor names a comp that has already forked, and refuses to reseed it a
     // the seeder verifies its own work with this same doctor and refuses a database missing them.
     run("e2e/support/break-db.ts", "unfork", comp.compId);
     run("e2e/support/break-db.ts", "restore-index", definition);
+  }
+
+  expect(doctor().ok).toBe(true);
+});
+
+test("db:doctor fails a database whose money constraints are missing, and names the migration", () => {
+  seed();
+
+  const name = MONEY_CONSTRAINTS.allocatedCeiling;
+  const definition = run("e2e/support/break-db.ts", "constraint-def", name).trim();
+  expect(definition).toContain(name);
+
+  try {
+    run("e2e/support/break-db.ts", "drop-constraint", definition);
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+    expect(health.output).toContain("allocated past");
+    expect(health.output).toContain("db:migrate");
+
+    // Reseeding does not create a constraint, for the same reason it does not create an index.
+    expect(health.output).not.toContain("db:seed");
+  } finally {
+    run("e2e/support/break-db.ts", "restore-constraint", definition);
+  }
+
+  expect(doctor().ok).toBe(true);
+});
+
+/**
+ * ADR-0014 accepted a residual it could not push into the database: the CHECK constrains the
+ * counter, not the sum the counter stands for. That trade was only acceptable because the
+ * disagreement is *detectable* — so this is the test that the detection is real. Note that nothing
+ * is broken to reach this state: `payments_allocated_check` permits it, which is precisely the gap.
+ */
+test("db:doctor names a payment whose counter drifted from its allocations", () => {
+  const comp = seed();
+
+  try {
+    const paymentId = run("e2e/support/break-db.ts", "drift-payment", comp.compId).trim();
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+    expect(health.output).toContain(paymentId);
+    expect(health.output).toContain("216000 cents are allocated");
+    expect(health.output).toContain("sum to 0");
+    expect(health.output).toContain("human must decide");
+
+    // Which figure is true is not a question a seed script gets to answer.
+    expect(health.output).not.toContain("db:seed");
+  } finally {
+    run("e2e/support/break-db.ts", "undrift", comp.compId);
   }
 
   expect(doctor().ok).toBe(true);
