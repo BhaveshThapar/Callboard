@@ -11,6 +11,7 @@ import {
   boardAssignments,
   CHAIN_INDEX_NAMES,
   comps,
+  MONEY_CONSTRAINT_NAMES,
   judgeAssignments,
   orgs,
   people,
@@ -19,6 +20,71 @@ import {
 } from "./schema";
 
 type ChainObservation = Pick<Observed, "forkGuaranteeEnforced" | "forkedComps">;
+
+type MoneyObservation = Pick<Observed, "moneyGuaranteeEnforced" | "driftingPayments">;
+
+/** The tables migration 0009 creates. Absent means the migration has not run. */
+const MONEY_TABLES = ["fee_schedules", "charges", "payments", "payment_allocations"] as const;
+
+/**
+ * Whether over-allocation is still representable on this database, and whether a counter has
+ * already drifted from the allocations it stands for.
+ *
+ * A fact about the database rather than the demo, like `observeChain`, and gathered the same way.
+ * `MONEY_CONSTRAINTS` spans two catalogs — three are partial unique indexes (`pg_indexes`) and two
+ * are CHECK constraints (`pg_constraint`) — so both are read and unioned. Neither has a drizzle
+ * model, so both are raw SQL.
+ *
+ * The drift query is the half ADR-0014 could not push into the database. It is skipped, not
+ * guessed, when the tables are absent: a database without `payments` has no drift, and selecting
+ * from a missing table would throw where a preflight must report.
+ */
+const observeMoney = async (): Promise<MoneyObservation> => {
+  const [present, tables] = await Promise.all([
+    db.execute<{ name: string }>(sql`
+      select indexname as name from pg_indexes where schemaname = 'public'
+      union
+      select conname as name from pg_constraint
+    `),
+    db.execute<{ tablename: string }>(sql`
+      select tablename from pg_tables where schemaname = 'public'
+    `),
+  ]);
+
+  const names = new Set(present.rows.map((row) => row.name));
+  const moneyGuaranteeEnforced = MONEY_CONSTRAINT_NAMES.every((name) => names.has(name));
+
+  const existing = new Set(tables.rows.map((row) => row.tablename));
+  if (!MONEY_TABLES.every((table) => existing.has(table))) {
+    return { moneyGuaranteeEnforced, driftingPayments: [] };
+  }
+
+  // `coalesce`, because a payment with no live allocations should read 0 rather than drop out of
+  // the comparison -- a counter claiming $2,160 is spent against nothing is exactly the drift.
+  const drifting = await db.execute<{
+    payment_id: string;
+    allocated_cents: number;
+    allocated_sum: number;
+  }>(sql`
+    select p.id as payment_id,
+           p.allocated_cents,
+           coalesce(sum(a.amount_cents) filter (where a.voided_at is null), 0)::int as allocated_sum
+      from payments p
+      left join payment_allocations a on a.payment_id = p.id
+     group by p.id, p.allocated_cents
+    having p.allocated_cents
+         <> coalesce(sum(a.amount_cents) filter (where a.voided_at is null), 0)
+  `);
+
+  return {
+    moneyGuaranteeEnforced,
+    driftingPayments: drifting.rows.map((row) => ({
+      paymentId: row.payment_id,
+      allocatedCents: row.allocated_cents,
+      allocatedSum: row.allocated_sum,
+    })),
+  };
+};
 
 /**
  * Whether a comp's locked results can still fork on this database, and whether one already has.
@@ -65,8 +131,9 @@ const observeChain = async (): Promise<ChainObservation> => {
  * the board view renders), not migration-file hashes. It only reads, so it is safe against `main`.
  */
 export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
-  const [chain, [comp]] = await Promise.all([
+  const [chain, money, [comp]] = await Promise.all([
     observeChain(),
+    observeMoney(),
     db
       .select({ id: comps.id, name: comps.name })
       .from(comps)
@@ -79,6 +146,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
     return summarizeHealth(
       {
         ...chain,
+        ...money,
         compFound: false,
         boardAssignments: 0,
         boardName: null,
@@ -163,6 +231,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
   return summarizeHealth(
     {
       ...chain,
+      ...money,
       compFound: true,
       boardAssignments: board.length,
       boardName: first?.personName ?? null,
