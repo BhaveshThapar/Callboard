@@ -7,7 +7,7 @@ It exists because PRD §13 and the demo script were asking for **two different l
 | | What it is | Why it's asked | Consumed by code today? |
 |---|---|---|---|
 | **Part 1 — your comp** | Rubric, teams, judges, board | It stands up *your* competition, so the next thing you see is your teams and your rubric, not a demo org's | **Yes** — `comp-config.json` → `bun run db:seed --config` |
-| **Part 2 — your money** | Fee schedule, last season's payments | It is what registration and payments get built against, and it is what replaces the deposit | **No.** See below — this is stated plainly, not hidden |
+| **Part 2 — your money** | Fee schedule, last season's payments | It is what registration and payments get built against, and it is what replaces the deposit | **The fee schedule, yes** — it configures your comp and the product bills from it. **Last season's payments, no** — see below, stated plainly rather than hidden |
 
 Part 1 is small and has a fast payoff. Part 2 is the one that costs real hours, and that is the point of it.
 
@@ -61,9 +61,9 @@ You are not committing to anything by sending this, and it costs you nothing. If
 
 ### Be straight about what happens to it
 
-**There is no code that reads Part 2 yet, and there will not be until the gate clears.** Registration and payments are designed in [PAYMENTS.md](PAYMENTS.md) and [DATA_MODEL.md](DATA_MODEL.md) and deliberately unbuilt — the tables that would hold this (`fee_schedules`, `charges`, `payments`, `payment_allocations`) are specified and not migrated, because migrating tables nothing reads is just dead code with a schema.
+**Your fee schedule now has somewhere to go; your payment history still does not.** As of July 31, 2026 the tables that hold obligations and payments (`fee_schedules`, `charges`, `payments`, `payment_allocations`) are being built, so the fee schedule you send is entered as your comp's configuration and the product computes what each team owes from it.
 
-So Part 2 does not go into a database. It goes in a folder, and it is what the build is designed against between September and December. Saying otherwise would be a nicer sentence and a false one.
+**Last season's records are different, and we are not going to pretend otherwise.** They are not imported. They go in a folder, and they are what the build is checked against — the $2,160 lump and the $97.01 deposit are test cases before they are anything else. There is no bulk import, and building one before seeing three real boards' exports would be guessing at the format.
 
 **Why ask for it now, then?** Because the founding season is free, and free makes "yes" the cheapest word in the language. There is no deposit to prove a board means it. This is what proves it instead: it costs a treasurer real hours and real internal buy-in, and a board that will not go dig it out was never going to run its comp on this. It is also the difference between a payments system built against a founder's guesses and one built against a real $2,160 lump.
 

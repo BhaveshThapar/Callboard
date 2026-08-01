@@ -110,33 +110,51 @@ Append-only, indexed on `(comp_id, at)`. `actor_kind` ∈ `board | judge | syste
 
 ---
 
-## Designed, not migrated
+## Money
 
-### Money
+This is the shape of Pain 1 (PRD §2.2), and it is worth getting exactly right before a single dollar moves. **Landing in migration `0009`** — the columns below are what implementation settled on, and where they exceed [ADR-0002](decisions/0002-money-as-cents-and-allocations.md)'s sketch the reason is given, because the next reader takes this section as the spec.
 
-This is the shape of Pain 1 (PRD §2.2), and it is worth getting exactly right before a single dollar moves.
+Five constraints do the real work and are named once, in `MONEY_CONSTRAINTS`, for `CHAIN_INDEXES`' reason — the schema, the write path reading a failed insert's `cause`, and `db:doctor` must agree on strings none can derive. What each refuses is [ADR-0014](decisions/0014-the-allocation-counter.md).
 
-**`fee_schedules`** — `comp_id`, `per_dancer_cents`, `per_room_cents`, `deposit_cents`, `late_fee_cents`, `late_after`
+**`fee_schedules`** — `id`, `comp_id`, `per_dancer_cents`, `per_room_cents`, `deposit_cents`, `late_fee_cents`, `late_after`
 
 Mayuri 2026 charged $70/dancer + $140/room + a $100 refundable deposit, plus late fees. Every team therefore owes a different total, which is why a lump payment has to be unbundled by hand today.
 
-**`charges`** — `id`, `comp_id`, `team_id`, `kind`, `amount_cents`, `due_at`, `created_at`
+`id` was not in ADR-0002's list and is added for the ordinary reason — a row a `charges` generation run can name. The schedule is authored as comp config, not in a UI: it arrives from a treasurer through [INTAKE.md](INTAKE.md), which asks for exactly these five numbers.
+
+`per_room_cents` bills per room, and nothing recorded a room count — so **`teams.rooms integer`** is added, nullable. Null means *not yet known*, and the generator must emit **no hotel charge plus a stated gap** rather than a $0 one. A $0 hotel charge is a lie a treasurer will believe, and will find in April.
+
+**`charges`** — `id`, `comp_id`, `team_id`, `kind`, `amount_cents`, `due_at`, `created_at`, `voided_at`, `voided_reason`
 
 `kind` ∈ `registration | hotel | deposit | late_fee`. One row per obligation. Generated from the fee schedule and the team's roster, so nobody computes a total by hand.
 
-**`payments`** — `id`, `comp_id`, `team_id`, `rail`, `gross_cents`, `fee_cents`, `net_cents`, `external_ref`, `received_at`, `reconciled_at`
+**`voided_at`, never `DELETE`.** Deleting a charge that has money against it destroys the record of what a payment was *for*. Voiding gets the hard case right: a team that paid $1,120 and then dropped reads `owed 0 / paid 1120 / balance −1120` — the org owes them, stated in the product rather than discovered in April. `charges_live_kind_unique` is partial on `voided_at is null`, which is what makes regeneration idempotent — one live obligation per `(team, kind)` — while leaving voided history in place. It is also why a team that paid, dropped and came back reads *paid, not owing*: the old allocations still count, and the void does not block the new charge.
 
-`rail` ∈ `card | ach | venmo | zelle | check | cash`. Venmo and Zelle are in the enum because they exist in the world, not because we route through them.
+**`amount_cents > 0`, never negative.** A revision is a void plus an insert. Two mechanisms for "owes less than we said" is one too many, and the negative one is what makes a `sum()` report quietly wrong.
+
+**`payments`** — `id`, `comp_id`, `team_id`, `rail`, `gross_cents`, `fee_cents`, `net_cents`, `allocated_cents`, `external_ref`, `received_at`, `reconciled_at`
+
+`rail` ∈ `card | ach | venmo | zelle | check | cash`. Venmo and Zelle are in the enum because they exist in the world, not because we route through them — and today none of them is routed, so **every payment row is hand-entered**. That is the design, not a stopgap: it is what lets the ledger close the gap without Stripe.
 
 **Three columns, not one.** BU Dheem's $100 deposit landed as $97.01. That is `gross_cents = 10000`, `fee_cents = 299`, `net_cents = 9701`. The team's obligation is settled by the gross; the org's bank shows the net; the difference is a recorded cost rather than a $2.99 hole in the books.
 
-**`payment_allocations`** — `id`, `payment_id`, `charge_id`, `amount_cents`
+`net = gross - fee` is a **`CHECK`, not a generated column**. A generated column *supplies* the right answer, so an import claiming `net 9701` where the arithmetic says `9702` lands cleanly and the disagreement disappears. The ~$5,000 gap is made of discrepancies nobody was shown, so this one is refused at the door.
+
+`external_ref` is unique where present: a replayed webhook or a re-imported CSV is a duplicate payment, and a duplicate payment is a team told it is paid up when it is not.
+
+**`payment_allocations`** — `id`, `payment_id`, `charge_id`, `amount_cents`, `voided_at`
 
 The unbundler. NCSU sent one payment of $2,160 labeled "hotel, security deposit & reg fees." That is one `payments` row and three `payment_allocations` rows. The invariant is `sum(allocations.amount_cents) <= payments.gross_cents`, with the remainder being an unapplied credit.
+
+**`payments.allocated_cents` is what enforces that**, and it is the one denormalized number in the schema. The invariant spans rows, so a `CHECK` cannot see it; `CHECK (allocated_cents <= gross_cents)` plus `UPDATE ... SET allocated_cents = allocated_cents + $n` can, because that statement is one atomic read-modify-write holding its own row lock. Over-allocation becomes unrepresentable rather than merely caught. The residual — the database enforces `allocated <= gross`, *not* `allocated = sum(live allocations)` — is why `db:doctor` reports drifting payments by id. All of this is [ADR-0014](decisions/0014-the-allocation-counter.md), including why it is not a trigger.
 
 Without this table you get the kill exhibit from PRD §14: a season-summary sheet reading **$2,837.47** next to a hand-typed note saying *"true amount around 8k."*
 
 **Everything is `integer` cents.** Never a float, never a `numeric` read into a JS `number` for arithmetic. See [ADR-0002](decisions/0002-money-as-cents-and-allocations.md).
+
+---
+
+## Designed, not migrated
 
 ### Schedule
 
