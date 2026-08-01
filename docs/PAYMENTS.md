@@ -1,6 +1,10 @@
 # Payments
 
-**Status: designed, not implemented.** No Stripe code exists in this repo. This document is the spec Module A builds against, and the argument a treasurer has to be able to check.
+**Status: the ledger is being built; routing is not.** As of July 31, 2026 the obligation half of this document — `fee_schedules`, `charges`, `payments`, `payment_allocations`, and the reconciliation they make possible — was authorized and is landing in migration `0009`. **No Stripe code exists in this repo, and none is authorized** ([ADR-0005](decisions/0005-stripe-connect-standard-never-hold-funds.md) stays *designed, not implemented*).
+
+That split is the whole point and it is not a compromise: the ~$5,000 gap this document exists to close is closed by the **ledger**, on hand-entered `rail: 'venmo'` rows. Stripe buys ingestion and a `fee_cents` known at payment time rather than discovered on a March statement. Useful, and not the thing that was broken.
+
+This document is the spec Module A builds against, and the argument a treasurer has to be able to check.
 
 Sources: PRD §8.2 (A5–A11), §10, §11, §14.
 
