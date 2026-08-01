@@ -39,7 +39,9 @@ Module B (Tabulation), PRD §8.3. Judges score from any phone; the math runs its
 
 ## ▓▓▓ The founding-partner gate · PRD §13 ▓▓▓
 
-**Nothing below this line is built until the gate clears.** The selling window is **August**; boards for spring 2027 are forming now. The build window is **Sept–Dec 2026**, and it only opens on three signatures.
+**This line was drawn to hold until the gate cleared. It has been crossed three times**, each at the founder's direction: A1 and A2 in July 2026, ADJ·3 on July 31, and the money spine (A6–A9) on the same day. The gate itself has not moved — Track 1 is **0/10 conversations and 0/3 signatures** — so the line is recorded here as breached rather than redrawn, because a line that moves to wherever the code got to is not a line.
+
+What remains genuinely gated is named in each phase heading below, and the largest piece of it is Stripe (A5–A5c). The selling window is **August**; boards for spring 2027 are forming now. Nothing on this page moves Track 1.
 
 The founding season is **free** ($0; $300 from 2027–28), so a "yes" costs a board nothing and is worth nothing. A signature is a named person, a comp date, **their roster / fee schedule / last season's payment records**, and a **written $300 line in the budget they hand their successors**. Those are the things a board can only give if it means it.
 
@@ -55,7 +57,7 @@ The founding season is **free** ($0; $300 from 2027–28), so a "yes" costs a bo
 
 ---
 
-## Phase 01 — v1 · Module A · Registration · **A1–A2 live · A3–A4 gated**
+## Phase 01 — v1 · Module A · Registration · **A1–A2 live · A3 authorized · A4 gated**
 
 The spine, and the registration lead's pain. Roster and money live in one record so the acceptance-doc-vs-Venmo split that made "who paid" unanswerable at Mayuri 2026 cannot happen.
 
@@ -65,14 +67,16 @@ The spine, and the registration lead's pain. Roster and money live in one record
 |---|---|---|---|---|---|
 | **A1** | Configurable registration form | **Live** | Per comp: team info, roster size, audition-video link, waiver acknowledgment — authored as data in the comp config, like the rubric. The public form is the first page with no `Actor`; the projection is the scope. What it collects, the board can *see*: the audition link, the captain, and the waiver are on the roster screen, because accepting a team is a decision made about its application. The bid code is minted by a read-then-insert, so two captains applying at once collide on `teams_comp_bid_code_unique` — the loser retries rather than being handed the failed SQL. A board adds its **own questions** the same way — `registration.fields`, one of `text \| longtext \| number \| select \| checkbox`, whose answers land in `teams.custom_answers` keyed by field id and are shown to the board under the labels it asked them in. The config is both the form and the schema its answers are validated against, so there is one definition of what a comp asked, and it is the one that survives to be read a year later. **No division field** ([ADR-0010](decisions/0010-a-comp-is-one-division.md)). | — | ADR-0010, `teams`, `people`, `comps.registration` |
 | **A2** | Application → acceptance → waitlist | **Live** | The status lifecycle as one total transition map. Dropping a team that held a slot promotes the top of the waitlist, and the two land **in the same transaction** ([ADR-0012](decisions/0012-transactions-for-writes-that-span-statements.md)) or neither does. The roster freezes at the lock — reinstating a dropped team afterwards would hand it back scores it had already been given ([ADR-0009](decisions/0009-teams-is-the-roster-of-record.md)). A team the board waitlists joins the **back of the queue** — `waitlist_rank` is assigned on the way in, so promotion follows arrival order rather than uuid sort, which is what it followed while nothing in the product wrote that column. A board that wants a different order can say so: a reorder is a *trade* of two adjacent ranks, so it renumbers nobody else, and the lock freezes it because a rank is roster. One gap remains, and it is Phase 02's: obligations are *not* reconciled, because there are no `charges`. | A1 | ADR-0009, ADR-0012, `teams.status`, `transitions.ts` |
-| **A3** | Roster + payment status, one record | Designed | Joined by design, eliminating the acceptance-doc-vs-Venmo split. The structural fix, not a report. **Needs `charges`, which do not exist** — this is the easiest thing to drift into and the line where the gate still holds. It also sits on top of a question ADR-0012 explicitly reserved for the founding partners: whether Callboard routes money at all. | A2, `charges` | ADR-0012, PRD A3 |
+| **A3** | Roster + payment status, one record | Authorized | Joined by design, eliminating the acceptance-doc-vs-Venmo split. The structural fix, not a report. **Needs `charges`, which do not exist yet** — they land in migration `0009`. Built by *widening* `listRosterForBoard`, not by adding a fourth window: A3 asks no new question about which teams count, so money changes the columns and not the `where`. The question ADR-0012 reserved for the founding partners — whether Callboard *routes* money — stays reserved; this needs no rail. | A2, `charges` | ADR-0012, ADR-0014, PRD A3 |
 | **A4** | Team submission portal | Designed | Post-acceptance materials: final music, roster updates, emergency contacts — a team-facing filtered view of the same record. **Not as free as it looks.** It needs a third actor kind (`Actor` is still `BoardActor \| JudgeActor`), a `team_assignments` table, and a migration widening `audit_log`'s `actor_kind` check. Above all it needs a **link**, and nothing mints one — that is [ADR-0011](decisions/0011-nothing-mints-a-link.md), a decision, not an oversight. | a third actor kind; a link-minting path ([ADR-0011](decisions/0011-nothing-mints-a-link.md)) | ADR-0011, PRD A4 |
 
 ---
 
-## Phase 02 — v1 · Module A · Payments · **Designed (gated)**
+## Phase 02 — v1 · Module A · Payments · **A6–A9 authorized · A5x gated**
 
-The treasurer's pain, and why the ledger disagrees with the bank by ~$5,000 today. Callboard **never holds funds and never touches the org's tax status** — Stripe Connect Standard, funds settle direct to the org. Every amount is integer cents.
+The treasurer's pain, and why the ledger disagrees with the bank by ~$5,000 today. Callboard **never holds funds and never touches the org's tax status** — and today it does not move money at all: every `payments` row is hand-entered, on a rail we record and do not route. Every amount is integer cents.
+
+**The split is the point.** The ~$5k gap is closed by the **ledger** — obligations, payments, allocations, roster joined to money — which works perfectly well on a hand-entered `rail: 'venmo'` row. **Stripe (A5–A5c) buys ingestion, not correctness**, and stays gated: building card rails before a board says it wants them is guessing, and [ADR-0005](decisions/0005-stripe-connect-standard-never-hold-funds.md) remains *designed, not implemented*. A6–A9 were authorized July 31, 2026, ahead of the gate; the decisions they rest on are [ADR-0002](decisions/0002-money-as-cents-and-allocations.md) and [ADR-0014](decisions/0014-the-allocation-counter.md).
 
 | ID | Feature | Detail | Needs | Source |
 |---|---|---|---|---|

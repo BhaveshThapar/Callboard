@@ -20,6 +20,8 @@ Three mechanisms produce that gap (PRD §14):
 
 **A payment never points at a charge.** `payment_allocations(payment_id, charge_id, amount_cents)` sits between them, so one payment can settle many obligations and one obligation can be settled by many payments. Invariant: `sum(allocations.amount_cents) <= payments.gross_cents`, with any remainder an unapplied credit.
 
+*What enforces that invariant is [ADR-0014](0014-the-allocation-counter.md), which this ADR did not answer: it spans rows, so a `CHECK` cannot see it.*
+
 **`payments.rail` records rails we do not route** — `venmo`, `zelle`, `check`, `cash` — because boards will keep taking money on them during the transition, and a ledger that cannot represent reality is a ledger nobody trusts.
 
 ## Consequences
@@ -33,3 +35,5 @@ Formatting for display is the only place a fractional dollar exists, and it happ
 The money tables are specified in [DATA_MODEL.md](../DATA_MODEL.md) and absent from Postgres. PRD §8.1 says the model is defined now — it is, in prose and in a schema sketch. Migrating tables that no code reads would be dead code with a migration attached.
 
 They land with Module A, behind the founding-partner gate in PRD §13. The decision recorded here is what Module A is required to build.
+
+**Update, July 31, 2026.** The gate has not cleared — Track 1 is still 0/10 and 0/3 — and the money spine was authorized anyway, at the founder's direction. These tables land in migration `0009`. This section is superseded on the question of *when*, not on any of the decisions above, all of which the implementation obeys. [ADR-0014](0014-the-allocation-counter.md) answers the one question this ADR left open.
