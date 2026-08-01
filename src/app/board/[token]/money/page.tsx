@@ -5,6 +5,8 @@ import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
 import { listRosterForBoard, resolveBoardActor } from "@/lib/auth/scope";
 import { describeBalance, formatCents } from "@/lib/money/format";
 import { whoOwes } from "@/lib/money/who-owes";
+import type { PayableTeam } from "./RecordPayment";
+import { RecordPayment } from "./RecordPayment";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +24,23 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
   const actor = await resolveBoardActor(token);
   if (!actor) notFound();
 
-  const report = whoOwes(await listRosterForBoard(actor));
+  const roster = await listRosterForBoard(actor);
+  const report = whoOwes(roster);
+
+  // Every team, not only the billed ones: a team paying a deposit to hold a slot is `applied` and
+  // has no charges yet, and that is the normal order of events rather than an edge case.
+  const payable: PayableTeam[] = roster.map((team) => ({
+    id: team.id,
+    name: team.name,
+    bidCode: team.bidCode,
+    status: team.status,
+    charges: team.charges.map((charge) => ({
+      id: charge.id,
+      kind: charge.kind,
+      amountCents: charge.amountCents,
+      paidCents: charge.paidCents,
+    })),
+  }));
 
   return (
     <div className="bg-app min-h-screen">
@@ -52,6 +70,12 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
             )}
           </div>
         </header>
+
+        {payable.length > 0 && (
+          <div className="mb-6">
+            <RecordPayment token={token} teams={payable} />
+          </div>
+        )}
 
         {report.rows.length === 0 ? (
           <div className={cardClass}>
