@@ -33,11 +33,29 @@ export const DEMO_CONFIG: CompConfig = {
     { bidCode: "F-623", name: "Pitt Nrityamala", school: "Pittsburgh" },
     { bidCode: "G-745", name: "Cornell Yalla", school: "Cornell" },
     { bidCode: "H-860", name: "UVA Aayaam", school: "Virginia" },
-  ].map((team, i) => ({ ...team, division: "fusion", rosterSize: 16, performanceOrder: i + 1 })),
+    // Room counts are deliberately partial. The demo must show the *gap* case as well as the happy
+    // one: a team whose rooms are unknown gets no hotel charge and a stated reason, rather than a
+    // $0 hotel line a treasurer would read as "nothing owed".
+  ].map((team, i) => ({
+    ...team,
+    division: "fusion",
+    rosterSize: 16,
+    rooms: i < 6 ? 4 : undefined,
+    performanceOrder: i + 1,
+  })),
   judges: [
     { name: "Priya Raghavan", email: "priya@example.com" },
     { name: "Arjun Mehta", email: "arjun@example.com" },
     { name: "Sonia Desai", email: "sonia@example.com" },
   ],
   board: [{ name: "Ananya Krishnan", email: "ananya@example.com" }],
+  // Mayuri 2026's real numbers (PRD §14, INTAKE.md): $70/dancer + $140/room + a $100 deposit. Every
+  // team therefore owes a different total, which is the normal case rather than the hard one.
+  feeSchedule: {
+    perDancerCents: 7000,
+    perRoomCents: 14000,
+    depositCents: 10000,
+    lateFeeCents: 2500,
+    lateAfter: "2027-02-01",
+  },
 };

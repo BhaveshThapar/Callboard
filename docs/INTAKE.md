@@ -53,6 +53,8 @@ You are not committing to anything by sending this, and it costs you nothing. If
 
 **Your fee schedule.** What a team owes and how it's built up: per dancer, per hotel room, a deposit, late fees and the date they kick in. *(Mayuri 2026, for reference: $70/dancer + $140/room + $100 deposit + late fees — which means every team owes a different number, and that is the normal case, not the hard one.)*
 
+This one **is** entered into the product: it becomes your comp's configuration, and each team's total is generated from it and their roster rather than typed by hand. Send the room count per team if you have it. If you don't, say so rather than sending zeros — a team whose rooms are unknown gets **no hotel charge and a note saying why**, which is recoverable, whereas a $0 hotel charge looks settled and is not.
+
 **Last season's payment records.** What actually arrived, however it arrived. What matters most is the ugly parts:
 - Payments that came in as one lump covering several things. *(Mayuri's worst: a single $2,160 that was hotel + security deposit + registration, unbundled by hand.)*
 - Payments that arrived as the wrong number. *(A $100 deposit that landed as $97.01, because the card fee came out first.)*

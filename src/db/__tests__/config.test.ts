@@ -5,6 +5,20 @@ import { DEMO_CONFIG } from "../seed-config";
 
 const valid = () => structuredClone(DEMO_CONFIG) as unknown as Record<string, unknown>;
 
+/**
+ * The smallest config that parses. Used where the assertion is about a field being *absent*, which
+ * `DEMO_CONFIG` cannot answer -- it carries a fee schedule and room counts of its own, so asserting
+ * absence against it tests the demo rather than the default.
+ */
+const minimal = (): Record<string, unknown> => ({
+  org: { name: "O", slug: "o" },
+  comp: { name: "C", slug: "c" },
+  rubric: { name: "R", normalization: "raw", criteria: [{ label: "A", maxPoints: 10 }] },
+  teams: [{ name: "T", bidCode: "A-1" }],
+  judges: [{ name: "J" }],
+  board: [{ name: "B" }],
+});
+
 describe("parseCompConfig", () => {
   it("accepts the demo config unchanged", () => {
     expect(parseCompConfig(valid())).toEqual(DEMO_CONFIG);
@@ -262,6 +276,86 @@ describe("parseCompConfig", () => {
           ),
         ).toThrow(/registration.fields\[1\].label/);
       });
+    });
+  });
+  describe("feeSchedule", () => {
+    const withFee = (fee: unknown) => ({ ...valid(), feeSchedule: fee });
+
+    it("is absent when unstated, which bills nothing rather than billing zero", () => {
+      expect(parseCompConfig(minimal()).feeSchedule).toBeUndefined();
+    });
+
+    it("accepts Mayuri 2026's numbers", () => {
+      const parsed = parseCompConfig(
+        withFee({
+          perDancerCents: 7000,
+          perRoomCents: 14000,
+          depositCents: 10000,
+          lateFeeCents: 2500,
+          lateAfter: "2027-02-01",
+        }),
+      );
+      expect(parsed.feeSchedule).toEqual({
+        perDancerCents: 7000,
+        perRoomCents: 14000,
+        depositCents: 10000,
+        lateFeeCents: 2500,
+        lateAfter: "2027-02-01",
+      });
+    });
+
+    it("defaults every unstated component to zero", () => {
+      expect(parseCompConfig(withFee({ depositCents: 10000 })).feeSchedule).toEqual({
+        perDancerCents: 0,
+        perRoomCents: 0,
+        depositCents: 10000,
+        lateFeeCents: 0,
+        lateAfter: undefined,
+      });
+    });
+
+    // This is where ADR-0002 stops being a convention. 70.5 means $70.50 to whoever typed it and
+    // 70.5 cents to the parser, and the difference only ever surfaces on a bank statement.
+    it("refuses a non-integer cents value, naming the path", () => {
+      expect(() => parseCompConfig(withFee({ perDancerCents: 70.5 }))).toThrow(
+        /feeSchedule.perDancerCents: expected a whole number/,
+      );
+    });
+
+    it("refuses a negative amount", () => {
+      expect(() => parseCompConfig(withFee({ depositCents: -1 }))).toThrow(
+        /feeSchedule.depositCents: expected a value of zero or more/,
+      );
+    });
+
+    it("refuses a late fee with no date, which would never apply", () => {
+      expect(() => parseCompConfig(withFee({ lateFeeCents: 2500 }))).toThrow(
+        /feeSchedule.lateAfter/,
+      );
+    });
+
+    it("refuses a late date with no fee, which would charge nothing", () => {
+      expect(() => parseCompConfig(withFee({ lateAfter: "2027-02-01" }))).toThrow(
+        /feeSchedule.lateFeeCents/,
+      );
+    });
+
+    it("refuses a late date that is not an ISO date", () => {
+      expect(() =>
+        parseCompConfig(withFee({ lateFeeCents: 2500, lateAfter: "Feb 1 2027" })),
+      ).toThrow(/an ISO date/);
+    });
+  });
+
+  describe("teams[].rooms", () => {
+    it("is undefined when unstated, which is not-yet-known rather than zero", () => {
+      expect(parseCompConfig(minimal()).teams[0]?.rooms).toBeUndefined();
+    });
+
+    it("refuses a non-integer room count", () => {
+      const config = valid();
+      (config.teams as Record<string, unknown>[])[0]!.rooms = 2.5;
+      expect(() => parseCompConfig(config)).toThrow(/teams\[0\].rooms/);
     });
   });
 });
