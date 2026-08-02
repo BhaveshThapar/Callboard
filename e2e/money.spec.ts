@@ -2,8 +2,10 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Browser, Page } from "@playwright/test";
+import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
+
+test.use({ viewport: { width: 1280, height: 900 } });
 
 /**
  * A2's other half: a roster move and the obligations it implies land together, or neither does.
@@ -61,9 +63,7 @@ const seed = (): SeededComp => {
   return JSON.parse(readFileSync(out, "utf8")) as SeededComp;
 };
 
-const boardPage = async (browser: Browser, token: string): Promise<Page> => {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
+const boardPage = async (page: Page, token: string): Promise<Page> => {
   await page.goto(`/board/${token}/roster`);
   await expect(page.getByTestId("roster")).toBeVisible();
   return page;
@@ -86,9 +86,9 @@ const balanceCents = async (page: Page, bidCode: string): Promise<number | null>
   return Number(await cell.getAttribute("data-balance-cents"));
 };
 
-test("accepting a team generates what the schedule says it owes, in the same act", async ({ browser }) => {
+test("accepting a team generates what the schedule says it owes, in the same act", async ({ page }) => {
   const comp = seed();
-  const page = await boardPage(browser, comp.boardToken);
+  await boardPage(page, comp.boardToken);
 
   // Applied teams are not billable, so there is no balance cell at all -- not a $0 one.
   expect(await balanceCents(page, "M-1")).toBeNull();
@@ -99,9 +99,9 @@ test("accepting a team generates what the schedule says it owes, in the same act
   expect(await balanceCents(page, "M-1")).toBe(178_000);
 });
 
-test("a team whose rooms are unknown is billed for everything except the room it cannot be billed for", async ({ browser }) => {
+test("a team whose rooms are unknown is billed for everything except the room it cannot be billed for", async ({ page }) => {
   const comp = seed();
-  const page = await boardPage(browser, comp.boardToken);
+  await boardPage(page, comp.boardToken);
 
   await move(page, "M-3", "accepted");
 
@@ -109,9 +109,9 @@ test("a team whose rooms are unknown is billed for everything except the room it
   expect(await balanceCents(page, "M-3")).toBe(80_000);
 });
 
-test("moving accepted to competing regenerates nothing", async ({ browser }) => {
+test("moving accepted to competing regenerates nothing", async ({ page }) => {
   const comp = seed();
-  const page = await boardPage(browser, comp.boardToken);
+  await boardPage(page, comp.boardToken);
 
   const before = await balanceCents(page, "M-2");
   expect(before).toBe(20 * 7000 + 5 * 14_000 + 10_000);
@@ -123,9 +123,9 @@ test("moving accepted to competing regenerates nothing", async ({ browser }) => 
   expect(await balanceCents(page, "M-2")).toBe(before);
 });
 
-test("dropping a team voids what it owed, and promotes the waitlist with its own charges", async ({ browser }) => {
+test("dropping a team voids what it owed, and promotes the waitlist with its own charges", async ({ page }) => {
   const comp = seed();
-  const page = await boardPage(browser, comp.boardToken);
+  await boardPage(page, comp.boardToken);
 
   await move(page, "M-2", "dropped");
 
@@ -146,9 +146,9 @@ test("dropping a team voids what it owed, and promotes the waitlist with its own
  * Here the charges are *voided*, the allocations survive, and `charges_live_kind_unique` is partial
  * on `voided_at is null` so the regenerate is not blocked by the rows it is replacing.
  */
-test("a team that paid, dropped, and came back reads paid rather than owing", async ({ browser }) => {
+test("a team that paid, dropped, and came back reads paid rather than owing", async ({ page }) => {
   const comp = seed();
-  const page = await boardPage(browser, comp.boardToken);
+  await boardPage(page, comp.boardToken);
 
   const owed = await balanceCents(page, "M-2");
   expect(owed).toBeGreaterThan(0);
@@ -199,10 +199,10 @@ test("a team that paid, dropped, and came back reads paid rather than owing", as
  * charge must not vanish with it.
  */
 test("changing a roster size releases the money attached to the charge it replaces", async ({
-  browser,
+  page,
 }) => {
   const comp = seed();
-  const page = await boardPage(browser, comp.boardToken);
+  await boardPage(page, comp.boardToken);
 
   const owed = await balanceCents(page, "M-2");
   execFileSync("bunx", ["tsx", "e2e/support/pay.ts", comp.compId, "M-2", String(owed)], {
@@ -233,10 +233,8 @@ test("changing a roster size releases the money attached to the charge it replac
  * is asserted against the sum of the rows above it rather than against a constant — a summary that
  * disagrees with its own rows is the ~$5,000 gap in miniature, arrived at honestly.
  */
-test("the who-owes screen totals exactly the rows it shows", async ({ browser }) => {
+test("the who-owes screen totals exactly the rows it shows", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await page.goto(`/board/${comp.boardToken}/money`);
   await expect(page.getByTestId("who-owes")).toBeVisible();
@@ -256,7 +254,7 @@ test("the who-owes screen totals exactly the rows it shows", async ({ browser })
   expect(rowTotal).toBeGreaterThan(0);
 });
 
-test("a comp that bills nothing says so rather than showing an empty table", async ({ browser }) => {
+test("a comp that bills nothing says so rather than showing an empty table", async ({ page }) => {
   const noFees = { ...CONFIG, org: { name: "No Fees Org", slug: "nofee-e2e-org" }, comp: { ...CONFIG.comp, slug: "nofee-e2e-comp" } };
   delete (noFees as { feeSchedule?: unknown }).feeSchedule;
 
@@ -268,18 +266,14 @@ test("a comp that bills nothing says so rather than showing an empty table", asy
   });
   const comp = JSON.parse(readFileSync(out, "utf8")) as SeededComp;
 
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
   await page.goto(`/board/${comp.boardToken}/money`);
 
   await expect(page.getByText("No team has been billed yet")).toBeVisible();
   await expect(page.getByTestId("who-owes")).toHaveCount(0);
 });
 
-test("the who-owes CSV carries the same total the screen does", async ({ browser }) => {
+test("the who-owes CSV carries the same total the screen does", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await page.goto(`/board/${comp.boardToken}/money`);
   const shown = Number(

@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
+test.use({ viewport: { width: 1280, height: 900 } });
+
 /**
  * A8, driven through the product rather than around it.
  *
@@ -102,10 +104,8 @@ const pay = async (
 
 const owedRow = (page: Page, bidCode: string) => page.getByTestId(`owes-row-${bidCode}`);
 
-test("a board records a payment and the team reads settled", async ({ browser }) => {
+test("a board records a payment and the team reads settled", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await accept(page, comp.boardToken, "M-1");
   await money(page, comp.boardToken);
@@ -122,12 +122,8 @@ test("a board records a payment and the team reads settled", async ({ browser })
   await expect(page.getByTestId("roster-balance-M-1")).toHaveAttribute("data-balance-cents", "0");
 });
 
-test("a card fee is entered beside the gross, and the team is credited what arrived", async ({
-  browser,
-}) => {
+test("a card fee is entered beside the gross, and the team is credited what arrived", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -148,12 +144,8 @@ test("a card fee is entered beside the gross, and the team is credited what arri
   await expect(row).toContainText("$100.00");
 });
 
-test("a lump larger than its allocations is recorded as a credit, and says so before submitting", async ({
-  browser,
-}) => {
+test("a lump larger than its allocations is recorded as a credit, and says so before submitting", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -173,10 +165,8 @@ test("a lump larger than its allocations is recorded as a credit, and says so be
   await expect(page.getByTestId("payment-message")).toContainText("not attached");
 });
 
-test("allocations past the payment are refused in a sentence, never in SQL", async ({ browser }) => {
+test("allocations past the payment are refused in a sentence, never in SQL", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -193,12 +183,8 @@ test("allocations past the payment are refused in a sentence, never in SQL", asy
   await expect(message).not.toContainText("insert into");
 });
 
-test("more than a charge is worth is refused before it becomes a wrong label", async ({
-  browser,
-}) => {
+test("more than a charge is worth is refused before it becomes a wrong label", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -212,10 +198,8 @@ test("more than a charge is worth is refused before it becomes a wrong label", a
   await expect(page.getByTestId("payment-message")).toContainText("left on that deposit charge");
 });
 
-test("an amount typed to a third decimal place is refused, not rounded", async ({ browser }) => {
+test("an amount typed to a third decimal place is refused, not rounded", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
   await pay(page, "M-2", { gross: "100.005" });
@@ -223,10 +207,8 @@ test("an amount typed to a third decimal place is refused, not rounded", async (
   await expect(page.getByTestId("payment-message")).toContainText("dollars and cents");
 });
 
-test("the money screen is reachable by clicking, not by knowing the URL", async ({ browser }) => {
+test("the money screen is reachable by clicking, not by knowing the URL", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   // The defect this file exists for was half invisibility: A9 shipped and nothing linked to it, so
   // the only way in was to type the path. A screen a board cannot find is a screen it does not have.
@@ -252,12 +234,8 @@ test("the money screen is reachable by clicking, not by knowing the URL", async 
  * the sum of gross, so saying what a payment was for is a statement about attribution and about
  * nothing else. If that number moves, the fix has reintroduced the bug it was written to close.
  */
-test("a lump paid before acceptance is attributed after it, and attributing it moves no balance", async ({
-  browser,
-}) => {
+test("a lump paid before acceptance is attributed after it, and attributing it moves no balance", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -293,10 +271,8 @@ test("a lump paid before acceptance is attributed after it, and attributing it m
   await expect(owedRow(page, "M-1")).toHaveAttribute("data-balance-cents", "-38000");
 });
 
-test("the same payment cannot be applied to the same charge twice", async ({ browser }) => {
+test("the same payment cannot be applied to the same charge twice", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -317,12 +293,8 @@ test("the same payment cannot be applied to the same charge twice", async ({ bro
   await expect(message).not.toContainText("Failed query");
 });
 
-test("another team's charge is refused, because a chargeId on a form is a claim", async ({
-  browser,
-}) => {
+test("another team's charge is refused, because a chargeId on a form is a claim", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await accept(page, comp.boardToken, "M-1");
   await money(page, comp.boardToken);
@@ -352,12 +324,8 @@ test("another team's charge is refused, because a chargeId on a form is a claim"
   );
 });
 
-test("a team with no charges can still be paid, because a deposit holds a slot", async ({
-  browser,
-}) => {
+test("a team with no charges can still be paid, because a deposit holds a slot", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 

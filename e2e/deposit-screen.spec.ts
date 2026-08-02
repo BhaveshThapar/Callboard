@@ -5,6 +5,8 @@ import { join } from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 
+test.use({ viewport: { width: 1280, height: 900 } });
+
 /**
  * A7, driven from the screen instead of from a fixture.
  *
@@ -72,10 +74,8 @@ const move = async (page: Page, bidCode: string, to: string): Promise<void> => {
   await expect(page.getByTestId(`deposit-row-${bidCode}`)).toHaveAttribute("data-state", to);
 };
 
-test("a board returns a deposit from the screen, and the row goes terminal", async ({ browser }) => {
+test("a board returns a deposit from the screen, and the row goes terminal", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -98,12 +98,8 @@ test("a board returns a deposit from the screen, and the row goes terminal", asy
   expect(depositFixture("state", comp.compId, "M-2")).toBe("refunded");
 });
 
-test("a bounced return is retried from the screen, because the money never left", async ({
-  browser,
-}) => {
+test("a bounced return is retried from the screen, because the money never left", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -118,10 +114,8 @@ test("a bounced return is retried from the screen, because the money never left"
   expect(depositFixture("state", comp.compId, "M-2")).toBe("refunded");
 });
 
-test("forfeiting needs a reason, and nothing is written without one", async ({ browser }) => {
+test("forfeiting needs a reason, and nothing is written without one", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
 
@@ -149,12 +143,8 @@ test("forfeiting needs a reason, and nothing is written without one", async ({ b
  * between it and the INSERT, microseconds wide. No browser test can force it, which is exactly why
  * `money.spec.ts` proves it by writing straight at the database instead of pretending to.
  */
-test("a deposit closed elsewhere is refused in process, with a sentence and never SQL", async ({
-  browser,
-}) => {
+test("a deposit closed elsewhere is refused in process, with a sentence and never SQL", async ({ page }) => {
   const comp = seed();
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await context.newPage();
 
   await money(page, comp.boardToken);
   await move(page, "M-2", "refund_pending");
