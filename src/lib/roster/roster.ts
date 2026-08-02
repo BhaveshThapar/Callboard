@@ -6,7 +6,7 @@ import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
 import { resolveRosterTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
-import { feeScheduleFor, syncCharges, voidChargesFor } from "@/lib/money/charges";
+import { feeScheduleFor, syncCharges, today, voidChargesFor } from "@/lib/money/charges";
 import {
   canTransition,
   dropFreesASlot,
@@ -25,11 +25,6 @@ const LOCKED = "Results are locked. The roster can no longer change.";
 
 const BILLABLE: readonly TeamStatus[] = BILLABLE_STATUSES;
 
-/**
- * Today, as an ISO date, resolved once per roster move and passed into the pure fee engine. The
- * clock is read *here* rather than there, which is what keeps `src/lib/fees/` reproducible.
- */
-const today = (): string => new Date().toISOString().slice(0, 10);
 
 /**
  * The rank for a team joining this comp's waitlist. Read-then-write, and deliberately not in a
