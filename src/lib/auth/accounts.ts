@@ -11,6 +11,7 @@
  * [ADR-0016]: ../../../docs/decisions/0016-accounts-for-people-who-stay-links-for-people-who-visit.md
  */
 import { and, eq, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db, withTransaction } from "@/db";
 import { violatedConstraint } from "@/db/errors";
 import {
@@ -20,6 +21,7 @@ import {
   memberships,
   people,
   sessions,
+  teams,
   users,
 } from "@/db/schema";
 import type { AccountRole } from "@/db/schema";
@@ -231,6 +233,58 @@ export const resolveLiaisonActor = async (
     compName: membership.compName,
     personId: user.personId,
     personName: membership.personName,
+  };
+};
+
+export type InvitationView = {
+  email: string | null;
+  compName: string;
+  role: AccountRole;
+  teamName: string | null;
+  invitedByName: string | null;
+};
+
+/**
+ * What the accept screen may say about an invitation before anybody has proved anything.
+ *
+ * The projection is the scope, as it is for `publicComp`: it carries the address the invitation was
+ * sent to, the comp, the role and who sent it — enough for the holder to recognize it as theirs, and
+ * nothing about the comp's roster, its money, or anybody else on it.
+ *
+ * **Null for expired, spent, revoked and never-existed alike.** One answer, for the reason a `draft`
+ * comp 404s exactly as a nonexistent one does: whether a dead link was ever real is the only thing
+ * its holder could learn here, and it is not theirs to learn.
+ */
+export const describeInvitation = async (token: string): Promise<InvitationView | null> => {
+  const inviter = alias(people, "inviter");
+
+  const [row] = await db
+    .select({
+      email: people.email,
+      compName: comps.name,
+      role: invitations.role,
+      teamName: teams.name,
+      invitedByName: inviter.name,
+      expiresAt: invitations.expiresAt,
+      acceptedAt: invitations.acceptedAt,
+      revokedAt: invitations.revokedAt,
+    })
+    .from(invitations)
+    .innerJoin(people, eq(people.id, invitations.personId))
+    .innerJoin(comps, eq(comps.id, invitations.compId))
+    .leftJoin(teams, eq(teams.id, invitations.teamId))
+    .leftJoin(inviter, eq(inviter.id, invitations.createdByPersonId))
+    .where(and(eq(invitations.tokenHash, hashToken(token)), eq(invitations.purpose, "invite")))
+    .limit(1);
+
+  if (!row || !row.role || !isLive(row, now())) return null;
+
+  return {
+    email: row.email,
+    compName: row.compName,
+    role: row.role,
+    teamName: row.teamName,
+    invitedByName: row.invitedByName,
   };
 };
 
