@@ -181,6 +181,34 @@ correctness. Also no receipts and no automatic reminders; both need a comms laye
 exist. If they want card rails, that is a thing to hear from a founding partner rather than a thing
 to guess at, which makes it an ask, not an apology.
 
+## The captain's beat — when they ask "does the team see any of this?"
+
+Short, and only if it comes up. It usually does, right after the money beat: a treasurer who has just
+watched a $2,160 lump get unbundled asks whether the team can see its own balance without being
+texted a screenshot.
+
+Run it from **People** on the board screen.
+
+**1. Invite a captain.** Name, email, the team. The screen hands back a link **once** — nothing in
+the product can recover it afterwards, because only its sha256 is stored, the same treatment a judge
+link gets. Say out loud that a human still has to send it: **there is no comms engine yet**, so the
+screen says "copy this" rather than implying an email went out.
+
+**2. Open it and set a password.** The invitation **names who it is for before it is accepted**, so
+the address is fixed and readonly — accepting somebody else's link cannot make you them.
+
+**3. Land on their own team.** They see what their team owes, charge by charge, and *no other team* —
+no roster, no scores, and no bid code but their own. Say why that last one matters: a competitor
+holding the name-to-code mapping is the end of blind judging for that comp, arriving from inside the
+product instead of from the street.
+
+**4. Take them back off.** Hit **Remove** on the People screen. The next request they make is
+refused. Worth saying: the *membership* is what died, not their login — the same person keeps
+working at any other comp they belong to, because authority here is per comp and identity is per org.
+
+The one sentence to close on: **a board can now reach one specific human**, which is what everything
+still unbuilt — dues reminders, receipts, schedule pushes — has been waiting on.
+
 ## The five minutes
 
 **1. Hand out three phones.** No app, no account, no password. The link is the credential. This is the first thing people notice.
