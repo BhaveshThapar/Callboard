@@ -120,6 +120,163 @@ test("a team whose rooms are unknown is billed for everything except the room it
   expect(csv).toContain("room count unknown");
 });
 
+/**
+ * The other half of the gap, and the one that had no answer at all until now.
+ *
+ * `generateCharges` withheld the hotel line and said why — correctly — and **nothing in the product
+ * could write `teams.rooms`**. Its only writer was the seed script, so every team that registered
+ * through the form was permanently "room count unknown" and a comp billing $140/room could not
+ * charge one of them. The gap was honest and permanent, which is worse than a gap.
+ */
+test("a room count the board fills in bills the hotel it could not bill before", async ({
+  page,
+}) => {
+  const comp = seed();
+  await boardPage(page, comp.boardToken);
+
+  await move(page, "M-3", "accepted");
+  // 10 dancers x $70 + $100 deposit. No hotel: the room count is unknown.
+  expect(await balanceCents(page, "M-3")).toBe(80_000);
+
+  await page.getByTestId("billing-rooms-M-3").fill("4");
+  await page.getByTestId("billing-save-M-3").click();
+  await expect(page.getByTestId("roster-billing-message")).toContainText("Updated");
+
+  // 4 rooms x $140 = $560, generated in the same act that recorded the rooms.
+  expect(await balanceCents(page, "M-3")).toBe(80_000 + 56_000);
+
+  // And the gap it was withholding is gone from the money screen, because the reason is gone.
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await expect(page.getByTestId("gap-M-3-hotel")).toHaveCount(0);
+  await expect(page.getByTestId("charge-M-3-hotel")).toContainText("$560.00");
+});
+
+/**
+ * A roster changes between acceptance and the show — two dancers drop out — and the bill has to
+ * follow. The assertion that matters is not the new total but that the money already paid against
+ * the *old* registration charge survives the re-bill: `syncCharges` voids and re-inserts, and
+ * releases the allocations first, so the payment stays findable rather than pointing at a row
+ * nobody can read.
+ */
+test("a corrected roster size re-bills registration without losing what was paid", async ({
+  page,
+}) => {
+  const comp = seed();
+  await boardPage(page, comp.boardToken);
+
+  const owed = await balanceCents(page, "M-2");
+  execFileSync("bunx", ["tsx", "e2e/support/pay.ts", comp.compId, "M-2", String(owed)], {
+    stdio: "pipe",
+  });
+
+  await roster(page, comp.boardToken);
+  expect(await balanceCents(page, "M-2")).toBe(0);
+
+  await page.getByTestId("billing-dancers-M-2").fill("18");
+  await page.getByTestId("billing-save-M-2").click();
+  await expect(page.getByTestId("roster-billing-message")).toContainText("Updated");
+
+  // Two fewer dancers at $70 = $140 less owed, and the team is now $140 in credit rather than
+  // billed from scratch.
+  expect(await balanceCents(page, "M-2")).toBe(-14_000);
+});
+
+/**
+ * The regenerate path, against the state it exists for: a charge the schedule says is owed and the
+ * database does not hold. That is what a late fee looks like the day after `lateAfter` — nothing
+ * re-ran the schedule once a team's status settled, so the fee was never billed to anybody.
+ *
+ * Idempotency is asserted on both sides of the repair, because a board clicks this twice.
+ */
+test("regenerating bills a charge the schedule says is owed, and clicking twice does nothing", async ({
+  page,
+}) => {
+  const comp = seed();
+  await boardPage(page, comp.boardToken);
+
+  const owed = await balanceCents(page, "M-2");
+  expect(owed).toBeGreaterThan(0);
+
+  // The state, arrived at from the other side: a live charge disappears while the schedule still
+  // says it is owed. `void-charge.ts` says why a test cannot simply wait for February.
+  const removed = Number(
+    execFileSync("bunx", ["tsx", "e2e/support/void-charge.ts", comp.compId, "M-2", "hotel"], {
+      encoding: "utf8",
+    }).trim(),
+  );
+  expect(removed).toBe(5 * 14_000);
+
+  await roster(page, comp.boardToken);
+  expect(await balanceCents(page, "M-2")).toBe(owed! - removed);
+
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await page.getByTestId("regenerate-charges").click();
+  await expect(page.getByTestId("regenerate-message")).toContainText("1 charge added, 0 voided");
+
+  await roster(page, comp.boardToken);
+  expect(await balanceCents(page, "M-2")).toBe(owed);
+
+  // The second click is the one that matters: identity is `(teamId, kind)` among live charges, so
+  // an unchanged roster plans nothing. A button that double-billed on a double-click would be worse
+  // than no button.
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await page.getByTestId("regenerate-charges").click();
+  await expect(page.getByTestId("regenerate-message")).toContainText("0 charges added, 0 voided");
+
+  await roster(page, comp.boardToken);
+  expect(await balanceCents(page, "M-2")).toBe(owed);
+});
+
+/**
+ * The mark that `payments.reconciled_at` existed for since migration `0009` and that nothing ever
+ * wrote. PRD §13 measures this product on *reconciliation error vs. bank: $0*, and a treasurer
+ * matching rows against a statement had nowhere to record having matched them — so the second pass
+ * down a season started from nothing every time.
+ */
+test("a payment can be marked against the bank, and the mark survives a reload and the CSV", async ({
+  page,
+}) => {
+  const comp = seed();
+
+  execFileSync("bunx", ["tsx", "e2e/support/pay.ts", comp.compId, "M-2", "10000"], {
+    stdio: "pipe",
+  });
+
+  await page.goto(`/board/${comp.boardToken}/money`);
+  const row = page.locator("[data-testid^='payment-row-']").first();
+  await expect(row).toHaveAttribute("data-reconciled", "false");
+  await expect(page.getByTestId("payments-unreconciled")).toContainText("1 not matched");
+
+  await row.getByRole("button", { name: "mark matched" }).click();
+  await expect(page.getByTestId("payments-message")).toContainText("Matched against the bank");
+
+  await page.reload();
+  await expect(page.locator("[data-testid^='payment-row-']").first()).toHaveAttribute(
+    "data-reconciled",
+    "true",
+  );
+  await expect(page.getByTestId("payments-unreconciled")).toContainText(
+    "all matched against the bank",
+  );
+
+  // The file a treasurer opens beside the statement has to carry the mark, or the mark is only ever
+  // true on a screen nobody is looking at while they reconcile.
+  const csv = await (await page.request.get(`/board/${comp.boardToken}/money/payments`)).text();
+  const lines = csv.split("\r\n");
+  expect(lines[0]).toContain("Reconciled");
+  expect(lines[1]).toMatch(/\d{4}-\d{2}-\d{2}$/);
+  expect(lines.at(-1)).toContain("TOTAL");
+
+  // Reversible, because the mark moves no money — it is bookkeeping about a bank statement, and a
+  // mis-tick you cannot undo makes the mark worth less rather than more.
+  await page.getByRole("button", { name: "matched ✓" }).click();
+  await expect(page.getByTestId("payments-message")).toContainText("Mark removed");
+  await expect(page.locator("[data-testid^='payment-row-']").first()).toHaveAttribute(
+    "data-reconciled",
+    "false",
+  );
+});
+
 test("moving accepted to competing regenerates nothing", async ({ page }) => {
   const comp = seed();
   await boardPage(page, comp.boardToken);

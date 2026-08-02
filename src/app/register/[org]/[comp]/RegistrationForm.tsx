@@ -94,6 +94,27 @@ export function RegistrationForm({
           />
         </div>
 
+        {open.collectRooms && (
+          <div>
+            <label htmlFor="rooms" className={labelClass}>
+              Hotel rooms
+            </label>
+            <p className={hintClass}>
+              This comp bills per room. Leave it blank if you do not know yet — the board can fill it
+              in later, and nothing is charged for rooms until it is known.
+            </p>
+            <input
+              id="rooms"
+              name="rooms"
+              type="number"
+              min={0}
+              step={1}
+              defaultValue={was.rooms}
+              className={cx(inputClass, "tabular mt-2")}
+            />
+          </div>
+        )}
+
         <div>
           <label htmlFor="contactName" className={labelClass}>
             Contact name

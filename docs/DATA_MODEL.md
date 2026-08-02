@@ -2,7 +2,9 @@
 
 The record is comp-scoped and multi-tenant: many orgs, many comps per org, isolated. Every table carries `comp_id`, or `org_id` where it outlives a single comp.
 
-Two groups of tables follow. The first group exists in Postgres. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema. They land with Module A.
+Two groups of tables follow. The first group exists in Postgres, through migration `0011`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
+
+It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `show_order`, `schedule_segments` and `assignments` — the Gita (PRD §9) and coordination (§7.3), both gated well behind it.
 
 ---
 
@@ -16,7 +18,9 @@ Persists across years. This is the institutional memory that PRD §2.3 says evap
 
 **`comps`** — `id`, `org_id`, `name`, `slug`, `comp_date`, `venue`, `status`, `registration`, `created_at`
 
-`status` ∈ `draft | open | live | complete`, enforced by a check constraint. Unique on `(org_id, slug)`.
+`status` ∈ `draft | open | live | complete`, enforced by a check constraint and by `COMP_STATUSES` in `src/db/schema/orgs.ts`, which is the one definition the type, the constraint, the config parser and the board's own control all derive from.
+
+It is what gates the public form, and it is **written by the board**, forward only, through `src/lib/comp/lifecycle.ts` — a total transition map in `transitions.ts`' shape. Until August 2, 2026 the only writer was `src/db/seed.ts`, so a board that opened registration could not close it: the sole remaining instrument was a reseed, which replaces the comp and reissues every token ([ADR-0013](decisions/0013-a-seed-replaces-a-comp-not-an-org.md)) — closing a form meant destroying the comp. Nothing runs backwards, because an application landing against a comp whose roster is being scored is the state the lock exists to make impossible.
 
 `registration` is the public form, authored as data in the comp config exactly like the rubric — waiver text, `requireAuditionUrl`, `maxRosterSize`, and `fields`, the board's own questions. Null, or a `status` other than `open`, and there is no form to fill in; `openRegistration` collapses those two cases into one answer, because distinguishing them publicly would leak the existence of a comp that has not announced itself.
 
@@ -124,6 +128,8 @@ Mayuri 2026 charged $70/dancer + $140/room + a $100 refundable deposit, plus lat
 
 `per_room_cents` bills per room, and nothing recorded a room count — so **`teams.rooms integer`** is added, nullable. Null means *not yet known*, and the generator must emit **no hotel charge plus a stated gap** rather than a $0 one. A $0 hotel charge is a lie a treasurer will believe, and will find in April.
 
+**Something has to be able to write it, and for three weeks nothing could.** `rooms` shipped with exactly one writer — the seed script — so the gap was correct, honest and *permanent*: every team that registered through the product read "hotel: not billed — room count unknown" forever, and a comp charging $140 a room could not charge one of them. Two paths write it now. The public form asks for it when, and only when, `per_room_cents > 0` — derived rather than declared twice, so the question and the charge cannot disagree — and the board states or corrects it on the roster screen beside `roster_size`, which re-bills in the same transaction. A blank field stays null on both paths: `Number("")` is 0, and a stated zero is a team saying it needs no rooms.
+
 **`charges`** — `id`, `comp_id`, `team_id`, `kind`, `amount_cents`, `due_at`, `created_at`, `voided_at`, `voided_reason`
 
 `kind` ∈ `registration | hotel | deposit | late_fee`. One row per obligation. Generated from the fee schedule and the team's roster, so nobody computes a total by hand.
@@ -141,6 +147,8 @@ Mayuri 2026 charged $70/dancer + $140/room + a $100 refundable deposit, plus lat
 `net = gross - fee` is a **`CHECK`, not a generated column**. A generated column *supplies* the right answer, so an import claiming `net 9701` where the arithmetic says `9702` lands cleanly and the disagreement disappears. The ~$5,000 gap is made of discrepancies nobody was shown, so this one is refused at the door.
 
 `external_ref` is unique where present: a replayed webhook or a re-imported CSV is a duplicate payment, and a duplicate payment is a team told it is paid up when it is not.
+
+`reconciled_at` is the mark a treasurer makes having matched a row against the bank, and it is a **timestamp rather than a boolean** for `waiver_accepted_at`'s reason: a boolean records a claim, a timestamp records an event. It shipped in this migration with no writer at all, which left PRD §13's *reconciliation error vs. bank: $0* as a metric with no instrument — the rows could be exported and matched by eye, and there was nowhere to record that they had been, so every pass through a season started from nothing. Unlike a `deposit_events` ending it is **reversible**: a reconciliation mark moves no money, and a mis-tick you cannot undo makes the mark worth less rather than more. Every flip is audited, which is where the history lives; `payments` is not an append-only chain and does not become one for this.
 
 **`payment_allocations`** — `id`, `payment_id`, `charge_id`, `amount_cents`, `voided_at`
 

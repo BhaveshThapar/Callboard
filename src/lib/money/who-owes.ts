@@ -141,6 +141,83 @@ export const summarizeOpenPayments = (
   };
 };
 
+export type PaymentRow = {
+  receivedAt: Date;
+  bidCode: string;
+  teamName: string;
+  rail: string;
+  grossCents: number;
+  feeCents: number;
+  netCents: number;
+  allocatedCents: number;
+  refundedCents: number;
+  externalRef: string | null;
+  reconciledAt: Date | null;
+};
+
+/**
+ * What arrived, one row per payment, as the file a treasurer reconciles against.
+ *
+ * A separate export from `toWhoOwesCsv` because it answers a separate question, and its rows are a
+ * different thing: who-owes has one row per *team*, and a bank statement has one line per
+ * *transaction*. Matching a statement against a per-team summary is the hand-unbundling this product
+ * exists to remove, so the file that faces the bank has the bank's shape.
+ *
+ * `Reconciled` is the column `payments.reconciled_at` existed for and never had — the mark that says
+ * a row has already been matched, so the second pass down a season does not start from nothing.
+ * Gross, fee and net are all three present, because the statement shows the net and the team was
+ * credited the gross, and that difference is the $97.01 deposit.
+ *
+ * `Refunded` is here for the same reason all three of those are. A returned deposit is a debit on
+ * the statement the treasurer is reading, and a file that showed only what came in would leave them
+ * matching an outflow against nothing — a discrepancy nobody was shown, which is what the ~$5,000
+ * gap is made of (ADR-0015).
+ */
+export const toPaymentsCsv = (rows: readonly PaymentRow[]): string =>
+  toCsv(
+    [
+      "Received",
+      "Bid code",
+      "Team",
+      "Rail",
+      "Gross",
+      "Fee",
+      "Net",
+      "Attached",
+      "Refunded",
+      "Reference",
+      "Reconciled",
+    ],
+    [
+      ...rows.map((row) => [
+        row.receivedAt.toISOString().slice(0, 10),
+        row.bidCode,
+        row.teamName,
+        row.rail,
+        formatCents(row.grossCents),
+        formatCents(row.feeCents),
+        formatCents(row.netCents),
+        formatCents(row.allocatedCents),
+        row.refundedCents === 0 ? "" : formatCents(row.refundedCents),
+        row.externalRef ?? "",
+        row.reconciledAt ? row.reconciledAt.toISOString().slice(0, 10) : "",
+      ]),
+      [
+        "",
+        "",
+        "TOTAL",
+        "",
+        formatCents(rows.reduce((sum, row) => sum + row.grossCents, 0)),
+        formatCents(rows.reduce((sum, row) => sum + row.feeCents, 0)),
+        formatCents(rows.reduce((sum, row) => sum + row.netCents, 0)),
+        formatCents(rows.reduce((sum, row) => sum + row.allocatedCents, 0)),
+        formatCents(rows.reduce((sum, row) => sum + row.refundedCents, 0)),
+        "",
+        "",
+      ],
+    ],
+  );
+
 /**
  * The same rows as a file, through the existing `toCsv`. Dollars rather than cents, because this is
  * an edge — a treasurer opens it in a spreadsheet beside a bank statement, and cents would have to

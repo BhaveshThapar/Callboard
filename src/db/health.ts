@@ -42,6 +42,18 @@ export type Observed = {
    * drift check above is blind to it by construction.
    */
   orphanedAllocations: { paymentId: string; chargeId: string; amountCents: number }[];
+  /**
+   * Deposits with more than one ending — `forkedComps`, one table over. Unrepresentable since
+   * `deposit_events_terminal_unique` was rekeyed to `(comp_id, team_id)` in `0011`, which is exactly
+   * why the doctor has to look: the guarantee lives in the database, not in the code.
+   */
+  forkedDeposits: { teamId: string; endings: number }[];
+  /**
+   * Payments carrying `refunded_cents` with no `refunded` deposit event to explain it. The second
+   * denormalized number in the schema, and the second one no CHECK can reconcile — the agreement
+   * spans tables (ADR-0015).
+   */
+  unexplainedRefunds: { paymentId: string; refundedCents: number }[];
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
@@ -132,9 +144,14 @@ const moneyProblems = (observed: Observed): string[] => {
   const problems: string[] = [];
 
   if (!observed.moneyGuaranteeEnforced) {
+    // Deliberately no migration number. `MONEY_CONSTRAINT_NAMES` spans three migrations now --
+    // `0009` for the ledger, `0010` for the deposit terminal, `0011` for the refund ceiling -- so a
+    // sentence naming one of them is wrong for the other two, and it named 0009 for a day while
+    // `deposit_events_terminal_unique` shipped in 0010. `schemaProblems` says how far behind this
+    // database actually is, from the journal, which is the number that was always true.
     problems.push(
-      "a payment can still be allocated past what was paid: the money constraints are missing. " +
-        "This database predates migration 0009 — apply it with 'bun run db:migrate'.",
+      "a payment can still be allocated past what was paid, or refunded past it: the money " +
+        "constraints are missing. Apply the migrations with 'bun run db:migrate'.",
     );
   }
 
@@ -155,6 +172,24 @@ const moneyProblems = (observed: Observed): string[] => {
       `payment ${paymentId} still has ${amountCents} cents allocated to charge ${chargeId}, which ` +
         "has been voided. The money is recorded against an obligation that no longer exists; a " +
         "human must release it so it reads as unattached credit.",
+    );
+  }
+
+  // A deposit that ended twice, which is `forkedComps`' sentence about a smaller question -- and it
+  // gets the same refusal to offer a reseed, for the same reason: reseeding does not create an index
+  // and does not decide which of two endings actually happened.
+  for (const { teamId, endings } of observed.forkedDeposits) {
+    problems.push(
+      `team ${teamId} has ${endings} deposit endings, and a deposit ends once. A human must decide ` +
+        "which one happened before any balance built on it can be trusted.",
+    );
+  }
+
+  for (const { paymentId, refundedCents } of observed.unexplainedRefunds) {
+    problems.push(
+      `payment ${paymentId} records ${refundedCents} cents refunded, but its team's deposit was ` +
+        "never returned. Something moved the money without ending the deposit; the books claim to " +
+        "have paid out what nothing accounts for.",
     );
   }
 

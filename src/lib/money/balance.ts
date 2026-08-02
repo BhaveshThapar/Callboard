@@ -6,12 +6,12 @@
  * "what does this comp charge", this one answers "where does this team stand", and only the second
  * needs to know what arrived.
  */
+import { totalCents } from "@/lib/fees/schedule";
 
 export type ChargeLineView = {
   id: string;
   kind: string;
   amountCents: number;
-  dueAt: string | null;
   /** What has been allocated to this specific charge. */
   paidCents: number;
 };
@@ -47,7 +47,10 @@ export const teamBalance = (
   charges: readonly ChargeLineView[],
   paidCents = 0,
 ): TeamBalance => {
-  const owedCents = charges.reduce((sum, charge) => sum + charge.amountCents, 0);
+  // `totalCents` rather than the reduce it wraps. Its own docstring says "one place, so no caller
+  // writes the reduce itself" and this file was writing it itself, which is how a single definition
+  // quietly becomes two that agree until one of them changes.
+  const owedCents = totalCents(charges);
   return { owedCents, paidCents, balanceCents: owedCents - paidCents };
 };
 
@@ -64,7 +67,18 @@ export const teamBalance = (
 export const remainingOnCharge = (charge: ChargeLineView): number =>
   charge.amountCents - charge.paidCents;
 
+/**
+ * **Refunded money is not attributable money.** `refundedCents` defaults to 0, which keeps the entry
+ * form — where nothing has been returned yet, by definition — calling this with two fields.
+ *
+ * Leaving it out was a real bug for the length of one commit: refunding a deposit releases its
+ * allocations, so `allocated_cents` drops to 0 while `gross_cents` stays, and `gross - allocated`
+ * offered the whole payment back as credit to re-attribute. Money that has left the org's account
+ * would have been attachable to a live obligation, which is a wrong number of exactly the kind
+ * ADR-0015 exists to stop producing.
+ */
 export const unallocatedCents = (payment: {
   grossCents: number;
   allocatedCents: number;
-}): number => payment.grossCents - payment.allocatedCents;
+  refundedCents?: number;
+}): number => payment.grossCents - payment.allocatedCents - (payment.refundedCents ?? 0);

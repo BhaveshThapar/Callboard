@@ -32,6 +32,11 @@ const [team] = await db
   .limit(1);
 if (!team) throw new Error(`no team ${bidCode} in comp ${compId}`);
 
+/**
+ * Provenance only, and nullable since `0011`: the chain is keyed on the team, so a deposit whose
+ * charge has been voided — a dropped team's, a refunded one's — still has a chain to append to.
+ * Looking one up is best-effort for that reason.
+ */
 const [deposit] = await db
   .select({ id: charges.id })
   .from(charges)
@@ -44,7 +49,6 @@ const [deposit] = await db
     ),
   )
   .limit(1);
-if (!deposit) throw new Error(`team ${bidCode} has no live deposit charge`);
 
 switch (command) {
   case "append": {
@@ -52,7 +56,8 @@ switch (command) {
     try {
       await db.insert(depositEvents).values({
         compId,
-        chargeId: deposit.id,
+        teamId: team.id,
+        chargeId: deposit?.id ?? null,
         state: state as "held",
         reason: "e2e",
       });
@@ -72,7 +77,7 @@ switch (command) {
     const events = await db
       .select({ seq: depositEvents.seq, state: depositEvents.state })
       .from(depositEvents)
-      .where(eq(depositEvents.chargeId, deposit.id));
+      .where(eq(depositEvents.teamId, team.id));
     const { currentState } = await import("@/lib/money/deposit");
     console.log(currentState(events));
     break;

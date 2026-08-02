@@ -1,4 +1,4 @@
-import { and, eq, isNull, inArray, sum } from "drizzle-orm";
+import { and, eq, isNull, inArray, sql, sum } from "drizzle-orm";
 import { db } from "@/db";
 import {
   boardAssignments,
@@ -271,7 +271,6 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
         teamId: charges.teamId,
         kind: charges.kind,
         amountCents: charges.amountCents,
-        dueAt: charges.dueAt,
       })
       .from(charges)
       .where(and(eq(charges.compId, actor.compId), isNull(charges.voidedAt)))
@@ -289,8 +288,17 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
     // A team's balance is driven by every cent that arrived, not by what is allocated to its *live*
     // charges. Deriving it from allocations loses the money behind any charge later voided, which
     // bills a reinstated team twice for what it has already paid. See `teamBalance`.
+    //
+    // **Minus what went back out.** `gross - refunded` is the one definition of *what this team has
+    // actually paid us*, and it is a subtraction rather than a negative row because negative gross
+    // would make the allocation ceiling uninterpretable (ADR-0014, ADR-0015). Before `refunded_cents`
+    // a returned deposit left this sum untouched, so the org's books overstated its cash by every
+    // refund it had ever made and the team still read settled.
     db
-      .select({ teamId: payments.teamId, paidCents: sum(payments.grossCents) })
+      .select({
+        teamId: payments.teamId,
+        paidCents: sum(sql`${payments.grossCents} - ${payments.refundedCents}`),
+      })
       .from(payments)
       .where(eq(payments.compId, actor.compId))
       .groupBy(payments.teamId),
@@ -309,7 +317,6 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
       id: charge.id,
       kind: charge.kind,
       amountCents: charge.amountCents,
-      dueAt: charge.dueAt,
       paidCents: paidByCharge.get(charge.id) ?? 0,
     });
     chargesByTeam.set(charge.teamId, lines);

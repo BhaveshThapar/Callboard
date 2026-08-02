@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
 import { violatedConstraint } from "@/db/errors";
 import type { RegistrationConfig } from "@/db/schema";
-import { comps, orgs, people, teams, TEAMS_BID_CODE_UNIQUE } from "@/db/schema";
+import { comps, feeSchedules, orgs, people, teams, TEAMS_BID_CODE_UNIQUE } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { nextBidCode } from "@/lib/roster/roster";
 import { validateAnswers } from "./fields";
@@ -15,6 +15,17 @@ export type OpenRegistration = {
   compDate: string | null;
   venue: string | null;
   form: RegistrationConfig;
+  /**
+   * Whether this comp bills per room, and therefore whether the form asks for a room count.
+   *
+   * Derived from `fee_schedules.per_room_cents` rather than declared a second time in
+   * `comps.registration`: "this comp charges for rooms" already has one definition, and a form flag
+   * beside it is a thing that can disagree with the schedule the charges are generated from.
+   *
+   * It selects no team, no score and no person, so the projection rule holds — a stranger learns
+   * that the comp charges for rooms, which is a fact they are being asked to answer anyway.
+   */
+  collectRooms: boolean;
 };
 
 /**
@@ -44,9 +55,13 @@ export const openRegistration = async (
       venue: comps.venue,
       status: comps.status,
       registration: comps.registration,
+      // A left join: a comp that bills nothing has no schedule row, and an inner join would make
+      // its registration form disappear rather than ask one fewer question.
+      perRoomCents: feeSchedules.perRoomCents,
     })
     .from(comps)
     .innerJoin(orgs, eq(orgs.id, comps.orgId))
+    .leftJoin(feeSchedules, eq(feeSchedules.compId, comps.id))
     .where(and(eq(orgs.slug, orgSlug), eq(comps.slug, compSlug)))
     .limit(1);
 
@@ -60,6 +75,7 @@ export const openRegistration = async (
     compDate: row.compDate,
     venue: row.venue,
     form: row.registration,
+    collectRooms: (row.perRoomCents ?? 0) > 0,
   };
 };
 
@@ -69,6 +85,8 @@ export type Application = {
   contactName: string;
   contactEmail: string;
   rosterSize: number;
+  /** Null is *not yet known*, and stays null: a team that has not booked yet says so. */
+  rooms: number | null;
   auditionUrl: string | null;
   waiverAccepted: boolean;
   /** Answers to the comp's own questions, keyed by field id, exactly as they came off the form. */
@@ -138,6 +156,20 @@ export const apply = async (
     return { ok: false, message: "This comp requires an audition video link." };
   }
 
+  /**
+   * Rooms are optional even when the comp charges for them, and that is the honest shape: a team
+   * applying in September does not know its hotel block yet. Null flows through to a stated
+   * `hotel: not billed — room count unknown` and a board that can now answer it, which is strictly
+   * better than a number invented at the door.
+   */
+  if (application.rooms !== null && (!Number.isInteger(application.rooms) || application.rooms < 0)) {
+    return { ok: false, message: "Rooms must be a whole number, or left blank." };
+  }
+
+  // Whitelisted the way custom answers are: a comp that does not bill per room does not record a
+  // room count, however a hand-crafted POST is shaped.
+  const rooms = open.collectRooms ? application.rooms : null;
+
   // The comp's own questions are checked against the comp's own config, which is the only thing
   // that can say what was asked. The form's `required` attributes are a courtesy to an honest
   // applicant; this is the rule, and it is also the whitelist — an answer is kept only if a field
@@ -175,6 +207,7 @@ export const apply = async (
           bidCode,
           status: "applied",
           rosterSize: application.rosterSize,
+          rooms,
           contactPersonId: contact.id,
           auditionUrl: application.auditionUrl?.trim() || null,
           waiverAcceptedAt: new Date(),

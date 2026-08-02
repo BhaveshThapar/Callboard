@@ -7,7 +7,9 @@ import {
   listRosterForBoard,
   resolveBoardActor,
 } from "@/lib/auth/scope";
+import { registrationWindowFor } from "@/lib/comp/status";
 import { latestLockedRun } from "@/lib/comp/tab";
+import { RegistrationWindow } from "./RegistrationWindow";
 import { RosterTable } from "./RosterTable";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +20,11 @@ export default async function RosterPage({ params }: { params: Promise<{ token: 
   const actor = await resolveBoardActor(token);
   if (!actor) notFound();
 
-  const [roster, locked, fields] = await Promise.all([
+  const [roster, locked, fields, window] = await Promise.all([
     listRosterForBoard(actor),
     latestLockedRun(actor.compId),
     listRegistrationFieldsForBoard(actor),
+    registrationWindowFor(actor),
   ]);
 
   return (
@@ -50,6 +53,10 @@ export default async function RosterPage({ params }: { params: Promise<{ token: 
             </Link>
           </div>
         </header>
+
+        {window && (
+          <RegistrationWindow token={token} status={window.status} publicPath={window.path} />
+        )}
 
         <RosterTable token={token} roster={roster} locked={locked !== null} fields={fields} />
       </main>

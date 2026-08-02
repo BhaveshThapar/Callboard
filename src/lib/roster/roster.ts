@@ -1,12 +1,14 @@
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import type { Transaction } from "@/db";
 import { db, withTransaction } from "@/db";
 import type { TeamStatus } from "@/db/schema";
 import { BILLABLE_STATUSES, teams } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
-import { resolveRosterTeamForBoard } from "@/lib/auth/scope";
+import { listRosterForBoard, resolveRosterTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
 import { feeScheduleFor, syncCharges, today, voidChargesFor } from "@/lib/money/charges";
+import { refusalFor, UNKNOWN_REFUSAL } from "@/lib/money/refusals";
 import {
   canTransition,
   dropFreesASlot,
@@ -204,6 +206,171 @@ export const setTeamStatus = async (
     }
 
     return { ok: true, promoted: promoted && { id: promoted.id, name: promoted.name } };
+  });
+};
+
+/**
+ * What a team is billed *on* — its dancer count and its room count.
+ *
+ * This exists because the money spine shipped with no way to state either. `rooms` had exactly one
+ * writer in the whole repo, `src/db/seed.ts`, so every team that registered through the product was
+ * permanently `hotel: not billed — room count unknown`: the engine withheld the line correctly and
+ * nothing could ever answer it. At Mayuri's own schedule that is $560 a team the comp cannot charge.
+ * `rosterSize` was one step better and the same shape — an applicant stated it once and nobody could
+ * correct it, so roster churn between acceptance and the show billed the wrong registration total.
+ *
+ * Both are `null` for *not yet known*, never zero, which is `BillableTeam`'s distinction and the
+ * reason a gap is a stated sentence rather than a $0 charge.
+ *
+ * The guards are `setTeamStatus`', for its reasons: the lock freezes the roster, and a `teamId` on a
+ * form is a claim resolved against the window that produced the form. No fourth window is added —
+ * A3 already widened `listRosterForBoard` to carry these columns, so this changes what is written
+ * and not what is read.
+ *
+ * **The transaction is `setTeamStatus`' argument unchanged, not a third caller.** ADR-0012 counts by
+ * invariant, and this writes the same one: *the team's billable facts, and what it therefore owes*.
+ * Half of it is the orphan A3 exists to prevent, wearing different clothes — a team recorded as
+ * having four rooms and billed for none, which a treasurer finds in April.
+ *
+ * A team outside `BILLABLE_STATUSES` gets the columns and no charges, which is `setTeamStatus`'
+ * rule: an `applied` team's room count is worth recording the day it is known, and billing it is
+ * what acceptance is for.
+ */
+/**
+ * A billing write, with the database's refusal turned into a sentence rather than a stack trace.
+ *
+ * `charges_live_kind_unique` is what makes regenerating safe to click twice, and until now nothing
+ * caught it: two board members regenerating at the same moment, or a status move racing a room
+ * count, threw drizzle's own error — `Failed query: insert into "charges" ...` — straight at a
+ * board member. The invariant held and the product looked broken, which is the failure mode
+ * `violatedConstraint` exists for and the reason the ledger has read it since A8.
+ */
+const billingWrite = async <T extends { ok: boolean }>(
+  write: (tx: Transaction) => Promise<T>,
+): Promise<T | { ok: false; message: string }> => {
+  try {
+    return await withTransaction(write);
+  } catch (error) {
+    return { ok: false, message: refusalFor(error) ?? UNKNOWN_REFUSAL };
+  }
+};
+
+export const setTeamBilling = async (
+  actor: BoardActor,
+  teamId: string,
+  values: { rosterSize: number | null; rooms: number | null },
+): Promise<RosterMove> => {
+  if (await latestLockedRun(actor.compId)) return { ok: false, message: LOCKED };
+
+  const team = await resolveRosterTeamForBoard(actor, teamId);
+  if (!team) return { ok: false, message: "That team is not in this comp." };
+
+  const schedule = await feeScheduleFor(actor.compId);
+  const asOf = today();
+
+  return billingWrite(async (tx) => {
+    await tx
+      .update(teams)
+      .set({ rosterSize: values.rosterSize, rooms: values.rooms })
+      .where(and(eq(teams.id, teamId), eq(teams.compId, actor.compId)));
+
+    await recordAudit(
+      {
+        compId: actor.compId,
+        actorKind: "board",
+        actorPersonId: actor.personId,
+        action: "team.billing",
+        entity: "team",
+        entityId: teamId,
+        before: { rosterSize: team.rosterSize, rooms: team.rooms },
+        after: values,
+      },
+      tx,
+    );
+
+    if (schedule && BILLABLE.includes(team.status)) {
+      await syncCharges(tx, {
+        compId: actor.compId,
+        schedule,
+        teams: [{ teamId, rosterSize: values.rosterSize, rooms: values.rooms }],
+        asOf,
+        reason: "billing details changed",
+      });
+    }
+
+    return { ok: true };
+  });
+};
+
+/**
+ * Brings every billable team's obligations back in line with the schedule.
+ *
+ * The gap this closes is that `syncCharges` had exactly two callers and both were inside
+ * `setTeamStatus` — **a status transition was the only thing in the product that regenerated
+ * charges**. So a late fee could not fire: `generateCharges` adds one when `asOf > lateAfter`, and a
+ * team accepted in December is never re-planned, so the date passes in February and nothing bills
+ * it. The who-owes screen could not show it either, because it recomputes *gaps* and reads owed from
+ * live `charges` — under-billing with no line saying so, which is the failure the gaps exist to
+ * prevent arriving through the one door they do not watch.
+ *
+ * Idempotent by construction rather than by care: `planCharges` keys on `(teamId, kind)` among live
+ * charges, so a second run with nothing changed is `{insert: [], void: []}`. That is asserted in
+ * `src/lib/fees/__tests__/schedule.test.ts` against the pure function, which is why this needs no
+ * database to be sure of it.
+ *
+ * One transaction for the whole roster, because the invariant is the comp's rather than a team's:
+ * half an applied regeneration is a comp where some teams carry a late fee and others do not, and
+ * nothing on the screen would say which half ran.
+ */
+export const regenerateCharges = async (
+  actor: BoardActor,
+): Promise<{ ok: true; inserted: number; voided: number } | { ok: false; message: string }> => {
+  if (await latestLockedRun(actor.compId)) return { ok: false, message: LOCKED };
+
+  const schedule = await feeScheduleFor(actor.compId);
+  if (!schedule) return { ok: false, message: "This comp has no fee schedule, so it bills nothing." };
+
+  const billable = (await listRosterForBoard(actor)).filter((team) =>
+    BILLABLE.includes(team.status),
+  );
+  if (billable.length === 0) {
+    return { ok: false, message: "No team on this roster is billable yet." };
+  }
+
+  const asOf = today();
+
+  return billingWrite(async (tx) => {
+    const plan = await syncCharges(tx, {
+      compId: actor.compId,
+      schedule,
+      teams: billable.map((team) => ({
+        teamId: team.id,
+        rosterSize: team.rosterSize,
+        rooms: team.rooms,
+      })),
+      asOf,
+      reason: "charges regenerated",
+    });
+
+    await recordAudit(
+      {
+        compId: actor.compId,
+        actorKind: "board",
+        actorPersonId: actor.personId,
+        action: "charges.regenerate",
+        entity: "comp",
+        entityId: actor.compId,
+        before: { asOf, teams: billable.length },
+        after: {
+          inserted: plan.insert.length,
+          voided: plan.void.length,
+          unchanged: plan.unchanged.length,
+        },
+      },
+      tx,
+    );
+
+    return { ok: true as const, inserted: plan.insert.length, voided: plan.void.length };
   });
 };
 

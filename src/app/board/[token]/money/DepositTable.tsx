@@ -3,18 +3,10 @@
 import { useActionState } from "react";
 import { cardClass, cx, eyebrowClass, inputClass, pillClass } from "@/components/styles";
 import type { DepositState } from "@/lib/money/deposit";
+import type { DepositView } from "@/lib/money/deposits";
 import { formatCents } from "@/lib/money/format";
 import { advanceDepositAction } from "../actions";
 import { IDLE } from "../state";
-
-export type DepositRow = {
-  chargeId: string;
-  teamName: string;
-  bidCode: string;
-  amountCents: number;
-  state: DepositState;
-  canMoveTo: readonly DepositState[];
-};
 
 const STATE_TONE: Record<DepositState, string> = {
   held: "bg-hover text-muted",
@@ -35,7 +27,7 @@ const label = (state: DepositState) => state.replace("_", " ");
  * as finished without needing a disabled control to say so — and `deposit_events_terminal_unique`
  * is what actually guarantees it, for the two board members who click at the same moment.
  */
-export function DepositTable({ token, deposits }: { token: string; deposits: DepositRow[] }) {
+export function DepositTable({ token, deposits }: { token: string; deposits: DepositView[] }) {
   const [state, formAction, pending] = useActionState(advanceDepositAction, IDLE);
 
   if (deposits.length === 0) return null;
@@ -57,6 +49,7 @@ export function DepositTable({ token, deposits }: { token: string; deposits: Dep
           <tr className="border-b border-border-soft text-left">
             <th className={cx(eyebrowClass, "pb-2")}>Team</th>
             <th className={cx(eyebrowClass, "pb-2 text-right")}>Amount</th>
+            <th className={cx(eyebrowClass, "pb-2 text-right")}>Paid</th>
             <th className={cx(eyebrowClass, "pb-2")}>State</th>
             <th className={cx(eyebrowClass, "pb-2")}>Move to</th>
           </tr>
@@ -64,17 +57,28 @@ export function DepositTable({ token, deposits }: { token: string; deposits: Dep
         <tbody>
           {deposits.map((deposit) => (
             <tr
-              key={deposit.chargeId}
+              key={deposit.teamId}
               data-testid={`deposit-row-${deposit.bidCode}`}
               data-state={deposit.state}
+              data-paid-cents={deposit.paidCents}
+              data-settled={deposit.settled}
               className="border-b border-border-soft/60"
             >
               <td className="py-2.5 pr-3">
                 <span className="font-medium text-heading">{deposit.teamName}</span>
-                <span className="block text-caption text-subtle">{deposit.bidCode}</span>
+                <span className="block text-caption text-subtle">
+                  {deposit.bidCode}
+                  {/* A dropped team's deposit is the one a board most needs to decide about, and it
+                      used to vanish from this table at exactly that moment. Saying the obligation is
+                      gone is not the same as saying the money is. */}
+                  {deposit.settled && " · no longer owed"}
+                </span>
               </td>
               <td className="tabular py-2.5 pr-3 text-right text-muted">
                 {formatCents(deposit.amountCents)}
+              </td>
+              <td className="tabular py-2.5 pr-3 text-right text-subtle">
+                {deposit.paidCents === 0 ? "—" : formatCents(deposit.paidCents)}
               </td>
               <td className="py-2.5 pr-3">
                 <span className={cx(pillClass, STATE_TONE[deposit.state])}>
@@ -89,7 +93,7 @@ export function DepositTable({ token, deposits }: { token: string; deposits: Dep
                     {deposit.canMoveTo.map((to) => (
                       <form key={to} action={formAction} className="flex items-center gap-1">
                         <input type="hidden" name="token" value={token} />
-                        <input type="hidden" name="chargeId" value={deposit.chargeId} />
+                        <input type="hidden" name="teamId" value={deposit.teamId} />
                         <input type="hidden" name="state" value={to} />
                         {to === "forfeited" && (
                           <input

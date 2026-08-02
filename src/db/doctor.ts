@@ -24,13 +24,27 @@ type ChainObservation = Pick<Observed, "forkGuaranteeEnforced" | "forkedComps">;
 
 type MoneyObservation = Pick<
   Observed,
-  "moneyGuaranteeEnforced" | "driftingPayments" | "orphanedAllocations"
+  | "moneyGuaranteeEnforced"
+  | "driftingPayments"
+  | "orphanedAllocations"
+  | "forkedDeposits"
+  | "unexplainedRefunds"
 >;
 
 type SchemaObservation = Pick<Observed, "migrationsApplied" | "migrationsExpected">;
 
-/** The tables migration 0009 creates. Absent means the migration has not run. */
-const MONEY_TABLES = ["fee_schedules", "charges", "payments", "payment_allocations"] as const;
+/**
+ * The tables the money spine needs. `deposit_events` arrives in `0010` rather than `0009` and was
+ * missing from this list for a day — so a database with the ledger and no deposit chain passed every
+ * check here, and the two queries below had nothing to run against and silently did not run.
+ */
+const MONEY_TABLES = [
+  "fee_schedules",
+  "charges",
+  "payments",
+  "payment_allocations",
+  "deposit_events",
+] as const;
 
 /**
  * How far behind the repo this database is.
@@ -73,7 +87,7 @@ const observeSchema = async (): Promise<SchemaObservation> => {
  * from a missing table would throw where a preflight must report.
  */
 const observeMoney = async (): Promise<MoneyObservation> => {
-  const [present, tables] = await Promise.all([
+  const [present, tables, columns] = await Promise.all([
     db.execute<{ name: string }>(sql`
       select indexname as name from pg_indexes where schemaname = 'public'
       union
@@ -82,14 +96,36 @@ const observeMoney = async (): Promise<MoneyObservation> => {
     db.execute<{ tablename: string }>(sql`
       select tablename from pg_tables where schemaname = 'public'
     `),
+    /**
+     * **A table existing is not the column existing, and this preflight crashed over the
+     * difference.** `deposit_events` arrives in `0010` and its `team_id` in `0011`, so a database at
+     * `0010` passed the table guard above and then threw `column "team_id" does not exist` out of
+     * the fork query — turning the instrument that exists to *report* a database behind the repo
+     * into one that dies on it. Found by pointing it at the deployed demo, which is the only place
+     * it could have been found, because every other database here is migrated by the tooling that
+     * generates the migration.
+     */
+    db.execute<{ table_name: string; column_name: string }>(sql`
+      select table_name, column_name from information_schema.columns
+       where table_schema = 'public'
+    `),
   ]);
 
   const names = new Set(present.rows.map((row) => row.name));
   const moneyGuaranteeEnforced = MONEY_CONSTRAINT_NAMES.every((name) => names.has(name));
 
   const existing = new Set(tables.rows.map((row) => row.tablename));
+  const hasColumn = (table: string, column: string): boolean =>
+    columns.rows.some((row) => row.table_name === table && row.column_name === column);
+
   if (!MONEY_TABLES.every((table) => existing.has(table))) {
-    return { moneyGuaranteeEnforced, driftingPayments: [], orphanedAllocations: [] };
+    return {
+      moneyGuaranteeEnforced,
+      driftingPayments: [],
+      orphanedAllocations: [],
+      forkedDeposits: [],
+      unexplainedRefunds: [],
+    };
   }
 
   // `coalesce`, because a payment with no live allocations should read 0 rather than drop out of
@@ -124,6 +160,49 @@ const observeMoney = async (): Promise<MoneyObservation> => {
        and c.voided_at is not null
   `);
 
+  /**
+   * A deposit that ended twice — `tab_runs`' forked chain, one table over.
+   *
+   * `deposit_events_terminal_unique` makes this unrepresentable, exactly as the chain indexes do for
+   * a locked result, and for the same reason the doctor cannot assume it is there: the guarantee
+   * lives in the database, so the code has to look. Rows written before `0011` are the realistic
+   * source, because the index was keyed on `charge_id` until then and a void-and-reinsert let a
+   * second ending through against a fresh id.
+   */
+  const forkedDeposits = hasColumn("deposit_events", "team_id")
+    ? await db.execute<{ team_id: string; endings: number }>(sql`
+        select team_id, count(*)::int as endings
+          from deposit_events
+         where state in ('refunded', 'forfeited')
+         group by comp_id, team_id
+        having count(*) > 1
+      `)
+    : { rows: [] };
+
+  /**
+   * Money marked as returned with no ending to explain it.
+   *
+   * `refunded_cents` is the second denormalized number in the schema, and it earns the same
+   * treatment as the first: the CHECK constrains it against `gross_cents` but nothing can make it
+   * agree with the deposit chain, because that spans tables. A refund is the only act that moves it,
+   * so a payment carrying one for a team whose deposit never ended is a number nobody can account
+   * for — and an unaccountable number in a ledger is the $5,000 gap in miniature.
+   */
+  const unexplained =
+    hasColumn("payments", "refunded_cents") && hasColumn("deposit_events", "team_id")
+      ? await db.execute<{ payment_id: string; refunded_cents: number }>(sql`
+          select p.id as payment_id, p.refunded_cents
+            from payments p
+           where p.refunded_cents > 0
+             and not exists (
+                   select 1 from deposit_events e
+                    where e.team_id = p.team_id
+                      and e.comp_id = p.comp_id
+                      and e.state = 'refunded'
+                 )
+        `)
+      : { rows: [] };
+
   return {
     moneyGuaranteeEnforced,
     driftingPayments: drifting.rows.map((row) => ({
@@ -135,6 +214,14 @@ const observeMoney = async (): Promise<MoneyObservation> => {
       paymentId: row.payment_id,
       chargeId: row.charge_id,
       amountCents: row.amount_cents,
+    })),
+    forkedDeposits: forkedDeposits.rows.map((row) => ({
+      teamId: row.team_id,
+      endings: row.endings,
+    })),
+    unexplainedRefunds: unexplained.rows.map((row) => ({
+      paymentId: row.payment_id,
+      refundedCents: row.refunded_cents,
     })),
   };
 };

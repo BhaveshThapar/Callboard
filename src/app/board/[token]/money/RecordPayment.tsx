@@ -3,6 +3,7 @@
 import { useActionState, useState } from "react";
 import { cardClass, cx, eyebrowClass, inputClass, primaryButtonClass } from "@/components/styles";
 import { PAYMENT_RAILS } from "@/db/schema";
+import { unallocatedCents } from "@/lib/money/balance";
 import { formatCents, parseDollars } from "@/lib/money/format";
 import { recordPaymentAction } from "../actions";
 import { IDLE } from "../state";
@@ -47,7 +48,11 @@ export function RecordPayment({ token, teams }: { token: string; teams: PayableT
     if (!entered) return sum;
     return sum + (parseDollars(entered) ?? 0);
   }, 0);
-  const unattached = grossCents === null ? null : grossCents - allocatedCents;
+  // `unallocatedCents` rather than the subtraction, because that helper exists so this readout, the
+  // ledger's refusal and the unattributed panel cannot become three definitions of "what is left" —
+  // and this form is the one its own docstring names.
+  const unattached =
+    grossCents === null ? null : unallocatedCents({ grossCents, allocatedCents });
 
   return (
     <div className={cardClass}>

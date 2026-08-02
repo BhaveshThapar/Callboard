@@ -2,11 +2,16 @@
  * A8 — recording money that arrived, and saying what it was for.
  *
  * This is the write [ADR-0012](../../../docs/decisions/0012-transactions-for-writes-that-span-statements.md)
- * exists for, and the **second and last sanctioned `withTransaction` caller** — named in advance by
- * ADR-0012 so its arrival is a decision rather than a drift. The payment row, its allocations, and
- * the counter that constrains them are one act: half of it is a payment nobody can see the
- * destination of, or a counter claiming $2,160 is spent when nothing is. Both are states a human
- * has to find and repair, which is the problem being sold against.
+ * exists for, and the **second sanctioned `withTransaction` caller** — named in advance by ADR-0012
+ * so its arrival is a decision rather than a drift. The payment row, its allocations, and the
+ * counter that constrains them are one act: half of it is a payment nobody can see the destination
+ * of, or a counter claiming $2,160 is spent when nothing is. Both are states a human has to find and
+ * repair, which is the problem being sold against.
+ *
+ * It said "second **and last**" until August 2, 2026, when a third earned the name on ADR-0012's own
+ * terms: a deposit's ending and the money it returns ([ADR-0015](../../../docs/decisions/0015-a-refund-moves-the-money.md)).
+ * Three functions here — `recordPayment`, `allocatePayment`, `releaseAllocation` — are all *this*
+ * caller, because callers are counted by invariant rather than by call site.
  *
  * Nothing here routes money. Every row is hand-entered on a rail we record and do not move
  * (`PAYMENT_RAILS`), which is what lets the ledger close PRD §14's ~$5,000 gap without Stripe.
@@ -14,14 +19,14 @@
 import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Transaction } from "@/db";
 import { db, withTransaction } from "@/db";
-import { violatedConstraint } from "@/db/errors";
 import type { PaymentRail } from "@/db/schema";
-import { charges, MONEY_CONSTRAINTS, paymentAllocations, payments, teams } from "@/db/schema";
+import { charges, paymentAllocations, payments, teams } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor } from "@/lib/auth/scope";
 import { listRosterForBoard } from "@/lib/auth/scope";
 import { remainingOnCharge, unallocatedCents } from "./balance";
 import { formatCents } from "./format";
+import { refusalFor, UNKNOWN_REFUSAL } from "./refusals";
 
 export type PaymentInput = {
   teamId: string;
@@ -37,33 +42,6 @@ export type PaymentInput = {
 export type LedgerResult =
   | { ok: true; paymentId: string; allocatedCents: number; creditCents: number }
   | { ok: false; message: string };
-
-/**
- * A database refusal, as a sentence a treasurer can act on.
- *
- * The **third** reader of `violatedConstraint`, and it means a third thing by it: `lockAction` reads
- * a chain index as a *refusal* (there must not be a second root), `apply` reads the bid-code unique
- * as a *retry* (the applicant did nothing wrong), and this reads a money constraint as *an
- * explanation*. What all three share is that none may guess from the message text — drizzle's own
- * `message` is the failed SQL, and `Failed query: insert into "payments" ...` is not a thing to show
- * someone reconciling a bank statement.
- */
-const refusal = (error: unknown): string | null => {
-  switch (violatedConstraint(error)) {
-    case MONEY_CONSTRAINTS.allocatedCeiling:
-      return "That would allocate more than this payment is worth. Someone may have allocated part of it already — reload and check what is left.";
-    case MONEY_CONSTRAINTS.netIdentity:
-      return "The net does not equal gross minus fee. Enter what the bank actually shows rather than a rounded figure.";
-    case MONEY_CONSTRAINTS.externalRef:
-      return "A payment with that reference is already recorded for this comp. It has not been recorded twice.";
-    case MONEY_CONSTRAINTS.liveAllocation:
-      return "Part of this payment is already applied to that charge. Reload and adjust the existing allocation instead.";
-    default:
-      return null;
-  }
-};
-
-const UNKNOWN = "Could not record that payment. Nothing was saved — reload and try again.";
 
 /**
  * The counter, then the row. Extracted so the ordering [ADR-0014] cares about has **one**
@@ -201,7 +179,7 @@ export const recordPayment = async (
       };
     });
   } catch (error) {
-    return { ok: false, message: refusal(error) ?? UNKNOWN };
+    return { ok: false, message: refusalFor(error) ?? UNKNOWN_REFUSAL };
   }
 };
 
@@ -238,10 +216,19 @@ export const listOpenPayments = async (actor: BoardActor): Promise<OpenPayment[]
       receivedAt: payments.receivedAt,
       grossCents: payments.grossCents,
       allocatedCents: payments.allocatedCents,
+      refundedCents: payments.refundedCents,
     })
     .from(payments)
     .innerJoin(teams, eq(teams.id, payments.teamId))
-    .where(and(eq(payments.compId, actor.compId), sql`${payments.allocatedCents} < ${payments.grossCents}`))
+    // `+ refunded_cents`, because refunding a deposit *releases* its allocations: the counter drops
+    // back to zero while the gross stays, so `allocated < gross` would put a fully returned payment
+    // on the to-do list and offer money that has left the account back for re-attribution.
+    .where(
+      and(
+        eq(payments.compId, actor.compId),
+        sql`${payments.allocatedCents} + ${payments.refundedCents} < ${payments.grossCents}`,
+      ),
+    )
     .orderBy(desc(payments.receivedAt));
 
   return rows.map((row) => ({
@@ -279,6 +266,9 @@ export const allocatePayment = async (
       teamId: payments.teamId,
       grossCents: payments.grossCents,
       allocatedCents: payments.allocatedCents,
+      // Money that went back out is not money left to attribute. Without this the ceiling below
+      // would let a refunded deposit be attached to a live obligation.
+      refundedCents: payments.refundedCents,
     })
     .from(payments)
     // Comp scope comes from the where, not from a second definition of it.
@@ -349,8 +339,151 @@ export const allocatePayment = async (
       };
     });
   } catch (error) {
-    return { ok: false, message: refusal(error) ?? UNKNOWN };
+    return { ok: false, message: refusalFor(error) ?? UNKNOWN_REFUSAL };
   }
+};
+
+/** One live allocation, as the thing a board can point at and take back. */
+export type AllocationView = {
+  id: string;
+  chargeId: string;
+  chargeKind: string;
+  amountCents: number;
+};
+
+export type PaymentView = {
+  id: string;
+  teamId: string;
+  teamName: string;
+  bidCode: string;
+  rail: PaymentRail;
+  receivedAt: Date;
+  grossCents: number;
+  feeCents: number;
+  netCents: number;
+  allocatedCents: number;
+  /** What has gone back out. `unallocatedCents` subtracts it: a refund is not re-attributable. */
+  refundedCents: number;
+  externalRef: string | null;
+  reconciledAt: Date | null;
+  /** Live only. A voided allocation is history and is not offered back for release. */
+  allocations: AllocationView[];
+};
+
+/**
+ * Every payment this comp has recorded — not only the ones with money left to attach — and what
+ * each one was said to be for.
+ *
+ * `listOpenPayments` filters to `allocated < gross`, because its screen is a to-do list. This one
+ * cannot reuse it: a reconciled payment is usually fully allocated, so the question *"which of these
+ * have I matched against the bank statement"* is asked precisely about the rows that read filters
+ * out. Two reads, two questions — and this one is still a read for a screen rather than a fourth
+ * window, on `listOpenPayments`' own stated terms: comp scope comes from the `where`, and the only
+ * id it hands back is a `paymentId`, which is not a `teamId` claim.
+ *
+ * **The allocations are carried for `releaseAllocation`'s sake**, and they are what makes an
+ * `allocationId` on a form checkable: the array holds only this comp's live allocations, so another
+ * comp's and an already-released one are refused by the same `find` — A3's argument one table over.
+ * Unlike `listRosterForBoard`, which deliberately groups allocations to a per-charge sum because its
+ * question is *how much of this obligation is settled*, this screen's question is *what did this
+ * payment pay for, and can I take it back* — which is the one question the sum cannot answer.
+ */
+export const listPaymentsForBoard = async (actor: BoardActor): Promise<PaymentView[]> => {
+  const [rows, allocations] = await Promise.all([
+    db
+      .select({
+        id: payments.id,
+        teamId: payments.teamId,
+        teamName: teams.name,
+        bidCode: teams.bidCode,
+        rail: payments.rail,
+        receivedAt: payments.receivedAt,
+        grossCents: payments.grossCents,
+        feeCents: payments.feeCents,
+        netCents: payments.netCents,
+        allocatedCents: payments.allocatedCents,
+        refundedCents: payments.refundedCents,
+        externalRef: payments.externalRef,
+        reconciledAt: payments.reconciledAt,
+      })
+      .from(payments)
+      .innerJoin(teams, eq(teams.id, payments.teamId))
+      .where(eq(payments.compId, actor.compId))
+      .orderBy(desc(payments.receivedAt)),
+
+    db
+      .select({
+        id: paymentAllocations.id,
+        paymentId: paymentAllocations.paymentId,
+        chargeId: paymentAllocations.chargeId,
+        chargeKind: charges.kind,
+        amountCents: paymentAllocations.amountCents,
+      })
+      .from(paymentAllocations)
+      .innerJoin(payments, eq(payments.id, paymentAllocations.paymentId))
+      .innerJoin(charges, eq(charges.id, paymentAllocations.chargeId))
+      .where(and(eq(payments.compId, actor.compId), isNull(paymentAllocations.voidedAt)))
+      .orderBy(charges.kind),
+  ]);
+
+  const byPayment = new Map<string, AllocationView[]>();
+  for (const { paymentId, ...allocation } of allocations) {
+    byPayment.set(paymentId, [...(byPayment.get(paymentId) ?? []), allocation]);
+  }
+
+  return rows.map((row) => ({ ...row, allocations: byPayment.get(row.id) ?? [] }));
+};
+
+/**
+ * Marks a payment as matched against the bank — or takes the mark back off.
+ *
+ * `payments.reconciled_at` was in the schema from migration `0009` and **nothing ever wrote it**. It
+ * is the column PRD §13's *reconciliation error vs. bank: $0* is measured against, so a treasurer
+ * could export the rows and match them by eye and had nowhere to record that they had: the second
+ * pass across a season started from nothing, every time, which is how a $5,000 gap survives being
+ * looked for.
+ *
+ * A timestamp rather than a boolean, for `waiver_accepted_at`'s reason: a boolean records a claim
+ * and a timestamp records an event, and this is the column somebody would be asked to produce.
+ *
+ * Reversible on purpose, and it is the one thing here worth arguing. `deposit_events` refuses a
+ * second ending because a deposit returned twice is money gone; a reconciliation mark moves no
+ * money at all. It is a treasurer's own bookkeeping about a bank statement, and mis-ticking a row
+ * you cannot un-tick would make the mark worth less, not more. Every flip is audited, which is where
+ * the history lives — `payments` is not an append-only chain and does not become one for this.
+ *
+ * One statement, so no transaction (ADR-0012 stays about invariants that span two).
+ */
+export const setPaymentReconciled = async (
+  actor: BoardActor,
+  paymentId: string,
+  reconciled: boolean,
+): Promise<{ ok: true; reconciledAt: Date | null } | { ok: false; message: string }> => {
+  const [payment] = await db
+    .select({ id: payments.id, reconciledAt: payments.reconciledAt })
+    .from(payments)
+    // Comp scope comes from the where, exactly as `allocatePayment` takes it.
+    .where(and(eq(payments.id, paymentId), eq(payments.compId, actor.compId)))
+    .limit(1);
+
+  if (!payment) return { ok: false, message: "That payment is not one of this comp's." };
+
+  const reconciledAt = reconciled ? new Date() : null;
+
+  await db.update(payments).set({ reconciledAt }).where(eq(payments.id, payment.id));
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: reconciled ? "payment.reconcile" : "payment.unreconcile",
+    entity: "payment",
+    entityId: payment.id,
+    before: { reconciledAt: payment.reconciledAt },
+    after: { reconciledAt },
+  });
+
+  return { ok: true, reconciledAt };
 };
 
 /**
@@ -426,49 +559,74 @@ export const releaseAllocationsForCharges = async (
 };
 
 /**
- * Voids an allocation and returns the cents to the payment's unapplied credit.
+ * Voids one allocation and returns its cents to the payment's unapplied credit.
  *
- * Append-only in spirit: the allocation row survives with `voided_at` set, because deleting it would
- * destroy the record of what somebody believed the money was for. The counter moves down by the same
- * atomic increment that moved it up.
+ * **This is the undo for a wrong label, and for three weeks there was none.** The function existed,
+ * complete and transactional, with no server action and no UI behind it — so a treasurer who typed
+ * $560 against the deposit instead of the hotel could not take it back. `payment_allocations_live_unique`
+ * makes the mistake permanent on a second attempt, and `recordPayment`'s own ceiling message says
+ * *"reload and adjust the existing allocation instead"*, which named an instrument that did not
+ * exist. The only escape was a roster move that voided the whole charge.
+ *
+ * **This changes no balance**, exactly as `releaseAllocationsForCharges` does not: `paid` is the sum
+ * of gross, so releasing moves money from *attached to this obligation* to *unattached*, and the
+ * who-owes total does not move. What changes is that the money becomes re-attributable — which is
+ * the same sentence as A8's lump, arriving from the other direction.
+ *
+ * Append-only in spirit: the row survives with `voided_at` set, because deleting it would destroy
+ * the record of what somebody believed the money was for. The counter moves down by the same atomic
+ * increment that moved it up, so `db:doctor`'s drift check stays quiet.
+ *
+ * The `allocationId` resolves through `listPaymentsForBoard` — the read that produced the form —
+ * rather than through a `where` of its own. That is `advanceDeposit`'s pattern and the window rule's
+ * literal sentence: comp scope and *is live* both come free from that read, so another comp's
+ * allocation and an already-released one are refused by the same `find`, with no second definition
+ * of which allocations count.
  */
 export const releaseAllocation = async (
   actor: BoardActor,
   allocationId: string,
 ): Promise<LedgerResult> => {
-  const [row] = await db
-    .select({
-      id: paymentAllocations.id,
-      paymentId: paymentAllocations.paymentId,
-      amountCents: paymentAllocations.amountCents,
-      grossCents: payments.grossCents,
-    })
-    .from(paymentAllocations)
-    .innerJoin(payments, eq(payments.id, paymentAllocations.paymentId))
-    .innerJoin(charges, eq(charges.id, paymentAllocations.chargeId))
-    // Comp scope comes from the join, not from a second definition of it.
-    .where(
-      and(
-        eq(paymentAllocations.id, allocationId),
-        eq(payments.compId, actor.compId),
-        isNull(paymentAllocations.voidedAt),
-      ),
-    )
-    .limit(1);
+  const payments_ = await listPaymentsForBoard(actor);
+  const payment = payments_.find((row) => row.allocations.some((a) => a.id === allocationId));
+  const allocation = payment?.allocations.find((a) => a.id === allocationId);
 
-  if (!row) return { ok: false, message: "That allocation is not one of this comp's." };
+  if (!payment || !allocation) {
+    return { ok: false, message: "That allocation is not one of this comp's, or is already released." };
+  }
 
   try {
     return await withTransaction(async (tx) => {
-      await tx
+      /**
+       * **Void first here, and counter first everywhere else, and the asymmetry is the point.**
+       *
+       * On the way up the counter carries the constraint, so moving it first is what makes
+       * `allocated <= gross` fire on a race (ADR-0014). On the way down that CHECK protects nothing
+       * — `>= 0` only catches a decrement that crosses zero — so a counter-first release lets two
+       * clicks subtract the same cents twice and leaves the counter permanently under the sum it
+       * stands for. Exactly the drift `db:doctor` reports and nobody can resolve.
+       *
+       * So the guarded void is the serialization point: it takes the allocation's own row lock, and
+       * `returning` says whether *this* statement is the one that voided it. A loser voids nothing,
+       * decrements nothing, and is told so.
+       */
+      const voided = await tx
         .update(paymentAllocations)
         .set({ voidedAt: new Date() })
-        .where(eq(paymentAllocations.id, allocationId));
+        .where(and(eq(paymentAllocations.id, allocationId), isNull(paymentAllocations.voidedAt)))
+        .returning({ id: paymentAllocations.id });
+
+      if (voided.length === 0) {
+        return {
+          ok: false as const,
+          message: "Somebody else already released that. The money is unattached, not released twice.",
+        };
+      }
 
       await tx
         .update(payments)
-        .set({ allocatedCents: sql`${payments.allocatedCents} - ${row.amountCents}` })
-        .where(eq(payments.id, row.paymentId));
+        .set({ allocatedCents: sql`${payments.allocatedCents} - ${allocation.amountCents}` })
+        .where(eq(payments.id, payment.id));
 
       await recordAudit(
         {
@@ -477,8 +635,8 @@ export const releaseAllocation = async (
           actorPersonId: actor.personId,
           action: "allocation.release",
           entity: "payment",
-          entityId: row.paymentId,
-          before: { allocationId, amountCents: row.amountCents },
+          entityId: payment.id,
+          before: { allocationId, chargeId: allocation.chargeId, amountCents: allocation.amountCents },
           after: null,
         },
         tx,
@@ -486,12 +644,14 @@ export const releaseAllocation = async (
 
       return {
         ok: true as const,
-        paymentId: row.paymentId,
+        paymentId: payment.id,
+        // What this act allocated, which is nothing — the shape `allocatePayment` returns, read the
+        // same way. The credit is the number a treasurer is actually told about.
         allocatedCents: 0,
-        creditCents: row.amountCents,
+        creditCents: allocation.amountCents,
       };
     });
   } catch (error) {
-    return { ok: false, message: refusal(error) ?? UNKNOWN };
+    return { ok: false, message: refusalFor(error) ?? UNKNOWN_REFUSAL };
   }
 };
