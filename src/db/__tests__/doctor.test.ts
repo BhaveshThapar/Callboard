@@ -20,6 +20,8 @@ const healthy: Observed = {
   orphanedAllocations: [],
   forkedDeposits: [],
   unexplainedRefunds: [],
+  accountGuaranteeEnforced: true,
+  duplicateInvitations: [],
 };
 
 const unseeded: Observed = {
@@ -40,6 +42,8 @@ const unseeded: Observed = {
   orphanedAllocations: [],
   forkedDeposits: [],
   unexplainedRefunds: [],
+  accountGuaranteeEnforced: true,
+  duplicateInvitations: [],
 };
 
 const expected = { judges: 3, teams: 8 };
@@ -158,6 +162,34 @@ describe("summarizeHealth", () => {
     expect(money).not.toMatch(/00\d\d/);
     // Reseeding does not create a constraint, so it must not be offered as the remedy.
     expect(money).not.toMatch(/db:seed/);
+  });
+
+  /**
+   * The credential half of the same family. Nothing in the product produces two live invitations --
+   * `invite` revokes the previous envelope first -- so a duplicate means the index is gone or
+   * something wrote around the product, and either way a person has two valid ways into one comp.
+   */
+  it("reports a person holding two live invitations, and does not offer to reseed", () => {
+    const health = summarizeHealth(
+      { ...healthy, duplicateInvitations: [{ personId: "person-7", live: 2 }] },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const duplicate = health.problems.find((p) => p.includes("person-7"));
+    expect(duplicate).toMatch(/2 live invitations/);
+    expect(duplicate).toMatch(/an invitation is spent once/);
+    expect(duplicate).toMatch(/human must decide/);
+    expect(duplicate).not.toMatch(/db:seed/);
+  });
+
+  it("reports missing account constraints without naming a migration", () => {
+    const health = summarizeHealth({ ...healthy, accountGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const accounts = health.problems.find((p) => p.includes("two live invitations to one comp"));
+    expect(accounts).toMatch(/db:migrate/);
+    expect(accounts).not.toMatch(/db:seed/);
   });
 
   // `forkedComps`' sentence about a smaller question. Unrepresentable since `0011` rekeyed the

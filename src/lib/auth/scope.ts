@@ -35,7 +35,38 @@ export type JudgeActor = {
   judgeName: string;
   judgeAssignmentId: string;
 };
-export type Actor = BoardActor | JudgeActor;
+
+/**
+ * A team captain, signed in ([ADR-0016](../../../docs/decisions/0016-accounts-for-people-who-stay-links-for-people-who-visit.md)).
+ *
+ * `teamId` is on the actor rather than resolved per request, and that is the whole security design
+ * for this kind: a captain's every read is filtered by the team their *membership* names, so a
+ * `teamId` arriving on one of their forms is not a claim to be checked — it is ignored. The window
+ * rule says a `teamId` is resolved against the scoped read that produced the form; here the scope
+ * is the actor, which is stronger, because there is no read that could return another team's row.
+ */
+export type TeamActor = {
+  kind: "team";
+  compId: string;
+  compName: string;
+  personId: string;
+  personName: string;
+  teamId: string;
+};
+
+/** A liaison, signed in. Sees their own duties and the schedule those hang off, and nothing else. */
+export type LiaisonActor = {
+  kind: "liaison";
+  compId: string;
+  compName: string;
+  personId: string;
+  personName: string;
+};
+
+export type Actor = BoardActor | JudgeActor | TeamActor | LiaisonActor;
+
+/** The two kinds that arrive from a session rather than from a token in a URL. */
+export type AccountActor = TeamActor | LiaisonActor;
 
 /** Teams a judge is allowed to see. Note the absence of `name`: blindness is enforced by the type. */
 export type JudgeTeamView = { id: string; bidCode: string; performanceOrder: number | null };
@@ -332,6 +363,89 @@ export const resolveRosterTeamForBoard = async (
   actor: BoardActor,
   teamId: string,
 ): Promise<RosterTeamView | null> => claimed(await listRosterForBoard(actor), teamId);
+
+/**
+ * What a captain may see: their own team, and no other.
+ *
+ * **This is a fourth window, and CLAUDE.md forbids adding one casually rather than at all.** The bar
+ * is a genuinely new question, and this is one: the three existing windows all answer *which teams
+ * count for this board or this judge*, and none of them can answer *what does my team owe* without
+ * being handed a `teamId` to trust. This one takes the `teamId` off the **actor**, where it came
+ * from a membership row rather than from a form — so unlike the other three there is no claim to
+ * check, because there is no read here that could return somebody else's team.
+ *
+ * The projection is the scope, as it is for `publicComp`: `TeamOwnView` carries no other team, no
+ * bid code but its own, and no score. Widening it is a compile error rather than a review.
+ */
+export type TeamOwnView = {
+  id: string;
+  name: string;
+  bidCode: string;
+  school: string | null;
+  status: TeamStatus;
+  rosterSize: number | null;
+  rooms: number | null;
+  performanceOrder: number | null;
+  charges: ChargeLineView[];
+  balance: TeamBalance;
+};
+
+export const ownTeamForCaptain = async (actor: TeamActor): Promise<TeamOwnView | null> => {
+  const [team, charged, paid] = await Promise.all([
+    db
+      .select({
+        id: teams.id,
+        name: teams.name,
+        bidCode: teams.bidCode,
+        school: teams.school,
+        status: teams.status,
+        rosterSize: teams.rosterSize,
+        rooms: teams.rooms,
+        performanceOrder: teams.performanceOrder,
+      })
+      .from(teams)
+      // Both halves: the actor's team *and* the actor's comp. A membership cannot outlive the comp
+      // it names, but reading as if it could is what keeps this a scoped read rather than a lookup.
+      .where(and(eq(teams.id, actor.teamId), eq(teams.compId, actor.compId)))
+      .limit(1),
+
+    db
+      .select({
+        id: charges.id,
+        kind: charges.kind,
+        amountCents: charges.amountCents,
+      })
+      .from(charges)
+      .where(and(eq(charges.teamId, actor.teamId), isNull(charges.voidedAt)))
+      .orderBy(charges.kind),
+
+    db
+      .select({
+        chargeId: paymentAllocations.chargeId,
+        paidCents: sum(paymentAllocations.amountCents),
+      })
+      .from(paymentAllocations)
+      .innerJoin(charges, eq(charges.id, paymentAllocations.chargeId))
+      .where(and(eq(charges.teamId, actor.teamId), isNull(paymentAllocations.voidedAt)))
+      .groupBy(paymentAllocations.chargeId),
+  ]);
+
+  const row = team[0];
+  if (!row) return null;
+
+  const paidByCharge = new Map(paid.map((p) => [p.chargeId, Number(p.paidCents ?? 0)]));
+  const lines: ChargeLineView[] = charged.map((charge) => ({
+    ...charge,
+    paidCents: paidByCharge.get(charge.id) ?? 0,
+  }));
+
+  const [totals] = await db
+    .select({ paidCents: sum(sql`${payments.grossCents} - ${payments.refundedCents}`) })
+    .from(payments)
+    .where(and(eq(payments.teamId, actor.teamId), eq(payments.compId, actor.compId)));
+
+  return { ...row, charges: lines, balance: teamBalance(lines, Number(totals?.paidCents ?? 0)) };
+};
 
 /**
  * The questions this comp added to its own form, so the board can read the answers under the words

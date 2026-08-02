@@ -12,6 +12,7 @@ import {
   boardAssignments,
   CHAIN_INDEX_NAMES,
   comps,
+  ACCOUNT_CONSTRAINT_NAMES,
   MONEY_CONSTRAINT_NAMES,
   judgeAssignments,
   orgs,
@@ -32,6 +33,11 @@ type MoneyObservation = Pick<
 >;
 
 type SchemaObservation = Pick<Observed, "migrationsApplied" | "migrationsExpected">;
+
+type AccountObservation = Pick<Observed, "accountGuaranteeEnforced" | "duplicateInvitations">;
+
+/** The tables migration `0012` creates. Absent means P1 has not been applied here. */
+const ACCOUNT_TABLES = ["users", "memberships", "sessions", "invitations"] as const;
 
 /**
  * The tables the money spine needs. `deposit_events` arrives in `0010` rather than `0009` and was
@@ -227,6 +233,51 @@ const observeMoney = async (): Promise<MoneyObservation> => {
 };
 
 /**
+ * Whether a person can still be handed two live ways into one comp.
+ *
+ * `moneyProblems`' shape, one subsystem over, and it exists for the same reason: `invite` revokes
+ * the previous envelope before minting a new one, but the read and the write are two acts on
+ * neon-http, so `invitations_live_unique` is the only thing that can actually refuse the second —
+ * and a guarantee that lives in the database is one the code has to look for rather than assume.
+ */
+const observeAccounts = async (): Promise<AccountObservation> => {
+  const [present, tables] = await Promise.all([
+    db.execute<{ name: string }>(sql`
+      select indexname as name from pg_indexes where schemaname = 'public'
+      union
+      select conname as name from pg_constraint
+    `),
+    db.execute<{ tablename: string }>(sql`
+      select tablename from pg_tables where schemaname = 'public'
+    `),
+  ]);
+
+  const names = new Set(present.rows.map((row) => row.name));
+  const accountGuaranteeEnforced = ACCOUNT_CONSTRAINT_NAMES.every((name) => names.has(name));
+
+  const existing = new Set(tables.rows.map((row) => row.tablename));
+  if (!ACCOUNT_TABLES.every((table) => existing.has(table))) {
+    return { accountGuaranteeEnforced, duplicateInvitations: [] };
+  }
+
+  const duplicates = await db.execute<{ person_id: string; live: number }>(sql`
+    select person_id, count(*)::int as live
+      from invitations
+     where purpose = 'invite' and accepted_at is null and revoked_at is null
+     group by comp_id, person_id, role
+    having count(*) > 1
+  `);
+
+  return {
+    accountGuaranteeEnforced,
+    duplicateInvitations: duplicates.rows.map((row) => ({
+      personId: row.person_id,
+      live: row.live,
+    })),
+  };
+};
+
+/**
  * Whether a comp's locked results can still fork on this database, and whether one already has.
  *
  * Unlike everything else here this is a fact about the database, not about the seeded demo, so it is
@@ -279,10 +330,11 @@ const observeChain = async (): Promise<ChainObservation> => {
  * against, and was not.
  */
 export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
-  const [schema, chain, money, [comp]] = await Promise.all([
+  const [schema, chain, money, accounts, [comp]] = await Promise.all([
     observeSchema(),
     observeChain(),
     observeMoney(),
+    observeAccounts(),
     db
       .select({ id: comps.id, name: comps.name })
       .from(comps)
@@ -297,6 +349,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
         ...schema,
         ...chain,
         ...money,
+        ...accounts,
         compFound: false,
         boardAssignments: 0,
         boardName: null,
@@ -383,6 +436,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
       ...schema,
       ...chain,
       ...money,
+      ...accounts,
       compFound: true,
       boardAssignments: board.length,
       boardName: first?.personName ?? null,

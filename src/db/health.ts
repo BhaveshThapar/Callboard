@@ -54,6 +54,17 @@ export type Observed = {
    * spans tables (ADR-0015).
    */
   unexplainedRefunds: { paymentId: string; refundedCents: number }[];
+  /**
+   * Every constraint in `ACCOUNT_CONSTRAINTS` exists: a second live invitation to the same person,
+   * a duplicate login for one email, or two sessions sharing a token are all unrepresentable.
+   */
+  accountGuaranteeEnforced: boolean;
+  /**
+   * People holding more than one unspent invitation to the same comp and role — the state
+   * `invitations_live_unique` makes impossible, and therefore the state that says the index is gone.
+   * `forkedComps` and `forkedDeposits`' sibling, one table further out.
+   */
+  duplicateInvitations: { personId: string; live: number }[];
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
@@ -196,6 +207,36 @@ const moneyProblems = (observed: Observed): string[] => {
   return problems;
 };
 
+/**
+ * The credential half, and it earns its place for `moneyProblems`' reason: a guarantee that lives in
+ * the database is one the code cannot assume is there.
+ *
+ * A missing `invitations_live_unique` is the dangerous one. Nothing in the product produces two live
+ * invitations — `invite` revokes the previous envelope first — so a duplicate means either the index
+ * is gone or something wrote around the product, and both mean a person can be handed two valid ways
+ * into one comp. Reseeding fixes neither and is not offered, for the reason it is not offered for a
+ * forked chain.
+ */
+const accountProblems = (observed: Observed): string[] => {
+  const problems: string[] = [];
+
+  if (!observed.accountGuaranteeEnforced) {
+    problems.push(
+      "a person can still hold two live invitations to one comp, or two accounts on one email: " +
+        "the account constraints are missing. Apply the migrations with 'bun run db:migrate'.",
+    );
+  }
+
+  for (const { personId, live } of observed.duplicateInvitations) {
+    problems.push(
+      `person ${personId} holds ${live} live invitations to one comp and role, and an invitation ` +
+        "is spent once. A human must decide which one stands before either is accepted.",
+    );
+  }
+
+  return problems;
+};
+
 export const summarizeHealth = (
   observed: Observed,
   expected: { judges: number; teams: number },
@@ -207,6 +248,7 @@ export const summarizeHealth = (
         ...schemaProblems(observed),
         ...chainProblems(observed),
         ...moneyProblems(observed),
+        ...accountProblems(observed),
         "comp not seeded — run 'bun run db:seed'",
       ],
     };
@@ -216,6 +258,7 @@ export const summarizeHealth = (
     ...schemaProblems(observed),
     ...chainProblems(observed),
     ...moneyProblems(observed),
+    ...accountProblems(observed),
   ];
 
   if (observed.boardAssignments === 0) {

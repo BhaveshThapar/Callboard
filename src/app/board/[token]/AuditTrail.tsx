@@ -3,9 +3,15 @@ import type { recentAudit } from "@/lib/audit/log";
 
 type AuditRow = Awaited<ReturnType<typeof recentAudit>>[number];
 
+/**
+ * Total over `ACTOR_KINDS`, so a new kind of actor is a type error here rather than a blank badge in
+ * an audit trail. That is why the union is a `Record` and not a lookup with a fallback.
+ */
 const ACTOR_INITIAL: Record<AuditRow["actorKind"], string> = {
   board: "B",
   judge: "J",
+  team: "T",
+  liaison: "L",
   system: "S",
 };
 
