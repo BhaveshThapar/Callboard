@@ -4,8 +4,10 @@ config({ path: ".env.local", quiet: true });
 
 // Imported after dotenv, because `@/db` reads DATABASE_URL when it loads.
 const { db } = await import("@/db");
-const { boardAssignments, payments, tabRuns, teams } = await import("@/db/schema");
-const { eq, sql } = await import("drizzle-orm");
+const { boardAssignments, charges, paymentAllocations, payments, tabRuns, teams } = await import(
+  "@/db/schema"
+);
+const { and, eq, isNotNull, isNull, sql } = await import("drizzle-orm");
 const { lockResults } = await import("@/lib/comp/tab");
 
 /**
@@ -165,6 +167,40 @@ switch (command) {
 
   case "undrift": {
     await db.delete(payments).where(eq(payments.compId, need("undrift")));
+    console.log("cleared");
+    break;
+  }
+
+  /**
+   * Voids a charge while leaving its allocation live — the state the product no longer produces,
+   * because `syncCharges` and `voidChargesFor` release first, but which rows written before that
+   * are still sitting in.
+   *
+   * Again no constraint is broken, and again that is the point: the counter still equals the sum of
+   * the payment's live allocations, so `db:doctor`'s drift query reports nothing. What has gone is
+   * the obligation underneath, which that query never joins to.
+   */
+  case "orphan-allocation": {
+    const compId = need("orphan-allocation");
+    const [row] = await db
+      .select({ chargeId: paymentAllocations.chargeId, paymentId: paymentAllocations.paymentId })
+      .from(paymentAllocations)
+      .innerJoin(charges, eq(charges.id, paymentAllocations.chargeId))
+      .where(and(eq(charges.compId, compId), isNull(paymentAllocations.voidedAt)))
+      .limit(1);
+    if (!row) throw new Error(`comp ${compId} has no live allocations to orphan`);
+
+    await db.update(charges).set({ voidedAt: new Date() }).where(eq(charges.id, row.chargeId));
+    console.log(`${row.paymentId} ${row.chargeId}`);
+    break;
+  }
+
+  case "unorphan": {
+    // Restore rather than delete: the demo has to be left exactly as it was found.
+    await db
+      .update(charges)
+      .set({ voidedAt: null })
+      .where(and(eq(charges.compId, need("unorphan")), isNotNull(charges.voidedAt)));
     console.log("cleared");
     break;
   }

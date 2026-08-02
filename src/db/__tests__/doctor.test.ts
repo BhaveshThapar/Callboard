@@ -15,6 +15,7 @@ const healthy: Observed = {
   forkedComps: [],
   moneyGuaranteeEnforced: true,
   driftingPayments: [],
+  orphanedAllocations: [],
 };
 
 const unseeded: Observed = {
@@ -30,6 +31,7 @@ const unseeded: Observed = {
   forkedComps: [],
   moneyGuaranteeEnforced: true,
   driftingPayments: [],
+  orphanedAllocations: [],
 };
 
 const expected = { judges: 3, teams: 8 };
@@ -159,6 +161,36 @@ describe("summarizeHealth", () => {
     expect(drift).toMatch(/sum to 0/);
     expect(drift).toMatch(/human must decide/);
     expect(drift).not.toMatch(/db:seed/);
+  });
+
+  /**
+   * The second bad state of the same family, and the one the drift check structurally cannot see:
+   * the counter and the live allocations agree perfectly, and what has gone is the charge
+   * underneath — which that comparison never joins to. Voiding a charge now releases its
+   * allocations, so a row here predates that, which is exactly why the doctor looks.
+   */
+  it("reports an allocation still pointing at a voided charge, naming both ids", () => {
+    const health = summarizeHealth(
+      {
+        ...healthy,
+        orphanedAllocations: [{ paymentId: "pay-4", chargeId: "chg-7", amountCents: 112000 }],
+      },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const orphan = health.problems.find((p) => p.includes("pay-4"));
+    expect(orphan).toMatch(/chg-7/);
+    expect(orphan).toMatch(/112000 cents/);
+    expect(orphan).toMatch(/has been voided/);
+    expect(orphan).toMatch(/human must release it/);
+    // Reseeding does not repair a row a human has to decide about.
+    expect(orphan).not.toMatch(/db:seed/);
+  });
+
+  it("says nothing about orphaned allocations when there are none", () => {
+    const health = summarizeHealth(healthy, expected);
+    expect(health.ok).toBe(true);
   });
 
   // Same argument as the chain indexes: a database without the money constraints is missing them

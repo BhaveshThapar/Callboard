@@ -21,7 +21,10 @@ import {
 
 type ChainObservation = Pick<Observed, "forkGuaranteeEnforced" | "forkedComps">;
 
-type MoneyObservation = Pick<Observed, "moneyGuaranteeEnforced" | "driftingPayments">;
+type MoneyObservation = Pick<
+  Observed,
+  "moneyGuaranteeEnforced" | "driftingPayments" | "orphanedAllocations"
+>;
 
 /** The tables migration 0009 creates. Absent means the migration has not run. */
 const MONEY_TABLES = ["fee_schedules", "charges", "payments", "payment_allocations"] as const;
@@ -56,7 +59,7 @@ const observeMoney = async (): Promise<MoneyObservation> => {
 
   const existing = new Set(tables.rows.map((row) => row.tablename));
   if (!MONEY_TABLES.every((table) => existing.has(table))) {
-    return { moneyGuaranteeEnforced, driftingPayments: [] };
+    return { moneyGuaranteeEnforced, driftingPayments: [], orphanedAllocations: [] };
   }
 
   // `coalesce`, because a payment with no live allocations should read 0 rather than drop out of
@@ -76,12 +79,32 @@ const observeMoney = async (): Promise<MoneyObservation> => {
          <> coalesce(sum(a.amount_cents) filter (where a.voided_at is null), 0)
   `);
 
+  // A live allocation against a dead charge. Invisible to the query above, which compares the
+  // counter to the live allocations and finds them agreeing -- what has gone is the obligation
+  // underneath, which that comparison never joins to.
+  const orphaned = await db.execute<{
+    payment_id: string;
+    charge_id: string;
+    amount_cents: number;
+  }>(sql`
+    select a.payment_id, a.charge_id, a.amount_cents
+      from payment_allocations a
+      join charges c on c.id = a.charge_id
+     where a.voided_at is null
+       and c.voided_at is not null
+  `);
+
   return {
     moneyGuaranteeEnforced,
     driftingPayments: drifting.rows.map((row) => ({
       paymentId: row.payment_id,
       allocatedCents: row.allocated_cents,
       allocatedSum: row.allocated_sum,
+    })),
+    orphanedAllocations: orphaned.rows.map((row) => ({
+      paymentId: row.payment_id,
+      chargeId: row.charge_id,
+      amountCents: row.amount_cents,
     })),
   };
 };

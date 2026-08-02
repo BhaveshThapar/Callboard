@@ -29,6 +29,12 @@ export type Observed = {
    * is the half that has to be *found* rather than refused.
    */
   driftingPayments: { paymentId: string; allocatedCents: number; allocatedSum: number }[];
+  /**
+   * Live allocations pointing at a charge that has been voided — money recorded against an
+   * obligation that no longer exists. The counter and the live allocations still agree, so the
+   * drift check above is blind to it by construction.
+   */
+  orphanedAllocations: { paymentId: string; chargeId: string; amountCents: number }[];
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
@@ -95,6 +101,18 @@ const moneyProblems = (observed: Observed): string[] => {
       `payment ${paymentId} says ${allocatedCents} cents are allocated but its live allocations ` +
         `sum to ${allocatedSum}. Something wrote an allocation without moving the counter; a human ` +
         "must decide which figure is true before the balance it feeds can be trusted.",
+    );
+  }
+
+  // The second detectable bad state of the same family, and the one the drift check structurally
+  // cannot see: the counter and the live allocations agree perfectly, it is the charge underneath
+  // that has gone. Voiding a charge now releases its allocations, so this can only be a row written
+  // before that did — which is exactly why the doctor has to look rather than assume.
+  for (const { paymentId, chargeId, amountCents } of observed.orphanedAllocations) {
+    problems.push(
+      `payment ${paymentId} still has ${amountCents} cents allocated to charge ${chargeId}, which ` +
+        "has been voided. The money is recorded against an obligation that no longer exists; a " +
+        "human must release it so it reads as unattached credit.",
     );
   }
 

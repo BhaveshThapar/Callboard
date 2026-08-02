@@ -3,9 +3,11 @@ import { notFound } from "next/navigation";
 import { Wordmark } from "@/components/Wordmark";
 import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
 import { listRosterForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import { listDepositsForBoard } from "@/lib/money/deposits";
 import { describeBalance, formatCents } from "@/lib/money/format";
 import { listOpenPayments } from "@/lib/money/ledger";
 import { summarizeOpenPayments, whoOwes } from "@/lib/money/who-owes";
+import { DepositTable } from "./DepositTable";
 import type { PayableTeam } from "./RecordPayment";
 import { RecordPayment } from "./RecordPayment";
 import type { OpenPaymentView } from "./UnattributedCredit";
@@ -27,9 +29,16 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
   const actor = await resolveBoardActor(token);
   if (!actor) notFound();
 
-  const [roster, openPayments] = await Promise.all([
+  /**
+   * `listDepositsForBoard` calls `listRosterForBoard` again internally, and that duplicate read is
+   * deliberate. Threading the roster in as a parameter would create a way to hand it a roster that
+   * did not come from the window — which is exactly what the window rule exists to prevent — and
+   * this page is `force-dynamic` over a comp of 8–30 teams. The cheaper of the two costs.
+   */
+  const [roster, openPayments, deposits] = await Promise.all([
     listRosterForBoard(actor),
     listOpenPayments(actor),
+    listDepositsForBoard(actor),
   ]);
   const report = whoOwes(roster);
   const credit = summarizeOpenPayments(openPayments);
@@ -107,6 +116,10 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
             payments={openViews}
             totalRemainingCents={credit.totalRemainingCents}
           />
+        </div>
+
+        <div className="mb-6">
+          <DepositTable token={token} deposits={deposits} />
         </div>
 
         {report.rows.length === 0 ? (
