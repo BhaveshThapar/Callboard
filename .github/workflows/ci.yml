@@ -27,6 +27,16 @@ jobs:
       - name: Unit tests
         run: bun run test
 
+      # Typecheck does not compile the app. An RSC boundary violation or a server action that
+      # cannot be serialized passes `tsc` and fails at deploy — which is to say, it fails on the
+      # deployed demo, silently, until somebody opens it in front of a prospect.
+      - name: Build
+        run: bun run build
+        env:
+          # `next build` imports modules that read this at load. It never connects: no page here
+          # is statically rendered, every route that touches data is `force-dynamic`.
+          DATABASE_URL: postgresql://build:build@localhost:5432/build
+
   # The acceptance test in PRD §8.3 needs a real Postgres and a real browser.
   #
   # It reads its own secret. `bun run e2e` reseeds, which deletes the demo org and everything

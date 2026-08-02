@@ -3,7 +3,7 @@ const DEFAULT_PROTECTED_COMPUTE_ID = "ep-round-fire-a6dyy8t8";
 export const protectedComputeId = (): string =>
   process.env.CALLBOARD_PROTECTED_COMPUTE_ID || DEFAULT_PROTECTED_COMPUTE_ID;
 
-const hostnameOf = (connectionString: string): string | undefined => {
+export const hostnameOf = (connectionString: string): string | undefined => {
   try {
     return new URL(connectionString).hostname;
   } catch {

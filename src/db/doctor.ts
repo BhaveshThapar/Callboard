@@ -1,3 +1,4 @@
+import journal from "../../drizzle/meta/_journal.json";
 import { and, count, eq, gt, isNull, sql } from "drizzle-orm";
 import type { BoardActor, JudgeActor } from "@/lib/auth/scope";
 import { listJudgeLabelsForBoard } from "@/lib/auth/scope";
@@ -26,8 +27,37 @@ type MoneyObservation = Pick<
   "moneyGuaranteeEnforced" | "driftingPayments" | "orphanedAllocations"
 >;
 
+type SchemaObservation = Pick<Observed, "migrationsApplied" | "migrationsExpected">;
+
 /** The tables migration 0009 creates. Absent means the migration has not run. */
 const MONEY_TABLES = ["fee_schedules", "charges", "payments", "payment_allocations"] as const;
+
+/**
+ * How far behind the repo this database is.
+ *
+ * `drizzle.__drizzle_migrations` lives in the `drizzle` schema, not `public` — every other catalog
+ * query here filters on `schemaname = 'public'` and would miss it. A database that has never run
+ * drizzle-kit has no such table, and `to_regclass` returns null rather than throwing, which is what
+ * keeps a preflight reporting where a bare `select` would crash.
+ *
+ * The expected count is `drizzle/meta/_journal.json`, imported rather than written down, for the
+ * reason `CHAIN_INDEXES` and `MONEY_CONSTRAINTS` have one definition each: a number typed here would
+ * be a second one, and it would be wrong the first time somebody generated a migration.
+ */
+const observeSchema = async (): Promise<SchemaObservation> => {
+  const migrationsExpected = journal.entries.length;
+
+  const result = await db.execute<{ applied: number | null }>(sql`
+    select case
+             when to_regclass('drizzle.__drizzle_migrations') is null then null
+             else (select count(*)::int from drizzle.__drizzle_migrations)
+           end as applied
+  `);
+
+  // `?? null` rather than `|| null`: a database with the table and zero rows has applied 0, which
+  // is the most behind it is possible to be and must not read as "cannot tell".
+  return { migrationsApplied: result.rows[0]?.applied ?? null, migrationsExpected };
+};
 
 /**
  * Whether over-allocation is still representable on this database, and whether a counter has
@@ -150,11 +180,20 @@ const observeChain = async (): Promise<ChainObservation> => {
 /**
  * Is the seeded demo one a prospect can actually be shown? A comp seeded under an older schema can
  * carry a dead board link while the judge links still resolve -- the failure surfaces only when the
- * board link is opened, mid-call. This checks the property that breaks (a board link resolves and
- * the board view renders), not migration-file hashes. It only reads, so it is safe against `main`.
+ * board link is opened, mid-call. So this checks the properties that break -- a board link resolves,
+ * the board view renders, the guarantees are enforceable -- rather than trusting a version number.
+ *
+ * It also counts migrations now, and that is not a retreat from the above. Property checks are only
+ * as broad as the properties somebody thought to name: `0007` adds a nullable column, breaks no
+ * guarantee, and took the deployed demo down for nineteen days in July 2026 while every check here
+ * passed. The count is the backstop for the migration nobody wrote a check for.
+ *
+ * It only reads, so it is safe against `main` -- which is the database it most needs to be run
+ * against, and was not.
  */
 export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
-  const [chain, money, [comp]] = await Promise.all([
+  const [schema, chain, money, [comp]] = await Promise.all([
+    observeSchema(),
     observeChain(),
     observeMoney(),
     db
@@ -168,6 +207,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
   if (!comp) {
     return summarizeHealth(
       {
+        ...schema,
         ...chain,
         ...money,
         compFound: false,
@@ -253,6 +293,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
 
   return summarizeHealth(
     {
+      ...schema,
       ...chain,
       ...money,
       compFound: true,

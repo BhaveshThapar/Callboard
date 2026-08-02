@@ -36,6 +36,19 @@ DATABASE_URL='<neon main pooled>' bun run db:doctor
 
 It confirms a board link *and* a judge link resolve and that both the board and the judge views render — the judge view reads `judge_notes`, a table the board view never touches, so a drift there would 500 every phone while the board stayed up. It also confirms every judge has a `Judge N` label, which only the exports read: a comp seeded before `label_seq` existed renders a perfectly healthy board screen and then fails at the download, mid-call. Then it prints `✓ Demo healthy` or a `✗` naming what to reseed, exiting non-zero on failure. It only reads, so — unlike `db:seed` and `bun run e2e`, which the guard refuses against `main` — it is safe to point at the live demo.
 
+**Read the second line of the output, every time.** It names the compute the verdict is about:
+
+```
+✓ Demo healthy: board "Ananya Krishnan", 3 judges, 8 teams.
+  ep-round-fire-a6dyy8t8-pooler · the deployed demo
+```
+
+Without `· the deployed demo`, you checked a different database and the deployed one is still whatever it was. That is not hypothetical: **the demo returned 500s from July 13 to August 1, 2026** — nineteen days, across three waves of merged work — because Neon `main` sat at migration `0006` while Vercel served code expecting `0010`. The preflight existed the whole time and was run against `dev`, which was current. Both runs printed the same green line.
+
+The doctor now also refuses a database behind the repo, by counting `drizzle.__drizzle_migrations` against `drizzle/meta/_journal.json`. That check exists because the two older ones are constraint-shaped and migrations `0007` and `0008` add no constraint at all — nothing could see them missing, and `0007` is the one that broke the demo.
+
+**Merging is not deploying.** Vercel ships the code on a merge to `main`; nothing applies the migration. After merging anything with a new file in `drizzle/`, run `DATABASE_URL='<neon main pooled>' bun run db:migrate` and then this preflight.
+
 ## Before the call
 
 ```bash

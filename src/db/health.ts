@@ -8,6 +8,13 @@ export type DemoHealth =
   | { ok: false; problems: string[] };
 
 export type Observed = {
+  /**
+   * Migrations this database has applied, or null when the `drizzle` schema is absent — skipped,
+   * not guessed, the same rule the money queries follow when their tables are missing.
+   */
+  migrationsApplied: number | null;
+  /** Migrations the repo carries: `drizzle/meta/_journal.json`, which is the one definition. */
+  migrationsExpected: number;
   compFound: boolean;
   boardAssignments: number;
   boardName: string | null;
@@ -38,6 +45,41 @@ export type Observed = {
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
+
+/**
+ * Whether this database has the schema the code in front of it expects.
+ *
+ * The other two database-level checks are *constraint-shaped*: they ask whether a specific
+ * guarantee is enforceable, and each names the migration that adds it. That is stronger than a
+ * version number where it applies — and it is blind wherever a migration adds no constraint.
+ *
+ * Migrations `0007` and `0008` are pure `ADD COLUMN`. They carry no index and no CHECK, so nothing
+ * below could see them missing, and on July 13 2026 the first of them broke every page that reads
+ * `comps.registration` on the deployed demo. That outage ran nineteen days. The money check would
+ * have caught it on July 31, when `0009` landed — eighteen days late — and only because the money
+ * spine happened to add constraints.
+ *
+ * So this is the generic backstop, deliberately weaker and deliberately broader: it does not know
+ * what is missing, only that the database is behind the repo. Counting rather than comparing hashes
+ * is on purpose — a hash comparison would also flag a migration edited after it was applied, which
+ * is a different failure with no evidence of ever happening here, and a preflight that cries wolf
+ * is a preflight that gets skipped before a call.
+ *
+ * Reseeding is not offered, for the reason the other two do not offer it: a seed does not apply a
+ * migration, and `db:seed` runs this very check afterwards and would refuse to print links anyway.
+ */
+const schemaProblems = (observed: Observed): string[] => {
+  if (observed.migrationsApplied === null) return [];
+  if (observed.migrationsApplied >= observed.migrationsExpected) return [];
+
+  const behind = observed.migrationsExpected - observed.migrationsApplied;
+  return [
+    `this database is ${behind} migration${behind === 1 ? "" : "s"} behind the repo ` +
+      `(${observed.migrationsApplied} applied, ${observed.migrationsExpected} in drizzle/). ` +
+      "The code deployed in front of it expects columns and tables it does not have — apply them " +
+      "with 'bun run db:migrate'.",
+  ];
+};
 
 /**
  * Whether the database can still fork a comp's run chain, and whether one already has.
@@ -127,6 +169,7 @@ export const summarizeHealth = (
     return {
       ok: false,
       problems: [
+        ...schemaProblems(observed),
         ...chainProblems(observed),
         ...moneyProblems(observed),
         "comp not seeded — run 'bun run db:seed'",
@@ -134,7 +177,11 @@ export const summarizeHealth = (
     };
   }
 
-  const problems: string[] = [...chainProblems(observed), ...moneyProblems(observed)];
+  const problems: string[] = [
+    ...schemaProblems(observed),
+    ...chainProblems(observed),
+    ...moneyProblems(observed),
+  ];
 
   if (observed.boardAssignments === 0) {
     problems.push(`no board link for the demo comp — ${RESEED}`);

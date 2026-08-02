@@ -3,6 +3,8 @@ import type { Observed } from "../health";
 import { summarizeHealth } from "../health";
 
 const healthy: Observed = {
+  migrationsApplied: 11,
+  migrationsExpected: 11,
   compFound: true,
   boardAssignments: 1,
   boardName: "Ananya Krishnan",
@@ -19,6 +21,8 @@ const healthy: Observed = {
 };
 
 const unseeded: Observed = {
+  migrationsApplied: 11,
+  migrationsExpected: 11,
   compFound: false,
   boardAssignments: 0,
   boardName: null,
@@ -214,5 +218,70 @@ describe("summarizeHealth", () => {
     expect(health.problems).toHaveLength(2);
     expect(health.problems[0]).toMatch(/can still fork/);
     expect(health.problems[1]).toMatch(/allocated past/);
+  });
+});
+
+/**
+ * The backstop for the migration nobody wrote a check for. `0007` adds a nullable column, breaks no
+ * guarantee any other check names, and took the deployed demo down for nineteen days in July 2026
+ * while every other check here passed.
+ */
+describe("summarizeHealth migration lag", () => {
+  it("fails a database behind the repo, and names how far", () => {
+    const health = summarizeHealth({ ...healthy, migrationsApplied: 7 }, expected);
+
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems[0]).toMatch(/4 migrations behind/);
+    expect(health.problems[0]).toMatch(/7 applied, 11 in drizzle/);
+    expect(health.problems[0]).toMatch(/db:migrate/);
+  });
+
+  it("says migration, singular, when it is one behind", () => {
+    const health = summarizeHealth({ ...healthy, migrationsApplied: 10 }, expected);
+
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems[0]).toMatch(/1 migration behind/);
+  });
+
+  /** Reseeding does not apply a migration, so it must not be offered as the remedy. */
+  it("never offers a reseed for a schema that is behind", () => {
+    const health = summarizeHealth({ ...healthy, migrationsApplied: 7 }, expected);
+
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems[0]).not.toMatch(/db:seed/);
+  });
+
+  /**
+   * The outage was found on a database whose demo comp was still seeded and still resolving links.
+   * A schema this far behind has to be reported even when there is no comp to report it about --
+   * and especially then, because `db:seed` runs this check and would otherwise seed onto it.
+   */
+  it("reports a behind schema even when the comp is not seeded", () => {
+    const health = summarizeHealth({ ...unseeded, migrationsApplied: 6 }, expected);
+
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems[0]).toMatch(/5 migrations behind/);
+    expect(health.problems.at(-1)).toMatch(/comp not seeded/);
+  });
+
+  it("passes a database level with the repo", () => {
+    expect(summarizeHealth(healthy, expected).ok).toBe(true);
+  });
+
+  /**
+   * Ahead is not behind. A branch whose migration was reverted in the repo is a situation a
+   * preflight has no remedy for, and inventing one would be noise before a call.
+   */
+  it("passes a database ahead of the repo rather than inventing a problem", () => {
+    expect(summarizeHealth({ ...healthy, migrationsApplied: 12 }, expected).ok).toBe(true);
+  });
+
+  /** Skipped, not guessed: a database with no `drizzle` schema cannot be compared. */
+  it("says nothing when the migration table is absent", () => {
+    expect(summarizeHealth({ ...healthy, migrationsApplied: null }, expected).ok).toBe(true);
   });
 });
