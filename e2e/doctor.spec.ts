@@ -314,3 +314,39 @@ test("db:doctor names a deposit that ended twice, and refuses to reseed it away"
 
   expect(doctor().ok).toBe(true);
 });
+
+/**
+ * **A table existing is not the column existing**, and the preflight died over the difference.
+ *
+ * `deposit_events` arrives in `0010` and its `team_id` in `0011`, so a database at `0010` passed the
+ * table guard in `observeMoney` and then threw `column "team_id" does not exist` out of the fork
+ * query — turning the one instrument that exists to *report* a database behind the repo into one
+ * that crashes on it. That is worse than the bug it was added to find: a stack trace before a
+ * prospect call reads as "the tool is broken", not as "the database needs migrating".
+ *
+ * It was found by pointing `db:doctor` at the deployed demo, which was the only place it could be
+ * found — every other database here is migrated by the same command that generates the migration,
+ * so none of them is ever one behind.
+ */
+test("db:doctor reports a database missing a column, rather than dying on it", () => {
+  seed();
+
+  try {
+    run("e2e/support/break-db.ts", "drop-team-id");
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+
+    // The verdict it should have given all along: a sentence, and the command that fixes it.
+    expect(health.output).toContain("db:migrate");
+
+    // And emphatically not a stack trace with drizzle's own error in it.
+    expect(health.output).not.toContain("does not exist");
+    expect(health.output).not.toContain("NeonDbError");
+    expect(health.output).not.toContain("at async");
+  } finally {
+    expect(run("e2e/support/break-db.ts", "restore-team-id").trim()).toMatch(/^restored:\d+$/);
+  }
+
+  expect(doctor().ok).toBe(true);
+});

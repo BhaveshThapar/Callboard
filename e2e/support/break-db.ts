@@ -244,6 +244,43 @@ switch (command) {
     break;
   }
 
+  /**
+   * Drops a column a *later* migration added, leaving the table it lives on in place.
+   *
+   * The state the doctor crashed on rather than reported: `deposit_events` arrives in `0010` and its
+   * `team_id` in `0011`, so a database at `0010` passes the table guard and then throws
+   * `column "team_id" does not exist` out of the fork query. `CASCADE` takes the dependent index and
+   * foreign key with it, which is exactly the shape a database that never ran `0011` is in.
+   */
+  case "drop-team-id": {
+    await db.execute(sql.raw(`alter table deposit_events drop column team_id cascade`));
+    console.log("dropped");
+    break;
+  }
+
+  /**
+   * Puts it back by replaying migration `0011` itself, filtered to the statements that mention the
+   * column. The DDL has one definition and it is the migration -- `index-def`'s discipline, applied
+   * to a column: a fixture that wrote `ADD COLUMN ... uuid NOT NULL REFERENCES ...` by hand would be
+   * a second definition, and the first time the two disagreed this test would restore the wrong
+   * schema and pass anyway.
+   */
+  case "restore-team-id": {
+    const { readFileSync, readdirSync } = await import("node:fs");
+    const file = readdirSync("drizzle").find((name) => name.startsWith("0011_"));
+    if (!file) throw new Error("migration 0011 is missing from drizzle/");
+
+    const statements = readFileSync(`drizzle/${file}`, "utf8")
+      .split("--> statement-breakpoint")
+      .map((statement) => statement.trim().replace(/;$/, ""))
+      .filter((statement) => statement.includes("team_id"));
+    if (statements.length === 0) throw new Error("no team_id statements found in 0011");
+
+    for (const statement of statements) await db.execute(sql.raw(statement));
+    console.log(`restored:${statements.length}`);
+    break;
+  }
+
   case "unorphan": {
     // Restore rather than delete: the demo has to be left exactly as it was found.
     await db

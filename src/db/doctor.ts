@@ -87,7 +87,7 @@ const observeSchema = async (): Promise<SchemaObservation> => {
  * from a missing table would throw where a preflight must report.
  */
 const observeMoney = async (): Promise<MoneyObservation> => {
-  const [present, tables] = await Promise.all([
+  const [present, tables, columns] = await Promise.all([
     db.execute<{ name: string }>(sql`
       select indexname as name from pg_indexes where schemaname = 'public'
       union
@@ -96,12 +96,28 @@ const observeMoney = async (): Promise<MoneyObservation> => {
     db.execute<{ tablename: string }>(sql`
       select tablename from pg_tables where schemaname = 'public'
     `),
+    /**
+     * **A table existing is not the column existing, and this preflight crashed over the
+     * difference.** `deposit_events` arrives in `0010` and its `team_id` in `0011`, so a database at
+     * `0010` passed the table guard above and then threw `column "team_id" does not exist` out of
+     * the fork query — turning the instrument that exists to *report* a database behind the repo
+     * into one that dies on it. Found by pointing it at the deployed demo, which is the only place
+     * it could have been found, because every other database here is migrated by the tooling that
+     * generates the migration.
+     */
+    db.execute<{ table_name: string; column_name: string }>(sql`
+      select table_name, column_name from information_schema.columns
+       where table_schema = 'public'
+    `),
   ]);
 
   const names = new Set(present.rows.map((row) => row.name));
   const moneyGuaranteeEnforced = MONEY_CONSTRAINT_NAMES.every((name) => names.has(name));
 
   const existing = new Set(tables.rows.map((row) => row.tablename));
+  const hasColumn = (table: string, column: string): boolean =>
+    columns.rows.some((row) => row.table_name === table && row.column_name === column);
+
   if (!MONEY_TABLES.every((table) => existing.has(table))) {
     return {
       moneyGuaranteeEnforced,
@@ -153,13 +169,15 @@ const observeMoney = async (): Promise<MoneyObservation> => {
    * source, because the index was keyed on `charge_id` until then and a void-and-reinsert let a
    * second ending through against a fresh id.
    */
-  const forkedDeposits = await db.execute<{ team_id: string; endings: number }>(sql`
-    select team_id, count(*)::int as endings
-      from deposit_events
-     where state in ('refunded', 'forfeited')
-     group by comp_id, team_id
-    having count(*) > 1
-  `);
+  const forkedDeposits = hasColumn("deposit_events", "team_id")
+    ? await db.execute<{ team_id: string; endings: number }>(sql`
+        select team_id, count(*)::int as endings
+          from deposit_events
+         where state in ('refunded', 'forfeited')
+         group by comp_id, team_id
+        having count(*) > 1
+      `)
+    : { rows: [] };
 
   /**
    * Money marked as returned with no ending to explain it.
@@ -170,20 +188,20 @@ const observeMoney = async (): Promise<MoneyObservation> => {
    * so a payment carrying one for a team whose deposit never ended is a number nobody can account
    * for — and an unaccountable number in a ledger is the $5,000 gap in miniature.
    */
-  const unexplained = await db.execute<{
-    payment_id: string;
-    refunded_cents: number;
-  }>(sql`
-    select p.id as payment_id, p.refunded_cents
-      from payments p
-     where p.refunded_cents > 0
-       and not exists (
-             select 1 from deposit_events e
-              where e.team_id = p.team_id
-                and e.comp_id = p.comp_id
-                and e.state = 'refunded'
-           )
-  `);
+  const unexplained =
+    hasColumn("payments", "refunded_cents") && hasColumn("deposit_events", "team_id")
+      ? await db.execute<{ payment_id: string; refunded_cents: number }>(sql`
+          select p.id as payment_id, p.refunded_cents
+            from payments p
+           where p.refunded_cents > 0
+             and not exists (
+                   select 1 from deposit_events e
+                    where e.team_id = p.team_id
+                      and e.comp_id = p.comp_id
+                      and e.state = 'refunded'
+                 )
+        `)
+      : { rows: [] };
 
   return {
     moneyGuaranteeEnforced,
