@@ -2,7 +2,15 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import { judgeLabel } from "../labels";
 import type { JudgeLabelView } from "../labels";
 import type { PublicComp, PublicPlacement, PublicTeam } from "@/lib/comp/public";
-import type { BoardJudgeView, BoardTeamView, JudgeTeamView, RosterTeamView } from "../scope";
+import type {
+  BoardJudgeView,
+  BoardTeamView,
+  JudgeTeamView,
+  LiaisonActor,
+  RosterTeamView,
+  TeamActor,
+  TeamOwnView,
+} from "../scope";
 
 /**
  * Both directions of blindness are enforced by the shape of a type rather than by a filter someone
@@ -36,6 +44,40 @@ describe("the projections", () => {
     expectTypeOf<RosterTeamView>().toHaveProperty("balance");
     expectTypeOf<RosterTeamView>().toHaveProperty("charges");
     expectTypeOf<RosterTeamView>().toHaveProperty("name");
+  });
+
+  /**
+   * The fourth window, and the one whose scope lives on the actor rather than in a `where`. A
+   * captain's `teamId` comes off a membership row, so this projection is a single team by
+   * construction — but it must also carry no *other* team, which is what these assert. A `roster`
+   * field here would be the whole comp handed to one competitor.
+   */
+  it("gives a captain their own team and no way to reach another", () => {
+    expectTypeOf<TeamOwnView>().toHaveProperty("balance");
+    expectTypeOf<TeamOwnView>().toHaveProperty("charges");
+    expectTypeOf<TeamOwnView>().toHaveProperty("name");
+    expectTypeOf<TeamOwnView>().not.toHaveProperty("roster");
+    expectTypeOf<TeamOwnView>().not.toHaveProperty("teams");
+  });
+
+  /**
+   * A captain is a competitor, and a competitor holding the mapping from names to bid codes is the
+   * end of blind judging for that comp — the same argument `publicComp` is built on, arriving from
+   * inside the product rather than from the street. Their *own* code is fine: they already know
+   * which team they are.
+   */
+  it("gives a captain no score, and no bid code but their own", () => {
+    expectTypeOf<TeamOwnView>().toHaveProperty("bidCode");
+    expectTypeOf<TeamOwnView>().not.toHaveProperty("scores");
+    expectTypeOf<TeamOwnView>().not.toHaveProperty("placements");
+    expectTypeOf<TeamOwnView>().not.toHaveProperty("standings");
+  });
+
+  /** A session-derived actor carries the team it may act for, so a form cannot supply one. */
+  it("puts the captain's team on the actor rather than on a form", () => {
+    expectTypeOf<TeamActor>().toHaveProperty("teamId");
+    expectTypeOf<TeamActor>().toHaveProperty("compId");
+    expectTypeOf<LiaisonActor>().not.toHaveProperty("teamId");
   });
 
   it("gives the board no way to name a judge beside a score", () => {
