@@ -107,6 +107,17 @@ test("a team whose rooms are unknown is billed for everything except the room it
 
   // 10 dancers x $70 + $100 deposit. No hotel line at all, because a $0 one would read as settled.
   expect(await balanceCents(page, "M-3")).toBe(80_000);
+
+  // And the screen says *why*. Withholding the line silently is the same failure as the $0 line it
+  // was withheld to avoid: the team just owes $560 less than its neighbours and nothing explains it.
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await expect(page.getByTestId("gap-M-3-hotel")).toHaveText(/not billed.*room count unknown/);
+
+  // A team whose rooms *are* known carries no such line.
+  await expect(page.getByTestId("gap-M-2-hotel")).toHaveCount(0);
+
+  const csv = await (await page.request.get(`/board/${comp.boardToken}/money/export`)).text();
+  expect(csv).toContain("room count unknown");
 });
 
 test("moving accepted to competing regenerates nothing", async ({ page }) => {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listRosterForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import { feeScheduleFor, today } from "@/lib/money/charges";
 import { toWhoOwesCsv, whoOwes } from "@/lib/money/who-owes";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,11 @@ export async function GET(
   const actor = await resolveBoardActor(token);
   if (!actor) return new NextResponse("Not found", { status: 404 });
 
-  const report = whoOwes(await listRosterForBoard(actor));
+  const [roster, schedule] = await Promise.all([
+    listRosterForBoard(actor),
+    feeScheduleFor(actor.compId),
+  ]);
+  const report = whoOwes(roster, schedule, today());
   const slug = (value: string): string => value.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-");
 
   return new NextResponse(toWhoOwesCsv(report), {

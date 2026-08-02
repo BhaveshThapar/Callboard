@@ -1,13 +1,30 @@
 import { describe, expect, it } from "vitest";
 import type { RosterTeamView } from "@/lib/auth/scope";
+import type { FeeSchedule } from "@/lib/fees/types";
 import { teamBalance } from "../balance";
 import { summarizeOpenPayments, toWhoOwesCsv, whoOwes } from "../who-owes";
 
+/** Mayuri 2026's real numbers: $70/dancer + $140/room + a $100 deposit. */
+const SCHEDULE: FeeSchedule = {
+  perDancerCents: 7000,
+  perRoomCents: 14000,
+  depositCents: 10000,
+  lateFeeCents: 2500,
+  lateAfter: "2027-02-01",
+};
+
+const ASOF = "2026-12-01";
+
+/**
+ * Room count and roster size default to *known*, so a test that says nothing about them gets no
+ * billing gap and keeps meaning what it meant before gaps existed. The gap cases name them.
+ */
 const team = (
   bidCode: string,
   name: string,
   owedCents: number,
   paidCents: number,
+  known: { rosterSize?: number | null; rooms?: number | null } = {},
 ): RosterTeamView => {
   const charges =
     owedCents > 0
@@ -22,8 +39,8 @@ const team = (
     performanceOrder: null,
     status: "accepted",
     waitlistRank: null,
-    rosterSize: null,
-    rooms: null,
+    rosterSize: known.rosterSize === undefined ? 16 : known.rosterSize,
+    rooms: known.rooms === undefined ? 4 : known.rooms,
     auditionUrl: null,
     waiverAcceptedAt: null,
     contactName: null,
@@ -36,11 +53,15 @@ const team = (
 
 describe("whoOwes", () => {
   it("lists debtors first, so the chase list reads from the top", () => {
-    const report = whoOwes([
-      team("A-1", "Settled", 100_000, 100_000),
-      team("A-2", "Owes most", 200_000, 0),
-      team("A-3", "Owes some", 150_000, 100_000),
-    ]);
+    const report = whoOwes(
+      [
+        team("A-1", "Settled", 100_000, 100_000),
+        team("A-2", "Owes most", 200_000, 0),
+        team("A-3", "Owes some", 150_000, 100_000),
+      ],
+      SCHEDULE,
+      ASOF,
+    );
 
     expect(report.rows.map((r) => r.bidCode)).toEqual(["A-2", "A-3", "A-1"]);
     expect(report.outstandingCount).toBe(2);
@@ -53,7 +74,11 @@ describe("whoOwes", () => {
    * the settled count with teams nobody ever chased.
    */
   it("omits a team with no charges and no payments rather than showing it as settled", () => {
-    const report = whoOwes([team("A-1", "Billed", 100_000, 0), team("A-2", "Never billed", 0, 0)]);
+    const report = whoOwes(
+      [team("A-1", "Billed", 100_000, 0), team("A-2", "Never billed", 0, 0)],
+      SCHEDULE,
+      ASOF,
+    );
 
     expect(report.rows.map((r) => r.bidCode)).toEqual(["A-1"]);
     expect(report.settledCount).toBe(0);
@@ -61,7 +86,7 @@ describe("whoOwes", () => {
 
   it("keeps a team the org owes money to, and counts it separately", () => {
     // Paid, then dropped: charges voided, money still in the org's account.
-    const report = whoOwes([team("A-1", "Refund due", 0, 112_000)]);
+    const report = whoOwes([team("A-1", "Refund due", 0, 112_000)], SCHEDULE, ASOF);
 
     expect(report.rows).toHaveLength(1);
     expect(report.rows[0]?.balanceCents).toBe(-112_000);
@@ -80,7 +105,7 @@ describe("whoOwes", () => {
       team("A-3", "Three", 80_000, 0),
       team("A-4", "Never billed", 0, 0),
     ];
-    const report = whoOwes(rows);
+    const report = whoOwes(rows, SCHEDULE, ASOF);
 
     const summed = report.rows.reduce(
       (acc, row) => ({
@@ -98,24 +123,102 @@ describe("whoOwes", () => {
   });
 
   it("is empty for a comp that bills nothing", () => {
-    const report = whoOwes([team("A-1", "One", 0, 0)]);
+    const report = whoOwes([team("A-1", "One", 0, 0)], null, ASOF);
     expect(report.rows).toEqual([]);
     expect(report.totals).toEqual({ owedCents: 0, paidCents: 0, balanceCents: 0 });
   });
 });
 
+/**
+ * The gap is why a team owes less than its neighbours. `generateCharges` withholds the line rather
+ * than emitting a $0 one — "a $0 hotel charge is a lie a treasurer will believe" — and until this
+ * was rendered, the withholding was as silent as the lie would have been.
+ */
+describe("whoOwes billing gaps", () => {
+  it("says why a team with no room count was not billed for a hotel", () => {
+    const report = whoOwes([team("A-1", "No rooms", 112_000, 0, { rooms: null })], SCHEDULE, ASOF);
+
+    expect(report.rows[0]?.gaps).toEqual([
+      { teamId: "A-1", kind: "hotel", missing: "rooms" },
+    ]);
+  });
+
+  it("says nothing when the room count is known", () => {
+    const report = whoOwes([team("A-1", "Known", 112_000, 0)], SCHEDULE, ASOF);
+    expect(report.rows[0]?.gaps).toEqual([]);
+  });
+
+  /**
+   * A comp that does not bill per room is not missing anything when a room count is absent. The gap
+   * is a property of the schedule and the roster together, never of the roster alone.
+   */
+  it("says nothing when the schedule does not bill for the missing thing", () => {
+    const report = whoOwes(
+      [team("A-1", "No rooms", 112_000, 0, { rooms: null })],
+      { ...SCHEDULE, perRoomCents: 0 },
+      ASOF,
+    );
+
+    expect(report.rows[0]?.gaps).toEqual([]);
+  });
+
+  /**
+   * The case that was invisible: nothing could be billed at all, so there were no charges, so the
+   * team did not appear — the screen answered "who owes what" by silently omitting the team it
+   * could not answer for.
+   */
+  it("gives a row to a team whose only fact is that it could not be billed", () => {
+    const report = whoOwes(
+      [team("A-1", "Unbillable", 0, 0, { rosterSize: null, rooms: null })],
+      SCHEDULE,
+      ASOF,
+    );
+
+    expect(report.rows.map((r) => r.bidCode)).toEqual(["A-1"]);
+    expect(report.rows[0]?.owedCents).toBe(0);
+    expect(report.rows[0]?.gaps.map((g) => g.kind).sort()).toEqual(["hotel", "registration"]);
+  });
+
+  /** A dropped team is not being billed, so there is nothing the schedule failed to bill it for. */
+  it("states no gap for a team that is not in a billable status", () => {
+    const dropped: RosterTeamView = {
+      ...team("A-1", "Dropped", 0, 0, { rooms: null }),
+      status: "dropped",
+    };
+    const report = whoOwes([dropped], SCHEDULE, ASOF);
+
+    expect(report.rows).toEqual([]);
+  });
+});
+
 describe("toWhoOwesCsv", () => {
   it("carries dollars, because a treasurer opens it beside a bank statement", () => {
-    const csv = toWhoOwesCsv(whoOwes([team("A-1", "One", 178_000, 10_000)]));
+    const csv = toWhoOwesCsv(whoOwes([team("A-1", "One", 178_000, 10_000)], SCHEDULE, ASOF));
 
-    expect(csv).toContain("Bid code,Team,School,Status,Owed,Paid,Balance");
+    expect(csv).toContain("Bid code,Team,School,Status,Owed,Paid,Balance,Not billed");
     expect(csv).toContain("$1,780.00");
     expect(csv).toContain("$100.00");
     expect(csv).toContain("$1,680.00");
   });
 
+  /**
+   * The caveat travels with the number. A file read beside a bank statement is exactly where a short
+   * total gets mistaken for a team that paid in full.
+   */
+  it("carries the reason a team was under-billed", () => {
+    const csv = toWhoOwesCsv(
+      whoOwes([team("A-1", "No rooms", 112_000, 0, { rooms: null })], SCHEDULE, ASOF),
+    );
+
+    expect(csv).toContain("hotel: not billed — room count unknown");
+  });
+
   it("ends with a TOTAL row that matches the report", () => {
-    const report = whoOwes([team("A-1", "One", 100_000, 0), team("A-2", "Two", 50_000, 50_000)]);
+    const report = whoOwes(
+      [team("A-1", "One", 100_000, 0), team("A-2", "Two", 50_000, 50_000)],
+      SCHEDULE,
+      ASOF,
+    );
     const lines = toWhoOwesCsv(report).split("\r\n");
 
     expect(lines.at(-1)).toContain("TOTAL");

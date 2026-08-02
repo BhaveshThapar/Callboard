@@ -6,8 +6,11 @@
  * rule exists to prevent. This only decides what to *show*, and the totals row is arithmetic over
  * exactly the rows shown — asserted in e2e, because that sum is the thing being sold.
  */
+import { BILLABLE_STATUSES } from "@/db/schema/teams";
 import type { RosterTeamView } from "@/lib/auth/scope";
 import { toCsv } from "@/lib/export/csv";
+import { generateCharges } from "@/lib/fees/schedule";
+import type { BillingGap, FeeSchedule } from "@/lib/fees/types";
 import { formatCents } from "./format";
 
 export type WhoOwesRow = {
@@ -19,16 +22,29 @@ export type WhoOwesRow = {
   owedCents: number;
   paidCents: number;
   balanceCents: number;
+  /** What the schedule could not bill this team for, and why. Stated, never silently zero. */
+  gaps: BillingGap[];
 };
 
 export type WhoOwes = {
   rows: WhoOwesRow[];
   totals: { owedCents: number; paidCents: number; balanceCents: number };
-  /** Teams the schedule could not fully bill, and why. Stated, never silently zero. */
   outstandingCount: number;
   settledCount: number;
   creditCount: number;
 };
+
+const MISSING: Record<BillingGap["missing"], string> = {
+  rosterSize: "roster size unknown",
+  rooms: "room count unknown",
+};
+
+/**
+ * A gap as a treasurer reads it. The wording says *not billed* rather than $0, because the whole
+ * point of `BillingGap` is that those are different facts and only one of them is true.
+ */
+export const describeGap = (gap: BillingGap): string =>
+  `${gap.kind.replace("_", " ")}: not billed — ${MISSING[gap.missing]}`;
 
 /**
  * Teams that have money attached, worst first.
@@ -37,10 +53,44 @@ export type WhoOwes = {
  * billed, and putting a $0 row beside a team that genuinely owes nothing makes the screen answer a
  * question nobody asked. Ordering is by balance descending, so the board reads the chase list from
  * the top and stops when it runs out of debtors.
+ *
+ * The exception is a team the schedule *could not* bill. `generateCharges` withholds a line rather
+ * than emitting a $0 one when a room count or a roster size is unknown, and says so in `gaps` — but
+ * nothing rendered them, so a team with no room count simply owed $560 less than its neighbours and
+ * the screen gave no reason. That is the failure the gap exists to prevent, reintroduced one layer
+ * up. The gaps are recomputed here from the same pure function that withheld the line, so the screen
+ * states exactly what the engine declined to charge and cannot drift from it.
+ *
+ * A team whose *only* fact is a gap therefore earns a row: "we could not bill this team" is the
+ * answer to "who owes what", and it is the one answer that was previously invisible.
  */
-export const whoOwes = (roster: readonly RosterTeamView[]): WhoOwes => {
+export const whoOwes = (
+  roster: readonly RosterTeamView[],
+  schedule: FeeSchedule | null,
+  asOf: string,
+): WhoOwes => {
+  const billable: readonly string[] = BILLABLE_STATUSES;
+  const gapsByTeam = new Map<string, BillingGap[]>();
+
+  if (schedule) {
+    const { gaps } = generateCharges({
+      schedule,
+      teams: roster
+        .filter((team) => billable.includes(team.status))
+        .map((team) => ({ teamId: team.id, rosterSize: team.rosterSize, rooms: team.rooms })),
+      asOf,
+    });
+
+    for (const gap of gaps) {
+      gapsByTeam.set(gap.teamId, [...(gapsByTeam.get(gap.teamId) ?? []), gap]);
+    }
+  }
+
   const rows = roster
-    .filter((team) => team.charges.length > 0 || team.balance.paidCents > 0)
+    .filter(
+      (team) =>
+        team.charges.length > 0 || team.balance.paidCents > 0 || gapsByTeam.has(team.id),
+    )
     .map((team) => ({
       teamId: team.id,
       bidCode: team.bidCode,
@@ -50,6 +100,7 @@ export const whoOwes = (roster: readonly RosterTeamView[]): WhoOwes => {
       owedCents: team.balance.owedCents,
       paidCents: team.balance.paidCents,
       balanceCents: team.balance.balanceCents,
+      gaps: gapsByTeam.get(team.id) ?? [],
     }))
     .sort((a, b) => b.balanceCents - a.balanceCents || a.name.localeCompare(b.name));
 
@@ -97,7 +148,7 @@ export const summarizeOpenPayments = (
  */
 export const toWhoOwesCsv = (report: WhoOwes): string =>
   toCsv(
-    ["Bid code", "Team", "School", "Status", "Owed", "Paid", "Balance"],
+    ["Bid code", "Team", "School", "Status", "Owed", "Paid", "Balance", "Not billed"],
     [
       ...report.rows.map((row) => [
         row.bidCode,
@@ -107,6 +158,9 @@ export const toWhoOwesCsv = (report: WhoOwes): string =>
         formatCents(row.owedCents),
         formatCents(row.paidCents),
         formatCents(row.balanceCents),
+        // The caveat travels with the number. A file read beside a bank statement is exactly where
+        // an unexplained short total gets mistaken for a team that paid in full.
+        row.gaps.map(describeGap).join("; "),
       ]),
       [
         "",
@@ -116,6 +170,7 @@ export const toWhoOwesCsv = (report: WhoOwes): string =>
         formatCents(report.totals.owedCents),
         formatCents(report.totals.paidCents),
         formatCents(report.totals.balanceCents),
+        "",
       ],
     ],
   );
