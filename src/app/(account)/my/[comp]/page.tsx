@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { Wordmark } from "@/components/Wordmark";
 import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
-import { resolveTeamActor } from "@/lib/auth/accounts";
+import { compsForSession, resolveTeamActor } from "@/lib/auth/accounts";
 import { readSessionCookie } from "@/lib/auth/cookies";
 import { ownTeamForCaptain } from "@/lib/auth/scope";
 import { describeBalance, formatCents } from "@/lib/money/format";
@@ -23,7 +23,15 @@ export default async function MyTeamPage({ params }: { params: Promise<{ comp: s
   if (!session) redirect(`/sign-in?next=${encodeURIComponent(`/my/${comp}`)}`);
 
   const actor = await resolveTeamActor(session, comp);
-  if (!actor) notFound();
+  if (!actor) {
+    // Not a captain here. If this session holds some *other* membership at this comp, the landing
+    // page is where it says what that role can and cannot open, so send them there rather than
+    // 404ing: telling a signed-in board member their own comp does not exist is a lie, and it is
+    // the one this page told for as long as the landing page linked all three roles at it.
+    const held = await compsForSession(session);
+    if (held.some((row) => row.compId === comp)) redirect("/");
+    notFound();
+  }
 
   const team = await ownTeamForCaptain(actor);
   if (!team) notFound();

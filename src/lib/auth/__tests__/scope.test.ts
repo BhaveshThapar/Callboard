@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import { ACCOUNT_ROLES, INVITABLE_ROLES } from "@/db/schema/accounts";
 import { judgeLabel } from "../labels";
 import type { JudgeLabelView } from "../labels";
 import type { PublicComp, PublicPlacement, PublicTeam } from "@/lib/comp/public";
@@ -115,5 +116,24 @@ describe("judgeLabel", () => {
   it("names a judge by their seat on the panel", () => {
     expect(judgeLabel(1)).toBe("Judge 1");
     expect(judgeLabel(10)).toBe("Judge 10");
+  });
+});
+
+/**
+ * A credential a board can mint must open something. `ACCOUNT_ROLES` says what a membership may be;
+ * `INVITABLE_ROLES` says what may be handed out, and the gap between them is deliberate.
+ */
+describe("INVITABLE_ROLES", () => {
+  it("offers no role with nothing behind it", () => {
+    // `liaison` has an actor kind, a resolver and no reader — nothing in the product answers *what
+    // does a liaison see*, because that is C1's question and C1 needs a table that does not exist.
+    // Offering it let a board mint a link whose whole journey ended on a page that refused to load,
+    // which is what ADR-0011 spent a decision refusing. Put it back in the same commit as the
+    // screen; this test is what asks whether you did.
+    expect(INVITABLE_ROLES).not.toContain("liaison");
+  });
+
+  it("offers only roles a membership can actually hold", () => {
+    for (const role of INVITABLE_ROLES) expect(ACCOUNT_ROLES).toContain(role);
   });
 });

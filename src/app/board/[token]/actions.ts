@@ -15,9 +15,9 @@ import {
 } from "@/db/schema";
 import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import { invite, orgOfComp } from "@/lib/auth/accounts";
-import type { AccountRole } from "@/db/schema";
-import { ACCOUNT_ROLES } from "@/db/schema";
+import { invite, listInvitationsForBoard, orgOfComp, revokeAccess } from "@/lib/auth/accounts";
+import type { InvitableRole } from "@/db/schema";
+import { INVITABLE_ROLES } from "@/db/schema";
 import type { DepositState } from "@/lib/money/deposit";
 import { DEPOSIT_STATES } from "@/lib/money/deposit";
 import { advanceDeposit } from "@/lib/money/deposits";
@@ -847,7 +847,10 @@ export const inviteAction = async (
   const actor = await resolveBoardActor(token);
   if (!actor) return { status: "error", message: "This board link is no longer valid." };
 
-  if (!ACCOUNT_ROLES.includes(role as AccountRole)) {
+  // `INVITABLE_ROLES`, not `ACCOUNT_ROLES`: a `liaison` membership is representable and a liaison
+  // invitation is not, because nothing in the product can be opened by one. The form no longer offers
+  // it, and this is what makes that a rule rather than markup — `validateAnswers`' reason.
+  if (!INVITABLE_ROLES.includes(role as InvitableRole)) {
     return { status: "error", message: "Pick what they are being invited as." };
   }
   if (role === "captain" && !teamId) {
@@ -863,7 +866,7 @@ export const inviteAction = async (
 
   const result = await invite(
     { compId: actor.compId, personId: actor.personId, orgId },
-    { email, name, role: role as AccountRole, teamId: role === "captain" ? teamId : null },
+    { email, name, role: role as InvitableRole, teamId: role === "captain" ? teamId : null },
   );
   if (!result.ok) return { status: "error", message: result.message };
 
@@ -873,5 +876,49 @@ export const inviteAction = async (
     // The link is shown once, exactly as a seeded token is: only its sha256 is stored, so nothing
     // in the product can recover it afterwards. Until the comms engine exists, a human sends it.
     message: `Invitation for ${email}: ${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/invite/${result.value.token}`,
+  };
+};
+
+/**
+ * Taking somebody back off a comp — the other half of the minting path.
+ *
+ * `judge_assignments` and `board_assignments` have had revocation since ADR-0011; `memberships` did
+ * not, so P1 shipped a way to add a person and no way to remove one. One button covers both states a
+ * row can be in, because a board asking "take this person off" means the same thing whether they
+ * have signed in yet or not: an accepted row loses its membership, an unspent one loses its envelope,
+ * and a row that is both loses both.
+ *
+ * No last-one guard, unlike `revokeBoardAction`. That guard exists because nothing mints a board
+ * *link* and a board could revoke its way out of its own comp; a membership opens no board screen
+ * today, so revoking every one of them locks nobody out of anything.
+ */
+export const revokeAccessAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const personId = String(formData.get("personId") ?? "");
+  const role = String(formData.get("role") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  // `(personId, role)` is a claim, resolved against the read that produced the form it arrived on.
+  // `listInvitationsForBoard` is comp-scoped by its own `where`, so another comp's person is refused
+  // by the same `find` that refuses somebody nobody invited — the window rule, one level down, as a
+  // `chargeId` resolves through the roster's own `charges` array.
+  const invited = await listInvitationsForBoard(actor);
+  const target = invited.find((row) => row.personId === personId && row.role === role);
+  if (!target) return { status: "error", message: "Nobody was invited to this comp like that." };
+
+  const result = await revokeAccess(actor, { personId, role: target.role });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/people`);
+  return {
+    status: "ok",
+    message: result.value.removedMembership
+      ? `${target.name} can no longer open this comp.`
+      : `The invitation for ${target.name} no longer opens.`,
   };
 };

@@ -361,16 +361,28 @@ export type InvitedPerson = {
   acceptedAt: Date | null;
   revokedAt: Date | null;
   expiresAt: Date;
+  /**
+   * A live membership exists for this `(comp, person, role)` — that is, they can open something
+   * today. Distinct from `acceptedAt`, which only says they once did: an accepted invitation whose
+   * membership has since been revoked is a person the board removed, and a screen that could not
+   * tell those apart could not show whether the removal worked.
+   */
+  hasAccess: boolean;
 };
 
 /**
  * Who has been invited to this comp and where each stands. Comp-scoped off the actor, resolving no
  * id — `registrationWindowFor`'s shape, not a window.
+ *
+ * The `memberships` join is what makes this the read `revokeAccessAction` resolves against: every
+ * membership in the product is created by `acceptInvitation`, so an invitation row exists for every
+ * one of them and this list is complete. If a second path ever grants a membership, it has to appear
+ * here too, or a board will be unable to take back access it can see.
  */
 export const listInvitationsForBoard = async (actor: {
   compId: string;
-}): Promise<InvitedPerson[]> =>
-  db
+}): Promise<InvitedPerson[]> => {
+  const rows = await db
     .select({
       personId: invitations.personId,
       name: people.name,
@@ -380,12 +392,110 @@ export const listInvitationsForBoard = async (actor: {
       acceptedAt: invitations.acceptedAt,
       revokedAt: invitations.revokedAt,
       expiresAt: invitations.expiresAt,
+      membershipId: memberships.id,
     })
     .from(invitations)
     .innerJoin(people, eq(people.id, invitations.personId))
     .leftJoin(teams, eq(teams.id, invitations.teamId))
+    .leftJoin(
+      memberships,
+      and(
+        eq(memberships.compId, invitations.compId),
+        eq(memberships.personId, invitations.personId),
+        eq(memberships.role, invitations.role),
+        isNull(memberships.revokedAt),
+      ),
+    )
     .where(and(eq(invitations.compId, actor.compId), eq(invitations.purpose, "invite")))
-    .orderBy(invitations.createdAt) as Promise<InvitedPerson[]>;
+    .orderBy(invitations.createdAt);
+
+  // A row whose `purpose` is `invite` always carries a role; the filter is what turns the column's
+  // nullability into a type rather than a cast that would outlive the reason for it.
+  return rows.flatMap(({ membershipId, role, ...rest }) =>
+    role ? [{ ...rest, role, hasAccess: membershipId !== null }] : [],
+  );
+};
+
+/**
+ * Taking back what an invitation granted — the write `memberships.revoked_at` waited three weeks
+ * for. The column was read by `membershipFor` and by `compsForSession` from the first commit and
+ * written by nothing, so a captain could be added to a comp and never removed from it, while
+ * ADR-0011 spent an entire decision on revocability and ADR-0016 made sessions rows for that reason.
+ *
+ * **The session is deliberately left alone, and that is not an oversight.** Authority here is two
+ * lookups, not one: `resolveSessionUser` says which human holds the cookie and `membershipFor` says
+ * what they may do *at this comp*, and the second filters on `revoked_at`. So a revoked membership
+ * stops resolving on the very next request, while the same login keeps working at other comps —
+ * which is exactly the property the split was built for. Killing the session rows instead would sign
+ * somebody out of a comp this board has no say over.
+ *
+ * **Not a fifth `withTransaction` caller.** Two statements, but no invariant spanning them: the
+ * membership is revoked first because it is the thing that actually grants authority, so a failure
+ * in between leaves a person locked out with a dead envelope still on file — a tidiness problem,
+ * not a state anybody can act on. ADR-0012 asks for the argument to be made again rather than
+ * inherited, and this is the argument coming out the other way.
+ */
+export const revokeAccess = async (
+  actor: { compId: string; personId: string },
+  target: { personId: string; role: AccountRole },
+): Promise<AccountResult<{ removedMembership: boolean; removedInvitation: boolean }>> => {
+  const at = now();
+
+  const membership = await db
+    .update(memberships)
+    .set({ revokedAt: at })
+    .where(
+      and(
+        eq(memberships.compId, actor.compId),
+        eq(memberships.personId, target.personId),
+        eq(memberships.role, target.role),
+        isNull(memberships.revokedAt),
+      ),
+    )
+    .returning({ id: memberships.id });
+
+  // An unspent envelope is revoked too, or removing somebody would leave them a live link back in.
+  const invitation = await db
+    .update(invitations)
+    .set({ revokedAt: at })
+    .where(
+      and(
+        eq(invitations.compId, actor.compId),
+        eq(invitations.personId, target.personId),
+        eq(invitations.role, target.role),
+        isNull(invitations.acceptedAt),
+        isNull(invitations.revokedAt),
+      ),
+    )
+    .returning({ id: invitations.id });
+
+  if (membership.length === 0 && invitation.length === 0) {
+    return { ok: false, message: "That person already has no access to this comp." };
+  }
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "access.revoke",
+    entity: "person",
+    entityId: target.personId,
+    before: null,
+    after: {
+      role: target.role,
+      membershipRevoked: membership.length > 0,
+      invitationRevoked: invitation.length > 0,
+    },
+  });
+
+  return {
+    ok: true,
+    value: {
+      removedMembership: membership.length > 0,
+      removedInvitation: invitation.length > 0,
+    },
+  };
+};
 
 export const invite = async (
   actor: { compId: string; personId: string; orgId: string },

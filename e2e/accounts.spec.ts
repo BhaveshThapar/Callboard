@@ -126,7 +126,7 @@ test("an invitation cannot be used twice", async ({ page, browser }) => {
   const link = await inviteFrom(page, comp.boardToken, {
     name: "Dev Shah",
     email: "dev@example.com",
-    role: "liaison",
+    role: "board",
   });
 
   await page.goto(link);
@@ -180,7 +180,7 @@ test("a failed sign-in never says which half was wrong", async ({ page }) => {
   const link = await inviteFrom(page, comp.boardToken, {
     name: "Asha Rao",
     email: "asha@example.com",
-    role: "liaison",
+    role: "board",
   });
   await page.goto(link);
   await page.getByTestId("credential-password").fill(PASSWORD);
@@ -210,7 +210,7 @@ test("a captain is invited for a team, and nobody else is", async ({ page }) => 
   await page.goto(`/board/${comp.boardToken}/people`);
   // The team picker is disabled unless the role needs one, which is the CHECK on `memberships`
   // showing up in the form rather than being discovered by a failed insert.
-  await page.getByTestId("invite-role").selectOption("liaison");
+  await page.getByTestId("invite-role").selectOption("board");
   await expect(page.getByTestId("invite-team")).toBeDisabled();
 
   await page.getByTestId("invite-role").selectOption("captain");
@@ -274,6 +274,128 @@ test("a captain's session is not authority at a comp they are not in", async ({ 
   // than one is what makes this a 404 instead of a view of somebody else's comp.
   const response = await page.goto(`/my/${crypto.randomUUID()}`);
   expect(response?.status()).toBe(404);
+});
+
+/**
+ * A board member who accepts an invitation has to land somewhere that is not a lie.
+ *
+ * The landing page linked all three roles at `/my/[comp]`, which resolves a `captain` membership by
+ * name — so a board member signed in, saw their own comp, clicked it, and was told it did not exist.
+ * That is the "code with no caller" defect wearing a URL, and it shipped inside the commit that
+ * added the comment claiming the opposite.
+ */
+test("a board member signs in and is told where their way in actually is", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Ravi Menon",
+    email: "ravi@example.com",
+    role: "board",
+  });
+
+  await page.goto(link);
+  await page.getByTestId("credential-password").fill(PASSWORD);
+  await page.getByTestId("credential-confirm").fill(PASSWORD);
+  await page.getByTestId("credential-submit").click();
+
+  // Their comp is named, and so is the reason there is nothing here to click.
+  await expect(page.getByTestId("my-comps")).toBeVisible();
+  await expect(page.getByTestId(`my-comp-${COMP}`)).toBeVisible();
+  await expect(page.getByTestId(`my-comp-${COMP}-note`)).toContainText(/emailed to you/i);
+
+  // And the captain's page does not pretend their comp is missing. A 404 here is the bug; the
+  // landing page is where the sentence lives, so that is where they go.
+  await page.goto(`/my/${comp.compId}`);
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByTestId("my-comps")).toBeVisible();
+});
+
+/**
+ * A board can take somebody back off, which for three weeks it could not: `memberships.revoked_at`
+ * was read by every membership filter and written by nothing, so P1 shipped a way to add a person
+ * and no way to remove one — in a product whose two prior credential decisions are both about
+ * killing a credential (ADR-0011) and about being able to (ADR-0016).
+ *
+ * The session is deliberately still valid; what dies is the membership. That is the two-lookup
+ * design paying out, and asserting it here is what keeps somebody from "fixing" it by nuking
+ * sessions and signing a captain out of a comp this board has no say over.
+ */
+test("a board removes a captain, and the captain's own page stops resolving", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Devi Rao",
+    email: "devi@example.com",
+    role: "captain",
+    team: "Accepted Beta",
+  });
+  await page.goto(link);
+  await page.getByTestId("credential-password").fill(PASSWORD);
+  await page.getByTestId("credential-confirm").fill(PASSWORD);
+  await page.getByTestId("credential-submit").click();
+  await expect(page.getByTestId("my-comps")).toBeVisible();
+
+  await page.goto(`/my/${comp.compId}`);
+  await expect(page.getByTestId("my-team")).toBeVisible();
+
+  // The board removes them, from the screen rather than from the database.
+  const board = await page.context().newPage();
+  await board.goto(`/board/${comp.boardToken}/people`);
+  await expect(board.getByTestId("invitee-devi@example.com")).toHaveAttribute(
+    "data-has-access",
+    "true",
+  );
+  await board.getByTestId("revoke-devi@example.com").click();
+  await expect(board.getByTestId("revoke-message")).toContainText(/no longer open this comp/i);
+  await expect(board.getByTestId("invitee-devi@example.com")).toHaveAttribute(
+    "data-has-access",
+    "false",
+  );
+
+  // Same cookie, next request: the membership is what died, so the comp is gone from their landing
+  // page and their team's page refuses them.
+  await page.goto("/");
+  await expect(page.getByTestId(`my-comp-${COMP}`)).toHaveCount(0);
+
+  const response = await page.goto(`/my/${comp.compId}`);
+  expect(response?.status()).toBe(404);
+  await board.close();
+});
+
+/**
+ * A role with no screen behind it cannot be handed out — and the refusal is the rule, not the
+ * markup. `validateAnswers`' reason: the `<select>` no longer offers `liaison`, and a hand-crafted
+ * POST that names it anyway is refused by the same list the form was built from.
+ */
+test("a liaison cannot be invited, because there is nothing for one to open", async ({ page }) => {
+  const comp = seed();
+
+  await page.goto(`/board/${comp.boardToken}/people`);
+  await expect(page.locator('[data-testid="invite-role"] option[value="liaison"]')).toHaveCount(0);
+  await expect(page.locator('[data-testid="invite-role"] option[value="board"]')).toHaveCount(1);
+
+  await page.getByTestId("invite-name").fill("Lia Sonn");
+  await page.getByTestId("invite-email").fill("lia@example.com");
+
+  // Put the option back and submit it, the way `custom-fields.spec.ts` strips `required` before
+  // submitting: the form is a courtesy to an honest board, and the server is the rule.
+  await page.evaluate(() => {
+    const select = document.querySelector<HTMLSelectElement>('[data-testid="invite-role"]');
+    if (!select) throw new Error("no role select on the page");
+    const option = document.createElement("option");
+    option.value = "liaison";
+    select.append(option);
+    select.value = "liaison";
+  });
+  await page.getByTestId("invite-submit").click();
+
+  const message = page.getByTestId("invite-message");
+  await expect(message).toBeVisible();
+  await expect(message).not.toContainText("/invite/");
+
+  // The refusal is a sentence, and no envelope was minted behind it.
+  await page.reload();
+  await expect(page.getByTestId("invitee-lia@example.com")).toHaveCount(0);
 });
 
 test("signing out kills the session rather than only the cookie", async ({ page }) => {

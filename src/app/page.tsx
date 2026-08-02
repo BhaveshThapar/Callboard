@@ -8,20 +8,29 @@ import { SignOut } from "./(account)/SignOut";
 
 export const dynamic = "force-dynamic";
 
-const WHERE = {
-  captain: (compId: string) => `/my/${compId}`,
-  liaison: (compId: string) => `/my/${compId}`,
-  board: (compId: string) => `/my/${compId}`,
+/**
+ * What a role that has no page of its own is told instead of being handed a link.
+ *
+ * `/my/[comp]` is the **captain's** page and only the captain's: it resolves through
+ * `resolveTeamActor`, which asks for a `captain` membership by name, because `ownTeamForCaptain`'s
+ * whole safety argument is that the `teamId` comes off that membership. Linking the other two roles
+ * at it sent them to a `notFound()`, so a board member who accepted an invitation, signed in, and
+ * clicked their own comp was told it did not exist.
+ *
+ * A board member cannot be redirected to their board screens either, and that is a property rather
+ * than an omission: only the sha256 of a board token is stored (ADR-0003's rule, applied to
+ * `board_assignments`), so there is nothing here to recover and nothing to mint (ADR-0011). Saying
+ * so plainly is the honest end of the journey until P1 migrates board access onto accounts.
+ */
+const NO_PAGE_YET = {
+  board: "Board screens open from the link that was emailed to you, not from here.",
+  liaison: "Nothing for a liaison to do here yet.",
 } as const;
 
 export default async function Home() {
   /**
    * Where accepting an invitation lands. Without this the journey ends on a marketing page with no
    * way forward, which is the "code with no caller" defect wearing a URL.
-   *
-   * A board member still works from their emailed link rather than from here — `board_assignments`
-   * is what a board token resolves to, and P1 did not migrate those. Until it does, a signed-in
-   * board member sees the comp listed and is told where their own way in is.
    */
   const session = await readSessionCookie();
   const comps = session ? await compsForSession(session) : [];
@@ -44,14 +53,28 @@ export default async function Home() {
           <ul className="mt-4 space-y-2">
             {comps.map((comp) => (
               <li key={`${comp.compId}-${comp.role}`}>
-                <Link
-                  href={WHERE[comp.role](comp.compId)}
-                  data-testid={`my-comp-${comp.compSlug}`}
-                  className="text-body text-heading underline underline-offset-2 hover:text-primary"
-                >
-                  {comp.compName}
-                </Link>
+                {comp.role === "captain" ? (
+                  <Link
+                    href={`/my/${comp.compId}`}
+                    data-testid={`my-comp-${comp.compSlug}`}
+                    className="text-body text-heading underline underline-offset-2 hover:text-primary"
+                  >
+                    {comp.compName}
+                  </Link>
+                ) : (
+                  <span data-testid={`my-comp-${comp.compSlug}`} className="text-body text-heading">
+                    {comp.compName}
+                  </span>
+                )}
                 <span className="ml-2 text-caption text-subtle">as {comp.role}</span>
+                {comp.role !== "captain" && (
+                  <span
+                    data-testid={`my-comp-${comp.compSlug}-note`}
+                    className="block text-caption text-subtle"
+                  >
+                    {NO_PAGE_YET[comp.role]}
+                  </span>
+                )}
               </li>
             ))}
           </ul>

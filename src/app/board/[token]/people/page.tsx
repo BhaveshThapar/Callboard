@@ -30,6 +30,7 @@ export default async function PeoplePage({ params }: { params: Promise<{ token: 
     accepted: row.acceptedAt !== null,
     revoked: row.revokedAt !== null,
     expired: row.acceptedAt === null && row.expiresAt.getTime() <= now,
+    hasAccess: row.hasAccess,
   }));
 
   return (

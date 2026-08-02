@@ -1,9 +1,17 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import { cardClass, cx, eyebrowClass, inputClass, pillClass, primaryButtonClass } from "@/components/styles";
-import type { AccountRole } from "@/db/schema";
-import { inviteAction } from "../actions";
+import {
+  cardClass,
+  cx,
+  eyebrowClass,
+  inputClass,
+  pillClass,
+  primaryButtonClass,
+} from "@/components/styles";
+import type { AccountRole, InvitableRole } from "@/db/schema";
+import { INVITABLE_ROLES } from "@/db/schema";
+import { inviteAction, revokeAccessAction } from "../actions";
 import { IDLE } from "../state";
 
 export type InviteeRow = {
@@ -15,12 +23,24 @@ export type InviteeRow = {
   accepted: boolean;
   revoked: boolean;
   expired: boolean;
+  /** A live membership. `accepted` says they once signed in; this says they still get in. */
+  hasAccess: boolean;
 };
 
 const ROLE_LABEL: Record<AccountRole, string> = {
   board: "Board",
   captain: "Captain",
   liaison: "Liaison",
+};
+
+/**
+ * The options come from `INVITABLE_ROLES` rather than from a list written out here, so a role
+ * gaining a screen is one edit in the schema and not two that can disagree. `ROLE_LABEL` still
+ * covers every `AccountRole`, because a liaison invited before this narrowed is still on the table.
+ */
+const INVITE_LABEL: Record<InvitableRole, string> = {
+  captain: "Team captain",
+  board: "Board member",
 };
 
 /**
@@ -41,14 +61,15 @@ export function InvitePanel({
   teams: { id: string; name: string; bidCode: string }[];
 }) {
   const [state, formAction, pending] = useActionState(inviteAction, IDLE);
-  const [role, setRole] = useState<AccountRole>("captain");
+  const [revokeState, revokeFormAction, revoking] = useActionState(revokeAccessAction, IDLE);
+  const [role, setRole] = useState<InvitableRole>("captain");
 
   return (
     <div className={cardClass} data-testid="invite-panel">
       <h2 className="text-card font-semibold text-heading">Invite somebody</h2>
       <p className="mt-1 text-caption text-muted">
-        Board members, captains and liaisons sign in. Judges do not — a judge scores from the link
-        the seed printed.
+        Board members and captains sign in. Judges do not — a judge scores from the link the seed
+        printed. Liaisons cannot be invited yet, because there is nothing for one to open.
       </p>
 
       <form action={formAction} className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -75,14 +96,16 @@ export function InvitePanel({
         <select
           name="role"
           value={role}
-          onChange={(event) => setRole(event.target.value as AccountRole)}
+          onChange={(event) => setRole(event.target.value as InvitableRole)}
           aria-label="Role"
           data-testid="invite-role"
           className={inputClass}
         >
-          <option value="captain">Team captain</option>
-          <option value="board">Board member</option>
-          <option value="liaison">Liaison</option>
+          {INVITABLE_ROLES.map((invitable) => (
+            <option key={invitable} value={invitable}>
+              {INVITE_LABEL[invitable]}
+            </option>
+          ))}
         </select>
 
         {/* A captain is invited *for a team*, and the CHECK on `memberships` says the same thing in
@@ -132,6 +155,7 @@ export function InvitePanel({
               <th className={cx(eyebrowClass, "pb-2")}>Person</th>
               <th className={cx(eyebrowClass, "pb-2")}>As</th>
               <th className={cx(eyebrowClass, "pb-2")}>State</th>
+              <th className={cx(eyebrowClass, "pb-2")}></th>
             </tr>
           </thead>
           <tbody>
@@ -140,6 +164,7 @@ export function InvitePanel({
                 key={`${invitee.personId}-${invitee.role}`}
                 data-testid={`invitee-${invitee.email}`}
                 data-accepted={invitee.accepted}
+                data-has-access={invitee.hasAccess}
                 className="border-b border-border-soft/60"
               >
                 <td className="py-2.5 pr-3">
@@ -156,26 +181,62 @@ export function InvitePanel({
                   <span
                     className={cx(
                       pillClass,
-                      invitee.accepted
+                      invitee.hasAccess
                         ? "bg-primary-light text-primary"
-                        : invitee.revoked || invitee.expired
+                        : invitee.accepted || invitee.revoked || invitee.expired
                           ? "bg-hover text-subtle"
                           : "bg-secondary-light text-secondary",
                     )}
                   >
-                    {invitee.accepted
+                    {/* `accepted && !hasAccess` is somebody the board took off, and it has to read
+                        differently from an envelope that was merely superseded — otherwise the one
+                        state a revocation produces is the one the screen cannot show. */}
+                    {invitee.hasAccess
                       ? "signed in"
-                      : invitee.revoked
-                        ? "superseded"
-                        : invitee.expired
-                          ? "expired"
-                          : "invited"}
+                      : invitee.accepted
+                        ? "removed"
+                        : invitee.revoked
+                          ? "superseded"
+                          : invitee.expired
+                            ? "expired"
+                            : "invited"}
                   </span>
+                </td>
+                <td className="py-2.5 text-right">
+                  {(invitee.hasAccess ||
+                    (!invitee.accepted && !invitee.revoked && !invitee.expired)) && (
+                    <form action={revokeFormAction}>
+                      <input type="hidden" name="token" value={token} />
+                      <input type="hidden" name="personId" value={invitee.personId} />
+                      <input type="hidden" name="role" value={invitee.role} />
+                      <button
+                        type="submit"
+                        disabled={revoking}
+                        data-testid={`revoke-${invitee.email}`}
+                        className="text-micro text-subtle underline underline-offset-2 transition-colors hover:text-danger disabled:opacity-40"
+                      >
+                        {invitee.hasAccess ? "Remove" : "Cancel"}
+                      </button>
+                    </form>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+
+      {revokeState.message && (
+        <p
+          role="status"
+          data-testid="revoke-message"
+          className={cx(
+            "mt-3 text-caption",
+            revokeState.status === "error" ? "text-danger" : "text-muted",
+          )}
+        >
+          {revokeState.message}
+        </p>
       )}
     </div>
   );

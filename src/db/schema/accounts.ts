@@ -34,6 +34,25 @@ export const ACCOUNT_ROLES = ["board", "captain", "liaison"] as const;
 export type AccountRole = (typeof ACCOUNT_ROLES)[number];
 
 /**
+ * What a board may actually hand out today, which is **not** every role a membership can hold.
+ *
+ * `liaison` is a real role with a real actor kind and a real resolver, and it has no reader: nothing
+ * in the product answers *what does a liaison see*, because that is C1's question and C1 needs the
+ * `assignments` table that does not exist yet. Offering it anyway meant a board could mint a
+ * credential whose whole journey ended on a page that refused to load — a link that goes nowhere is
+ * the failure ADR-0011 spent a decision refusing, arriving through the door ADR-0016 opened.
+ *
+ * So the role stays in `ACCOUNT_ROLES`, in the CHECK, and in `LiaisonActor`; what goes away is the
+ * ability to issue one. This is the list, and it is the *rule* rather than the markup: the form reads
+ * it to build its options and `inviteAction` reads it to refuse a hand-crafted POST, for
+ * `validateAnswers`' reason — a `required` attribute is a courtesy to an honest board.
+ *
+ * Put `liaison` back here in the same commit that gives it a screen, and not before.
+ */
+export const INVITABLE_ROLES = ["captain", "board"] as const satisfies readonly AccountRole[];
+export type InvitableRole = (typeof INVITABLE_ROLES)[number];
+
+/**
  * The constraints that make a broken credential state unrepresentable rather than merely unlikely.
  * Named once, for `CHAIN_INDEXES`' and `MONEY_CONSTRAINTS`' reason: the schema declares them, the
  * auth paths read one off a failed insert to say something true to a person, and `db:doctor` looks
