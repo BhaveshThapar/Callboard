@@ -1,4 +1,4 @@
-import { CUSTOM_FIELD_TYPES } from "@/db/schema/orgs";
+import { COMP_STATUSES, CUSTOM_FIELD_TYPES } from "@/db/schema/orgs";
 import type { CompStatus, CustomField, RegistrationConfig } from "@/db/schema/orgs";
 import { TEAM_STATUSES } from "@/db/schema/teams";
 import type { TeamStatus } from "@/db/schema/teams";
@@ -80,7 +80,6 @@ export type FeeScheduleConfig = {
 
 const NORMALIZATIONS = ["raw", "zscore", "rank"] as const;
 const TIEBREAKER_KINDS = ["criterion", "head_to_head", "highest_single_judge"] as const;
-const COMP_STATUSES = ["draft", "open", "live", "complete"] as const;
 
 const fail = (path: string, expected: string): never => {
   throw new Error(`${path}: expected ${expected}`);

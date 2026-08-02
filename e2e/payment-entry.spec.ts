@@ -337,3 +337,75 @@ test("a team with no charges can still be paid, because a deposit holds a slot",
   await expect(page.getByTestId("payment-message")).toContainText("Recorded");
   await expect(owedRow(page, "M-1")).toHaveAttribute("data-balance-cents", "-10000");
 });
+
+/**
+ * Found by the obligation it settles rather than by id, because the id is only knowable from the
+ * row the scoped read rendered — which is the whole point of resolving it through that read.
+ */
+const releaseButton = (page: Page, kind: string) =>
+  page
+    .locator('[data-testid^="allocation-"]')
+    .filter({ hasText: kind })
+    .getByRole("button", { name: "release" });
+
+/**
+ * The undo for a wrong label, and the reason it had to be built: `releaseAllocation` shipped
+ * complete, transactional and audited with **no caller anywhere in the repo**, so a treasurer who
+ * mis-typed an allocation could not take it back. `payment_allocations_live_unique` refuses the
+ * corrected attempt — the test above proves it — and the only escape was a roster move that voided
+ * the whole charge.
+ *
+ * The load-bearing assertion is the last one, and it is the same one the lump test turns on from
+ * the other direction: **releasing must not move a balance.** `paid` is the sum of gross, so
+ * detaching money says something about attribution and nothing about whether it arrived. If that
+ * number moves, this has reintroduced the bug the whole module is built against.
+ */
+test("a mis-typed allocation is released, and the money reads unattached rather than gone", async ({ page }) => {
+  const comp = seed();
+
+  await money(page, comp.boardToken);
+
+  // M-2 is accepted in the seed: 20 x $70 + 5 x $140 + $100 = $2,200. The board pays it in full,
+  // but puts the hotel's $700 on the deposit -- the realistic slip, since both are "the extras".
+  await pay(page, "M-2", { gross: "2200.00", allocate: { registration: "1400.00", deposit: "100.00" } });
+  await expect(owedRow(page, "M-2")).toHaveAttribute("data-balance-cents", "0");
+
+  await releaseButton(page, "registration").click();
+  await expect(page.getByTestId("release-message")).toContainText("$1,400.00");
+
+  // The charge is unsettled again...
+  await expect(page.getByTestId("charge-M-2-registration")).toHaveAttribute("data-paid-cents", "0");
+
+  // ...the money is offered back as credit to re-attribute...
+  await expect(page.getByTestId("unattributed-total")).toHaveText("$2,100.00");
+
+  // ...and the balance has not moved, because the $2,200 is still in the org's account.
+  await expect(owedRow(page, "M-2")).toHaveAttribute("data-balance-cents", "0");
+
+  // And the correction the unique index refused before now goes through.
+  await page.getByTestId("apply-M-2-hotel").fill("700.00");
+  await page.getByTestId("apply-M-2-registration").fill("1400.00");
+  await page.getByTestId("apply-submit-M-2").click();
+  await expect(page.getByTestId("charge-M-2-hotel")).toHaveAttribute("data-paid-cents", "70000");
+});
+
+test("a released allocation is not offered twice, and the counter does not move twice", async ({ page }) => {
+  const comp = seed();
+
+  await money(page, comp.boardToken);
+  await pay(page, "M-2", { gross: "2200.00", allocate: { deposit: "100.00" } });
+
+  const release = releaseButton(page, "deposit");
+  const id = await release.getAttribute("data-testid");
+  expect(id).toBeTruthy();
+
+  await release.click();
+  await expect(page.getByTestId("release-message")).toContainText("$100.00");
+
+  // The row is gone from the screen, which is the ordinary half. The half that matters is that the
+  // id it carried is refused if it comes back -- a double-click subtracting the same cents twice
+  // would leave `allocated_cents` under the sum it stands for, which is the drift `db:doctor`
+  // reports and nobody can resolve after the fact.
+  await expect(page.getByTestId(id as string)).toHaveCount(0);
+  await expect(page.getByTestId("unattributed-total")).toHaveText("$2,200.00");
+});

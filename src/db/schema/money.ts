@@ -38,6 +38,8 @@ export type PaymentRail = (typeof PAYMENT_RAILS)[number];
 export const MONEY_CONSTRAINTS = {
   /** A payment is never allocated past what was paid. */
   allocatedCeiling: "payments_allocated_check",
+  /** Nor refunded past it. The outflow half, added with `refunded_cents` in `0011`. */
+  refundedCeiling: "payments_refunded_check",
   /** `net = gross - fee`, refused rather than silently supplied. */
   netIdentity: "payments_net_identity_check",
   /** One live obligation per (team, kind). This is the whole idempotency story. */
@@ -100,6 +102,18 @@ export const charges = pgTable(
       .references(() => teams.id, { onDelete: "cascade" }),
     kind: text("kind").$type<ChargeKind>().notNull(),
     amountCents: integer("amount_cents").notNull(),
+    /**
+     * **Nothing writes this yet, deliberately.** It was read into `ChargeLineView` and rendered
+     * nowhere, which is a column pretending to be a feature — so the read went and the column
+     * stayed, because the shape is right and the *data* does not exist.
+     *
+     * A due date has to come from a schedule, and the five fields in `fee_schedules` are the repo's
+     * own best guess rather than a board's (CLAUDE.md). Deriving it from `late_after` is the obvious
+     * move and is exactly the guess to avoid: it would silently decide that "the date a late fee
+     * starts" and "the date this is due" are one date, which is a founding partner's answer to give
+     * — and the late fee's own meaning is already parked as an open question. The first real
+     * schedule that arrives is what fills this in.
+     */
     dueAt: date("due_at"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     /**
@@ -109,6 +123,17 @@ export const charges = pgTable(
      * product rather than discovered in April.
      */
     voidedAt: timestamp("voided_at", { withTimezone: true }),
+    /**
+     * **Written by four paths and read by no screen, on purpose.** Every void carries one — "team
+     * dropped", "billing details changed", "deposit refunded" — and no board-facing view lists
+     * voided charges at all, because a screen showing obligations that are no longer owed is a
+     * screen a treasurer misreads.
+     *
+     * It is kept because it is the forensic half of `voided_at, never DELETE`: the row survives so
+     * the record of what a payment was *for* survives, and the reason is what makes that record
+     * answer *why it stopped being owed* a season later. Surfacing it needs a "history" view that
+     * nobody has asked for; inventing one would be the guess, not the gap.
+     */
     voidedReason: text("voided_reason"),
   },
   (t) => [
@@ -155,6 +180,18 @@ export const payments = pgTable(
      * check fires inside the same statement that moved the number.
      */
     allocatedCents: integer("allocated_cents").notNull().default(0),
+    /**
+     * How much of this payment has been given back — the outflow half of the ledger, and the reason
+     * a refund can move a number at all.
+     *
+     * A refund cannot be a negative `payments` row (negative gross makes `allocated <= gross`
+     * uninterpretable, which is the ceiling ADR-0014 bought) and it cannot be a `DELETE`. So it is a
+     * second integer on the row the money arrived on, and `paid` becomes `sum(gross - refunded)`.
+     * Until this column existed a returned deposit changed no number anywhere: the team still read
+     * settled and the books still said the money was in the account, which is a reconciliation gap
+     * of exactly the kind PRD §13 promises to close. See ADR-0015.
+     */
+    refundedCents: integer("refunded_cents").notNull().default(0),
     externalRef: text("external_ref"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
     reconciledAt: timestamp("reconciled_at", { withTimezone: true }),
@@ -176,6 +213,13 @@ export const payments = pgTable(
     check(
       MONEY_CONSTRAINTS.allocatedCeiling,
       sql`${t.allocatedCents} >= 0 and ${t.allocatedCents} <= ${t.grossCents}`,
+    ),
+    // The same bargain as the ceiling above, for the same reason: a refund of more than arrived is
+    // not a number to be caught in review. Deliberately *not* joined to `allocated_cents` -- money
+    // is routinely allocated and then returned, so the two ceilings are independent.
+    check(
+      MONEY_CONSTRAINTS.refundedCeiling,
+      sql`${t.refundedCents} >= 0 and ${t.refundedCents} <= ${t.grossCents}`,
     ),
     // A replayed webhook or a re-imported CSV is a duplicate payment, and a duplicate payment is a
     // team told it is paid up when it is not. Scoped to the comp: two comps can see the same bank
@@ -221,11 +265,19 @@ export const paymentAllocations = pgTable(
  * from an audit log.
  *
  * A refund is deliberately **not** a negative `payments` row: negative gross would make
- * `allocated_cents <= gross_cents` uninterpretable, and that ceiling is what ADR-0014 bought.
+ * `allocated_cents <= gross_cents` uninterpretable, and that ceiling is what ADR-0014 bought. What
+ * it *is* instead is `payments.refunded_cents`, moved in the same act as the terminal event.
  *
- * One INSERT plus one audit row, so this stays on `db` with no transaction. There is no invariant
- * spanning statements here — the *index* refuses a second ending, which is the chain-index argument
- * rather than the `withTransaction` one.
+ * **The chain belongs to a team, not to a charge**, and that is the correction migration `0011`
+ * made ([ADR-0015]). Keyed on `charge_id` it looked right and was not: `planCharges` voids and
+ * re-inserts a charge whenever its amount changes, so a `depositCents` edit or a drop-and-reinstate
+ * minted a new id with an empty chain and an already-refunded deposit became refundable again. The
+ * ending was per row rather than per deposit, and a deposit is a fact about a team.
+ *
+ * One INSERT plus one audit row when nothing moves; a transaction when it does. The *index* refuses
+ * a second ending, which is the chain-index argument rather than the `withTransaction` one.
+ *
+ * [ADR-0015]: ../../../docs/decisions/0015-a-refund-moves-the-money.md
  */
 export const depositEvents = pgTable(
   "deposit_events",
@@ -236,10 +288,16 @@ export const depositEvents = pgTable(
     compId: uuid("comp_id")
       .notNull()
       .references(() => comps.id, { onDelete: "cascade" }),
-    /** The `kind = 'deposit'` charge this is about. */
-    chargeId: uuid("charge_id")
+    /** Whose deposit this is. The chain's identity, and what the terminal index is keyed on. */
+    teamId: uuid("team_id")
       .notNull()
-      .references(() => charges.id, { onDelete: "cascade" }),
+      .references(() => teams.id, { onDelete: "cascade" }),
+    /**
+     * The `kind = 'deposit'` charge this was about *at the time*. Provenance, not identity: it is
+     * nullable because the charge it names may since have been voided and replaced, and the chain
+     * has to outlive that. Nothing resolves a deposit through it.
+     */
+    chargeId: uuid("charge_id").references(() => charges.id, { onDelete: "set null" }),
     state: text("state").$type<DepositState>().notNull(),
     reason: text("reason"),
     /** Every board action is attributed. Returning money is emphatically a board action. */
@@ -254,9 +312,10 @@ export const depositEvents = pgTable(
       sql`${t.state} in ${sql.raw(`(${DEPOSIT_STATES.map((s) => `'${s}'`).join(",")})`)}`,
     ),
     // Partial over the endings only, so a deposit may pass through `refund_pending` and
-    // `refund_failed` as often as reality demands and still finish exactly once.
+    // `refund_failed` as often as reality demands and still finish exactly once -- and keyed on the
+    // team, so it finishes once per *deposit* rather than once per charge row.
     uniqueIndex(MONEY_CONSTRAINTS.depositTerminal)
-      .on(t.chargeId)
+      .on(t.compId, t.teamId)
       .where(sql`${t.state} in ${sql.raw(`(${TERMINAL_STATES.map((s) => `'${s}'`).join(",")})`)}`),
   ],
 );

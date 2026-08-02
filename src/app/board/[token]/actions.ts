@@ -7,25 +7,37 @@ import { violatedConstraint } from "@/db/errors";
 import {
   boardAssignments,
   CHAIN_INDEX_NAMES,
+  COMP_STATUSES,
   deductions,
   judgeAssignments,
   PAYMENT_RAILS,
   TEAM_STATUSES,
 } from "@/db/schema";
-import type { PaymentRail, TeamStatus } from "@/db/schema";
+import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import type { DepositState } from "@/lib/money/deposit";
 import { DEPOSIT_STATES } from "@/lib/money/deposit";
 import { advanceDeposit } from "@/lib/money/deposits";
 import { formatCents, parseDollars } from "@/lib/money/format";
-import { allocatePayment, recordPayment } from "@/lib/money/ledger";
-import { setTeamStatus, setWaitlistRank } from "@/lib/roster/roster";
+import {
+  allocatePayment,
+  recordPayment,
+  releaseAllocation,
+  setPaymentReconciled,
+} from "@/lib/money/ledger";
+import {
+  regenerateCharges,
+  setTeamBilling,
+  setTeamStatus,
+  setWaitlistRank,
+} from "@/lib/roster/roster";
 import {
   listBoardForBoard,
   NOT_COMPETING,
   resolveBoardActor,
   resolveTeamForBoard,
 } from "@/lib/auth/scope";
+import { setCompStatus } from "@/lib/comp/status";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
 import type { BoardActionState } from "./state";
 
@@ -404,6 +416,127 @@ export const setWaitlistRankAction = async (
 };
 
 /**
+ * Opening and closing the comp's own registration window (A1/A2).
+ *
+ * `comps.status` gates the public form and had exactly one writer in the repo — the seed script. So
+ * a board could open registration from a config and then had no way to close it: reseeding is the
+ * only other path, and a reseed replaces the comp and reissues every token (ADR-0013), killing the
+ * links already in people's phones. Closing a form meant destroying the comp.
+ */
+export const setCompStatusAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const to = String(formData.get("status") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (!COMP_STATUSES.includes(to as CompStatus)) {
+    return { status: "error", message: "That is not a comp status." };
+  }
+
+  const result = await setCompStatus(actor, to as CompStatus);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}`);
+  revalidatePath(`/board/${token}/roster`);
+  return {
+    status: "ok",
+    message:
+      result.status === "open"
+        ? "Registration is open. The public form accepts applications."
+        : `This comp is now ${result.status}. The registration form is closed.`,
+  };
+};
+
+/**
+ * A blank field is *not yet known* and a `0` is a stated zero. `BillableTeam` draws that line and
+ * the whole gap machinery rests on it: null withholds a charge and says why, zero charges nothing
+ * and means it. So an empty input has to survive the round trip as null rather than becoming `0`,
+ * which `Number("")` would do silently.
+ */
+const parseCount = (raw: string): { ok: true; value: number | null } | { ok: false } => {
+  const trimmed = raw.trim();
+  if (trimmed === "") return { ok: true, value: null };
+
+  const value = Number(trimmed);
+  if (!Number.isInteger(value) || value < 0) return { ok: false };
+  return { ok: true, value };
+};
+
+/**
+ * The dancer count and the room count a team is billed on (A3/A6).
+ *
+ * `teams.rooms` shipped with no writer outside the seed, so the hotel line was unbillable for every
+ * team that ever registered through the product — the engine withheld it correctly, said "room count
+ * unknown", and the board had no way to answer. This is the answer.
+ */
+export const setTeamBillingAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const teamId = String(formData.get("teamId") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+  if (!teamId) return { status: "error", message: "Pick a team." };
+
+  const rosterSize = parseCount(String(formData.get("rosterSize") ?? ""));
+  if (!rosterSize.ok) {
+    return { status: "error", message: "Dancers must be a whole number, or blank if not known yet." };
+  }
+
+  const rooms = parseCount(String(formData.get("rooms") ?? ""));
+  if (!rooms.ok) {
+    return { status: "error", message: "Rooms must be a whole number, or blank if not known yet." };
+  }
+
+  const result = await setTeamBilling(actor, teamId, {
+    rosterSize: rosterSize.value,
+    rooms: rooms.value,
+  });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/roster`);
+  revalidatePath(`/board/${token}/money`);
+  return { status: "ok", message: "Updated, and the charges with it." };
+};
+
+/**
+ * Re-runs the fee schedule over the whole billable roster (A6).
+ *
+ * Until this existed, `syncCharges` ran only from `setTeamStatus` — so nothing regenerated charges
+ * once a team's status had settled, and a late fee whose date passed in February was never billed to
+ * anybody accepted in December. It is safe to click twice: `planCharges` keys on `(teamId, kind)`,
+ * so an unchanged roster plans nothing.
+ */
+export const regenerateChargesAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  const result = await regenerateCharges(actor);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/money`);
+  revalidatePath(`/board/${token}/roster`);
+
+  // Naming both numbers, including two zeros. "Nothing changed" is the answer a board most needs to
+  // be able to trust, and a bare "Done." makes a no-op and a re-bill read identically.
+  return {
+    status: "ok",
+    message: `Regenerated: ${result.inserted} charge${result.inserted === 1 ? "" : "s"} added, ${result.voided} voided.`,
+  };
+};
+
+/**
  * A8, reachable at last. The ledger shipped with `recordPayment` and nothing calling it, so a board
  * could generate what a team owes (`setTeamStatus` → `syncCharges`) and had no instrument to say a
  * cent of it had arrived — every accepted team a permanent debtor, and the CSV a treasurer opens
@@ -524,19 +657,87 @@ export const allocatePaymentAction = async (
 };
 
 /**
+ * Taking a wrong label back off money that did arrive.
+ *
+ * The counterpart to `allocatePaymentAction`, and the half that was missing: `releaseAllocation` was
+ * written, transactional and audited, and **had no caller anywhere in the repo**, so attribution was
+ * one-way. A treasurer who put $560 on the deposit instead of the hotel could not undo it —
+ * `payment_allocations_live_unique` refuses the corrected attempt, and `recordPayment`'s own ceiling
+ * message told them to *"adjust the existing allocation instead"*, naming an instrument that did not
+ * exist. The only escape was a roster move that voided the whole charge.
+ *
+ * **No balance moves**, which is worth saying on the screen and is why the message says *unattached*
+ * rather than *refunded*: `paid` is the sum of gross, so this changes what the money is for and not
+ * whether it arrived.
+ */
+export const releaseAllocationAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const allocationId = String(formData.get("allocationId") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+  if (!allocationId) return { status: "error", message: "Pick an allocation to release." };
+
+  const result = await releaseAllocation(actor, allocationId);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/money`);
+  revalidatePath(`/board/${token}/roster`);
+  return {
+    status: "ok",
+    message: `Released. ${formatCents(result.creditCents)} is unattached again — the balance has not moved.`,
+  };
+};
+
+/**
+ * Ticking a payment off against the bank statement.
+ *
+ * `payments.reconciled_at` shipped in migration `0009` and nothing wrote it, which left the metric
+ * PRD §13 names — reconciliation error vs. bank, target $0 — with no instrument behind it. A
+ * treasurer could match rows by eye and had nowhere to record having done it.
+ */
+export const reconcilePaymentAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const paymentId = String(formData.get("paymentId") ?? "");
+  const reconciled = String(formData.get("reconciled") ?? "") === "true";
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+  if (!paymentId) return { status: "error", message: "Pick a payment." };
+
+  const result = await setPaymentReconciled(actor, paymentId, reconciled);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/money`);
+  return {
+    status: "ok",
+    message: reconciled ? "Matched against the bank." : "Mark removed.",
+  };
+};
+
+/**
  * A7 gets a hand on it. `advanceDeposit` and `listDepositsForBoard` had no importer anywhere, so
  * the state machine, its guards and its terminal index were exercised only by a test fixture that
  * deliberately bypasses the product path — `e2e/support/deposit.ts` says so in its own header.
  *
  * Returning a deposit is the most consequential money act a board performs, and until now it
  * happened in Venmo with no record of who decided or why.
+ *
+ * The form carries a `teamId` rather than a `chargeId` since `0011`: a deposit's fate belongs to the
+ * team, not to whichever charge row happened to be carrying it when the board clicked (ADR-0015).
  */
 export const advanceDepositAction = async (
   _previous: BoardActionState,
   formData: FormData,
 ): Promise<BoardActionState> => {
   const token = String(formData.get("token") ?? "");
-  const chargeId = String(formData.get("chargeId") ?? "");
+  const teamId = String(formData.get("teamId") ?? "");
   const to = String(formData.get("state") ?? "");
   const reason = String(formData.get("reason") ?? "").trim();
 
@@ -553,11 +754,18 @@ export const advanceDepositAction = async (
     return { status: "error", message: "Forfeiting a deposit needs a written reason." };
   }
 
-  const result = await advanceDeposit(actor, chargeId, to as DepositState, reason || null);
+  const result = await advanceDeposit(actor, teamId, to as DepositState, reason || null);
   if (!result.ok) return { status: "error", message: result.message };
 
   revalidatePath(`/board/${token}/money`);
-  return { status: "ok", message: `Deposit is now ${result.state.replace("_", " ")}.` };
+  revalidatePath(`/board/${token}/roster`);
+  return {
+    status: "ok",
+    message:
+      result.state === "refunded"
+        ? "Deposit returned. It is no longer owed and no longer counted as paid."
+        : `Deposit is now ${result.state.replace("_", " ")}.`,
+  };
 };
 
 export const addDeductionAction = async (

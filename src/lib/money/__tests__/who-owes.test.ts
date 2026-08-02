@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { RosterTeamView } from "@/lib/auth/scope";
 import type { FeeSchedule } from "@/lib/fees/types";
 import { teamBalance } from "../balance";
-import { summarizeOpenPayments, toWhoOwesCsv, whoOwes } from "../who-owes";
+import type { PaymentRow } from "../who-owes";
+import { summarizeOpenPayments, toPaymentsCsv, toWhoOwesCsv, whoOwes } from "../who-owes";
 
 /** Mayuri 2026's real numbers: $70/dancer + $140/room + a $100 deposit. */
 const SCHEDULE: FeeSchedule = {
@@ -28,7 +29,7 @@ const team = (
 ): RosterTeamView => {
   const charges =
     owedCents > 0
-      ? [{ id: `${bidCode}-c`, kind: "registration", amountCents: owedCents, dueAt: null, paidCents }]
+      ? [{ id: `${bidCode}-c`, kind: "registration", amountCents: owedCents, paidCents }]
       : [];
 
   return {
@@ -223,6 +224,88 @@ describe("toWhoOwesCsv", () => {
 
     expect(lines.at(-1)).toContain("TOTAL");
     expect(lines.at(-1)).toContain("$1,000.00");
+  });
+});
+
+describe("toPaymentsCsv", () => {
+  const payment = (
+    bidCode: string,
+    grossCents: number,
+    feeCents: number,
+    reconciledAt: Date | null,
+    refundedCents = 0,
+  ): PaymentRow => ({
+    receivedAt: new Date("2027-01-14T15:04:00Z"),
+    bidCode,
+    teamName: `Team ${bidCode}`,
+    rail: "venmo",
+    grossCents,
+    feeCents,
+    netCents: grossCents - feeCents,
+    allocatedCents: grossCents,
+    refundedCents,
+    externalRef: null,
+    reconciledAt,
+  });
+
+  it("carries gross, fee and net as three numbers — the $97.01 case in a file", () => {
+    // BU Dheem's $100 deposit landed as $97.01. The team was credited $100; the bank shows $97.01;
+    // the $2.99 is a recorded cost. A file showing one of the three is the desync itself.
+    const csv = toPaymentsCsv([payment("B-207", 10_000, 299, null)]);
+
+    expect(csv).toContain("$100.00");
+    expect(csv).toContain("$2.99");
+    expect(csv).toContain("$97.01");
+  });
+
+  /**
+   * A returned deposit is a *debit* on the statement the treasurer is matching against. Without
+   * this column the file showed only what came in, so an outflow on the bank side matched nothing
+   * in the file — a discrepancy nobody was shown, which is the shape the ~$5,000 gap is made of.
+   */
+  it("shows what went back out, because the bank statement does", () => {
+    const csv = toPaymentsCsv([payment("M-2", 10_000, 0, null, 10_000)]).split("\r\n");
+
+    expect(csv[0]).toContain("Refunded");
+    expect(csv[1]).toContain("$100.00");
+    expect(csv.at(-1)).toContain("TOTAL");
+  });
+
+  // Blank rather than "$0.00", for the reconciliation column's reason: a zero in a money column
+  // reads as a figure somebody entered, and most payments are never refunded at all.
+  it("leaves the column blank when nothing was returned", () => {
+    const cells = toPaymentsCsv([payment("B-207", 10_000, 299, null)]).split("\r\n")[1]?.split(",");
+    expect(cells?.filter((cell) => cell === "")).not.toHaveLength(0);
+  });
+
+  it("says which rows are already matched, which is what the column exists for", () => {
+    const csv = toPaymentsCsv([
+      payment("A-114", 216_000, 0, new Date("2027-02-03T00:00:00Z")),
+      payment("B-207", 10_000, 299, null),
+    ]).split("\r\n");
+
+    expect(csv[1]).toContain("2027-02-03");
+    // An unreconciled payment is blank, not "false": the column is a date, because a timestamp
+    // records an event and a boolean records a claim.
+    expect(csv[2]?.endsWith(",")).toBe(true);
+  });
+
+  it("totals exactly the rows above it", () => {
+    const lines = toPaymentsCsv([
+      payment("A-114", 216_000, 0, null),
+      payment("B-207", 10_000, 299, null),
+    ]).split("\r\n");
+
+    expect(lines.at(-1)).toContain("TOTAL");
+    expect(lines.at(-1)).toContain("$2,260.00");
+    expect(lines.at(-1)).toContain("$2.99");
+    expect(lines.at(-1)).toContain("$2,257.01");
+  });
+
+  it("is a header and a total row when nothing has arrived", () => {
+    const lines = toPaymentsCsv([]).split("\r\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain("$0.00");
   });
 });
 

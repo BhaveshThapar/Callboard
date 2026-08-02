@@ -146,7 +146,7 @@ test("db:doctor names a comp that has already forked, and refuses to reseed it a
   expect(doctor().ok).toBe(true);
 });
 
-test("db:doctor fails a database whose money constraints are missing, and names the migration", () => {
+test("db:doctor fails a database whose money constraints are missing", () => {
   seed();
 
   const name = MONEY_CONSTRAINTS.allocatedCeiling;
@@ -160,6 +160,12 @@ test("db:doctor fails a database whose money constraints are missing, and names 
     expect(health.ok).toBe(false);
     expect(health.output).toContain("allocated past");
     expect(health.output).toContain("db:migrate");
+
+    // It names no migration, because `MONEY_CONSTRAINTS` now spans three of them (`0009` the
+    // ledger, `0010` the deposit terminal, `0011` the refund ceiling) and a sentence naming one is
+    // wrong for the other two. It said "predates migration 0009" while the constraint it was most
+    // likely to be missing shipped in 0010.
+    expect(health.output).not.toContain("predates migration");
 
     // Reseeding does not create a constraint, for the same reason it does not create an index.
     expect(health.output).not.toContain("db:seed");
@@ -245,5 +251,102 @@ test("db:doctor fails a comp with no board link", () => {
   expect(health.output).toContain("db:seed");
 
   seed();
+  expect(doctor().ok).toBe(true);
+});
+
+/**
+ * ADR-0015's named residual, and it is ADR-0014's twice over: `payments_refunded_check` can hold
+ * `refunded_cents` against the payment's own gross and can say nothing about whether a deposit was
+ * ever returned, because that agreement spans tables. A refund is the only act that moves the
+ * number, so one with no ending behind it is money the books claim to have paid out and nothing
+ * accounts for.
+ */
+test("db:doctor names money marked refunded that no deposit ending explains", () => {
+  const comp = seed();
+
+  try {
+    const paymentId = run("e2e/support/break-db.ts", "unexplained-refund", comp.compId).trim();
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+    expect(health.output).toContain(paymentId);
+    expect(health.output).toContain("10000 cents refunded");
+    expect(health.output).toContain("never returned");
+
+    // Which figure is true is not a question a seed script gets to answer.
+    expect(health.output).not.toContain("db:seed");
+  } finally {
+    run("e2e/support/break-db.ts", "undrift", comp.compId);
+  }
+
+  expect(doctor().ok).toBe(true);
+});
+
+/**
+ * A deposit that ended twice — the forked run chain, one table over, and it gets the same treatment
+ * for the same reason: `deposit_events_terminal_unique` makes it unrepresentable, the guarantee
+ * lives in the database rather than in the code, and so the code cannot assume it is there.
+ *
+ * Order matters in the `finally` exactly as it does for the run chain: the rows must go before the
+ * index comes back, because an index cannot be built over rows that violate it.
+ */
+test("db:doctor names a deposit that ended twice, and refuses to reseed it away", () => {
+  const comp = seed();
+
+  const name = MONEY_CONSTRAINTS.depositTerminal;
+  const definition = run("e2e/support/break-db.ts", "index-def", name).trim();
+  expect(definition).toContain(name);
+
+  try {
+    run("e2e/support/break-db.ts", "drop-index", name);
+    const teamId = run("e2e/support/break-db.ts", "fork-deposit", comp.compId).trim();
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+    expect(health.output).toContain(teamId);
+    expect(health.output).toContain("2 deposit endings");
+    expect(health.output).toContain("a deposit ends once");
+    expect(health.output).not.toContain("db:seed");
+  } finally {
+    run("e2e/support/break-db.ts", "unfork-deposit", comp.compId);
+    run("e2e/support/break-db.ts", "restore-index", definition);
+  }
+
+  expect(doctor().ok).toBe(true);
+});
+
+/**
+ * **A table existing is not the column existing**, and the preflight died over the difference.
+ *
+ * `deposit_events` arrives in `0010` and its `team_id` in `0011`, so a database at `0010` passed the
+ * table guard in `observeMoney` and then threw `column "team_id" does not exist` out of the fork
+ * query — turning the one instrument that exists to *report* a database behind the repo into one
+ * that crashes on it. That is worse than the bug it was added to find: a stack trace before a
+ * prospect call reads as "the tool is broken", not as "the database needs migrating".
+ *
+ * It was found by pointing `db:doctor` at the deployed demo, which was the only place it could be
+ * found — every other database here is migrated by the same command that generates the migration,
+ * so none of them is ever one behind.
+ */
+test("db:doctor reports a database missing a column, rather than dying on it", () => {
+  seed();
+
+  try {
+    run("e2e/support/break-db.ts", "drop-team-id");
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+
+    // The verdict it should have given all along: a sentence, and the command that fixes it.
+    expect(health.output).toContain("db:migrate");
+
+    // And emphatically not a stack trace with drizzle's own error in it.
+    expect(health.output).not.toContain("does not exist");
+    expect(health.output).not.toContain("NeonDbError");
+    expect(health.output).not.toContain("at async");
+  } finally {
+    expect(run("e2e/support/break-db.ts", "restore-team-id").trim()).toMatch(/^restored:\d+$/);
+  }
+
   expect(doctor().ok).toBe(true);
 });

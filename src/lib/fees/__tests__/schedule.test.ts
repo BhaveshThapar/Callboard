@@ -165,6 +165,86 @@ describe("planCharges", () => {
     expect(plan.insert).toEqual([{ teamId: "b", kind: "deposit", amountCents: 10000 }]);
   });
 
+  it("fills a gap by inserting the line it withheld, and touches nothing else", () => {
+    // The 2.1 path: a team applied without a room count, was billed for everything else, and the
+    // board has now been given a way to say "four rooms". The hotel line has to appear without
+    // voiding and re-inserting the registration and deposit charges the team may already have paid
+    // against — a void would release those allocations for no reason.
+    const before = generateCharges({
+      schedule: MAYURI,
+      teams: [team("a", 16, null)],
+      asOf: "2027-01-15",
+    });
+    const applied = before.lines.map((line, i) => ({ id: `c${i}`, ...line }));
+
+    const after = generateCharges({
+      schedule: MAYURI,
+      teams: [team("a", 16, 4)],
+      asOf: "2027-01-15",
+    });
+    const plan = planCharges(after.lines, applied);
+
+    expect(plan.insert).toEqual([{ teamId: "a", kind: "hotel", amountCents: 14000 * 4 }]);
+    expect(plan.void).toEqual([]);
+    expect(plan.unchanged).toHaveLength(2);
+  });
+
+  it("a corrected roster size re-bills registration and leaves the deposit alone", () => {
+    // Roster churn between acceptance and the show: two dancers drop. Only the line whose amount
+    // moved is voided, so the deposit's allocations survive a correction that has nothing to do
+    // with them.
+    const before = generateCharges({
+      schedule: MAYURI,
+      teams: [team("a", 16, 4)],
+      asOf: "2027-01-15",
+    });
+    const applied = before.lines.map((line, i) => ({ id: `c${i}`, ...line }));
+
+    const after = generateCharges({
+      schedule: MAYURI,
+      teams: [team("a", 14, 4)],
+      asOf: "2027-01-15",
+    });
+    const plan = planCharges(after.lines, applied);
+
+    expect(plan.void.map((c) => c.kind)).toEqual(["registration"]);
+    expect(plan.insert).toEqual([
+      { teamId: "a", kind: "registration", amountCents: 7000 * 14 },
+    ]);
+    expect(plan.unchanged.map((c) => c.kind).sort()).toEqual(["deposit", "hotel"]);
+  });
+
+  it("a regeneration after the late date adds one late fee, and a second adds none", () => {
+    // The 2.2 path, and the reason the button exists: nothing regenerated charges once a team's
+    // status had settled, so a late fee whose date passed was never billed to anybody.
+    const december = generateCharges({
+      schedule: MAYURI,
+      teams: [team("a", 16, 4)],
+      asOf: "2026-12-01",
+    });
+    const applied = december.lines.map((line, i) => ({ id: `c${i}`, ...line }));
+    expect(applied.some((c) => c.kind === "late_fee")).toBe(false);
+
+    const february = generateCharges({
+      schedule: MAYURI,
+      teams: [team("a", 16, 4)],
+      asOf: "2027-02-15",
+    });
+    const first = planCharges(february.lines, applied);
+
+    expect(first.insert).toEqual([{ teamId: "a", kind: "late_fee", amountCents: 2500 }]);
+    expect(first.void).toEqual([]);
+
+    // Clicking it twice is the realistic thing a board does, so the no-op is the property that
+    // matters more than the insert.
+    const second = planCharges(february.lines, [
+      ...applied,
+      { id: "late", teamId: "a", kind: "late_fee" as const, amountCents: 2500 },
+    ]);
+    expect(second.insert).toEqual([]);
+    expect(second.void).toEqual([]);
+  });
+
   it("is idempotent across two rounds: applying the plan then replanning changes nothing", () => {
     const first = generateCharges({
       schedule: MAYURI,
