@@ -3,10 +3,11 @@ import { notFound } from "next/navigation";
 import { Wordmark } from "@/components/Wordmark";
 import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
 import { listRosterForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import { feeScheduleFor, today } from "@/lib/money/charges";
 import { listDepositsForBoard } from "@/lib/money/deposits";
 import { describeBalance, formatCents } from "@/lib/money/format";
 import { listOpenPayments } from "@/lib/money/ledger";
-import { summarizeOpenPayments, whoOwes } from "@/lib/money/who-owes";
+import { describeGap, summarizeOpenPayments, whoOwes } from "@/lib/money/who-owes";
 import { DepositTable } from "./DepositTable";
 import type { PayableTeam } from "./RecordPayment";
 import { RecordPayment } from "./RecordPayment";
@@ -35,12 +36,13 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
    * did not come from the window — which is exactly what the window rule exists to prevent — and
    * this page is `force-dynamic` over a comp of 8–30 teams. The cheaper of the two costs.
    */
-  const [roster, openPayments, deposits] = await Promise.all([
+  const [roster, openPayments, deposits, schedule] = await Promise.all([
     listRosterForBoard(actor),
     listOpenPayments(actor),
     listDepositsForBoard(actor),
+    feeScheduleFor(actor.compId),
   ]);
-  const report = whoOwes(roster);
+  const report = whoOwes(roster, schedule, today());
   const credit = summarizeOpenPayments(openPayments);
 
   const chargesByTeam = new Map(roster.map((team) => [team.id, team.charges]));
@@ -174,6 +176,18 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
                         >
                           {charge.kind.replace("_", " ")}: {formatCents(charge.paidCents)} of{" "}
                           {formatCents(charge.amountCents)}
+                        </span>
+                      ))}
+                      {/* Without this line the team simply owes less than its neighbours and the
+                          screen gives no reason -- which is the $0-hotel-charge lie wearing a
+                          different hat. `generateCharges` already withheld the line and said why. */}
+                      {row.gaps.map((gap) => (
+                        <span
+                          key={`${gap.kind}-${gap.missing}`}
+                          data-testid={`gap-${row.bidCode}-${gap.kind}`}
+                          className="block text-micro text-primary"
+                        >
+                          {describeGap(gap)}
                         </span>
                       ))}
                     </td>

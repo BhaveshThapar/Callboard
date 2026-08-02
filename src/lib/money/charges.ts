@@ -14,6 +14,16 @@ import { releaseAllocationsForCharges } from "./ledger";
 type Writer = Transaction | typeof db;
 
 /**
+ * Today, as an ISO date, read here and passed into the pure fee engine. The clock is read on this
+ * side of the split rather than inside `src/lib/fees/`, which is what keeps that module
+ * reproducible — it bills the same number on Tuesday as on Monday because it is told the date.
+ *
+ * One definition, because both callers of the engine need it and they must agree: a roster move
+ * generating charges, and the who-owes screen stating what the schedule could not bill.
+ */
+export const today = (): string => new Date().toISOString().slice(0, 10);
+
+/**
  * A comp's schedule, or null when it charges nothing.
  *
  * Read **before** the transaction opens, by every caller. It is comp-level and unchanging for the
