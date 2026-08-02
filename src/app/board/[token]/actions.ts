@@ -14,6 +14,9 @@ import {
 } from "@/db/schema";
 import type { PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
+import type { DepositState } from "@/lib/money/deposit";
+import { DEPOSIT_STATES } from "@/lib/money/deposit";
+import { advanceDeposit } from "@/lib/money/deposits";
 import { formatCents, parseDollars } from "@/lib/money/format";
 import { allocatePayment, recordPayment } from "@/lib/money/ledger";
 import { setTeamStatus, setWaitlistRank } from "@/lib/roster/roster";
@@ -518,6 +521,43 @@ export const allocatePaymentAction = async (
         ? `Applied. ${formatCents(result.creditCents)} is still unattached.`
         : "Applied. All of it is now attached.",
   };
+};
+
+/**
+ * A7 gets a hand on it. `advanceDeposit` and `listDepositsForBoard` had no importer anywhere, so
+ * the state machine, its guards and its terminal index were exercised only by a test fixture that
+ * deliberately bypasses the product path — `e2e/support/deposit.ts` says so in its own header.
+ *
+ * Returning a deposit is the most consequential money act a board performs, and until now it
+ * happened in Venmo with no record of who decided or why.
+ */
+export const advanceDepositAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const chargeId = String(formData.get("chargeId") ?? "");
+  const to = String(formData.get("state") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim();
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (!DEPOSIT_STATES.includes(to as DepositState)) {
+    return { status: "error", message: "That is not a deposit state." };
+  }
+
+  // Keeping a team's money is a decision that has to be explainable, which is `overrideReason`'s
+  // argument. Returning it is the expected ending and needs no defence.
+  if (to === "forfeited" && !reason) {
+    return { status: "error", message: "Forfeiting a deposit needs a written reason." };
+  }
+
+  const result = await advanceDeposit(actor, chargeId, to as DepositState, reason || null);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/money`);
+  return { status: "ok", message: `Deposit is now ${result.state.replace("_", " ")}.` };
 };
 
 export const addDeductionAction = async (

@@ -9,6 +9,7 @@ import { db } from "@/db";
 import { charges, feeSchedules } from "@/db/schema";
 import type { BillableTeam, ChargePlan, ExistingCharge, FeeSchedule } from "@/lib/fees/types";
 import { generateCharges, planCharges } from "@/lib/fees/schedule";
+import { releaseAllocationsForCharges } from "./ledger";
 
 type Writer = Transaction | typeof db;
 
@@ -89,18 +90,18 @@ export const syncCharges = async (
   const plan = planCharges(lines, existing);
 
   if (plan.void.length > 0) {
+    const voidedIds = plan.void.map((charge) => charge.id);
+
+    // Before the charge disappears, let go of the money attached to it. An allocation left pointing
+    // at a voided charge is money that reads as fully attributed and is attributed to nothing —
+    // invisible to the who-owes screen, to the unattributed panel, and to `db:doctor`'s drift
+    // check, which compares the counter against live allocations and finds them in agreement.
+    await releaseAllocationsForCharges(writer, voidedIds);
+
     await writer
       .update(charges)
       .set({ voidedAt: new Date(), voidedReason: input.reason })
-      .where(
-        and(
-          eq(charges.compId, input.compId),
-          inArray(
-            charges.id,
-            plan.void.map((charge) => charge.id),
-          ),
-        ),
-      );
+      .where(and(eq(charges.compId, input.compId), inArray(charges.id, voidedIds)));
   }
 
   if (plan.insert.length > 0) {
@@ -132,6 +133,13 @@ export const voidChargesFor = async (
 ): Promise<number> => {
   const live = await liveChargesFor(writer, compId, [teamId]);
   if (live.length === 0) return 0;
+
+  // Same as `syncCharges`: the money lets go of the obligation before the obligation vanishes. This
+  // is the drop-and-reinstate path, where the team's payment has to survive as findable credit.
+  await releaseAllocationsForCharges(
+    writer,
+    live.map((charge) => charge.id),
+  );
 
   await writer
     .update(charges)
