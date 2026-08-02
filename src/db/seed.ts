@@ -149,90 +149,81 @@ export type SeededDemo = SeededComp;
 type SeededTeam = { id: string; bidCode: string };
 
 /**
- * Two payments, so a prospect sees the three states that matter rather than eight identical rows:
- * a team settled exactly, a team part-paid by a lump, and a team that has paid nothing.
+ * Background payments, so a prospect opens the money screen on the three states that matter rather
+ * than nine identical rows: a team settled exactly, a team part-paid, and teams that have paid
+ * nothing.
  *
- * Both are PRD §14's own evidence. BU Dheem's $100 deposit arrived as **$97.01** because the card
- * fee came out first — `gross 10000 / fee 299 / net 9701`, which is the whole reason `payments`
- * holds three integers. NCSU sent a single **$2,160** labeled "hotel, security deposit & reg fees",
- * which is one payment against three obligations and the reason allocations exist at all.
+ * **Deliberately not PRD §14's two exhibits.** BU Dheem's $100 deposit arriving as $97.01 and
+ * NCSU's $2,160 lump are what DEMO.md's money beat *performs*, live, in front of the prospect — and
+ * a row the script asks the operator to type must not already be sitting there. It was, and the
+ * step did not merely look redundant: allocating Dheem's deposit a second time is refused by the
+ * ceiling in `recordPayment` (*"$100.00 is more than is left on that deposit charge ($0.00)"*), so
+ * the beat failed mid-call. Same defect as the roster having nobody to accept, one screen over.
+ *
+ * These two teams are therefore chosen because **the script never touches them**. Moksha settles in
+ * full; Nrityamala pays registration and deposit and leaves the hotel outstanding, which is what
+ * puts a real number in the "still owed" column before anybody clicks anything.
  *
  * Written directly rather than through `recordPayment`, because that takes a `BoardActor` and a seed
  * has none. The counter is set to match the allocations in the same insert, which is the invariant
  * `db:doctor` checks — a seed that got this wrong would be reported as drift, which is the point.
+ * `e2e/doctor.spec.ts`'s orphaned-allocation case needs a live allocation to exist here at all.
  */
 const seedDemoPayments = async (
   compId: string,
   byBidCode: Map<string, SeededTeam & { id: string }>,
 ): Promise<void> => {
-  const dheem = byBidCode.get("B-207");
-  const ncsu = byBidCode.get("A-114");
+  /**
+   * Each names the obligations it settles — `null` meaning all of them — rather than a lump to be
+   * split greedily across whatever `charges` hands back. That query is unordered, so "pay $1,220
+   * against this team" would land differently depending on how Postgres felt: the hotel part-paid
+   * and the deposit untouched, or the reverse. A seed that varies is a seed no script can describe.
+   *
+   * Naming kinds also survives the late fee. From `lateAfter` there is a fourth charge, and Moksha
+   * settling *everything* stays true where a hardcoded $1,780 would silently stop settling.
+   */
+  const background = [
+    { bidCode: "E-518", rail: "ach" as const, kinds: null, ref: "demo-moksha-settled" },
+    {
+      bidCode: "F-623",
+      rail: "venmo" as const,
+      kinds: ["registration", "deposit"],
+      ref: "demo-nrityamala-partial",
+    },
+  ];
 
   const live = await db
     .select({ id: charges.id, teamId: charges.teamId, kind: charges.kind, amountCents: charges.amountCents })
     .from(charges)
     .where(eq(charges.compId, compId));
 
-  const chargeFor = (teamId: string, kind: string) =>
-    live.find((c) => c.teamId === teamId && c.kind === kind);
+  for (const { bidCode, rail, kinds, ref } of background) {
+    const team = byBidCode.get(bidCode);
+    if (!team) continue;
 
-  if (dheem) {
-    const deposit = chargeFor(dheem.id, "deposit");
-    if (deposit) {
-      const [payment] = await db
-        .insert(payments)
-        .values({
-          compId,
-          teamId: dheem.id,
-          rail: "card",
-          grossCents: 10000,
-          feeCents: 299,
-          netCents: 9701,
-          allocatedCents: deposit.amountCents,
-          externalRef: "demo-dheem-deposit",
-        })
-        .returning({ id: payments.id });
+    const allocations = live
+      .filter((c) => c.teamId === team.id && (kinds === null || kinds.includes(c.kind)))
+      .map((c) => ({ chargeId: c.id, amountCents: c.amountCents }));
+    if (allocations.length === 0) continue;
 
-      if (payment) {
-        await db.insert(paymentAllocations).values({
-          paymentId: payment.id,
-          chargeId: deposit.id,
-          amountCents: deposit.amountCents,
-        });
-      }
-    }
-  }
-
-  if (ncsu) {
-    const owed = live.filter((c) => c.teamId === ncsu.id);
-    const lump = 216_000;
-    // Allocated in order until the lump runs out, which is exactly the hand-unbundling this table
-    // exists to replace -- and it leaves a remainder or a shortfall rather than forcing a match.
-    const allocations: { chargeId: string; amountCents: number }[] = [];
-    let remaining = lump;
-    for (const charge of owed) {
-      if (remaining <= 0) break;
-      const amount = Math.min(remaining, charge.amountCents);
-      allocations.push({ chargeId: charge.id, amountCents: amount });
-      remaining -= amount;
-    }
-
+    // Gross equals the sum allocated: these arrived by bank transfer, where nothing is withheld.
+    // The fee-bearing case is BU Dheem's $97.01, which the demo script types rather than seeds.
     const allocated = allocations.reduce((sum, a) => sum + a.amountCents, 0);
     const [payment] = await db
       .insert(payments)
       .values({
         compId,
-        teamId: ncsu.id,
-        rail: "ach",
-        grossCents: lump,
+        teamId: team.id,
+        rail,
+        grossCents: allocated,
         feeCents: 0,
-        netCents: lump,
+        netCents: allocated,
         allocatedCents: allocated,
-        externalRef: "demo-ncsu-lump",
+        externalRef: ref,
       })
       .returning({ id: payments.id });
 
-    if (payment && allocations.length > 0) {
+    if (payment) {
       await db
         .insert(paymentAllocations)
         .values(allocations.map((a) => ({ paymentId: payment.id, ...a })));
@@ -342,9 +333,9 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
       );
     }
 
-    // One paid deposit and one lump, so the demo carries a settled team, a partly-paid team and an
-    // untouched one rather than eight identical rows. These are PRD §14's own numbers: BU Dheem's
-    // $100 deposit arriving as $97.01, and NCSU's $2,160 covering three obligations at once.
+    // Two background payments, so the money screen opens on a settled team, a partly-paid team and
+    // several untouched ones. PRD §14's own exhibits are deliberately *not* among them: the demo
+    // script types those, and a row it asks for cannot already exist.
     await seedDemoPayments(comp.id, byBidCode);
   }
 

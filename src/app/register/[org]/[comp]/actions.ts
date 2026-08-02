@@ -25,6 +25,7 @@ export const applyAction = async (
     contactName: String(formData.get("contactName") ?? ""),
     contactEmail: String(formData.get("contactEmail") ?? ""),
     rosterSize: String(formData.get("rosterSize") ?? ""),
+    rooms: String(formData.get("rooms") ?? ""),
     auditionUrl: String(formData.get("auditionUrl") ?? ""),
     waiverAccepted: formData.get("waiver") === "on",
     // Collected by prefix rather than from the comp's field list, which is not known yet — so a
@@ -54,6 +55,9 @@ export const applyAction = async (
       contactName: values.contactName,
       contactEmail: values.contactEmail,
       rosterSize: Number(values.rosterSize),
+      // Blank is *not yet known*, and `Number("")` is 0 — which would be a stated zero, a team
+      // telling the comp it needs no rooms. The two must not collapse.
+      rooms: values.rooms.trim() === "" ? null : Number(values.rooms),
       auditionUrl: values.auditionUrl || null,
       waiverAccepted: values.waiverAccepted,
       custom: values.custom,

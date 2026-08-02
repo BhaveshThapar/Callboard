@@ -3,14 +3,18 @@ import { notFound } from "next/navigation";
 import { Wordmark } from "@/components/Wordmark";
 import { cardClass, cx, eyebrowClass, pillClass } from "@/components/styles";
 import { listRosterForBoard, resolveBoardActor } from "@/lib/auth/scope";
+import { latestLockedRun } from "@/lib/comp/tab";
 import { feeScheduleFor, today } from "@/lib/money/charges";
 import { listDepositsForBoard } from "@/lib/money/deposits";
 import { describeBalance, formatCents } from "@/lib/money/format";
-import { listOpenPayments } from "@/lib/money/ledger";
+import { listOpenPayments, listPaymentsForBoard } from "@/lib/money/ledger";
 import { describeGap, summarizeOpenPayments, whoOwes } from "@/lib/money/who-owes";
 import { DepositTable } from "./DepositTable";
+import type { PaymentRowView } from "./PaymentsTable";
+import { PaymentsTable } from "./PaymentsTable";
 import type { PayableTeam } from "./RecordPayment";
 import { RecordPayment } from "./RecordPayment";
+import { RegenerateCharges } from "./RegenerateCharges";
 import type { OpenPaymentView } from "./UnattributedCredit";
 import { UnattributedCredit } from "./UnattributedCredit";
 
@@ -36,11 +40,13 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
    * did not come from the window — which is exactly what the window rule exists to prevent — and
    * this page is `force-dynamic` over a comp of 8–30 teams. The cheaper of the two costs.
    */
-  const [roster, openPayments, deposits, schedule] = await Promise.all([
+  const [roster, openPayments, allPayments, deposits, schedule, locked] = await Promise.all([
     listRosterForBoard(actor),
     listOpenPayments(actor),
+    listPaymentsForBoard(actor),
     listDepositsForBoard(actor),
     feeScheduleFor(actor.compId),
+    latestLockedRun(actor.compId),
   ]);
   const report = whoOwes(roster, schedule, today());
   const credit = summarizeOpenPayments(openPayments);
@@ -60,6 +66,20 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
       amountCents: charge.amountCents,
       paidCents: charge.paidCents,
     })),
+  }));
+
+  const paymentRows: PaymentRowView[] = allPayments.map((payment) => ({
+    id: payment.id,
+    teamName: payment.teamName,
+    bidCode: payment.bidCode,
+    rail: payment.rail,
+    receivedAt: payment.receivedAt.toISOString().slice(0, 10),
+    grossCents: payment.grossCents,
+    feeCents: payment.feeCents,
+    allocatedCents: payment.allocatedCents,
+    externalRef: payment.externalRef,
+    reconciled: payment.reconciledAt !== null,
+    allocations: payment.allocations,
   }));
 
   // Every team, not only the billed ones: a team paying a deposit to hold a slot is `applied` and
@@ -100,11 +120,30 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
                 data-testid="money-csv"
                 className="text-caption text-primary underline underline-offset-2"
               >
-                Download CSV
+                Who owes CSV
+              </a>
+            )}
+            {paymentRows.length > 0 && (
+              <a
+                href={`/board/${token}/money/payments`}
+                data-testid="payments-csv"
+                className="text-caption text-primary underline underline-offset-2"
+              >
+                Payments CSV
               </a>
             )}
           </div>
         </header>
+
+        {/* Outside the `report.rows.length` branch below, deliberately: the case this exists for is
+            a comp whose teams are billable and whose charges are *missing* — a late fee whose date
+            passed, a room count that has just been filled in — and an empty screen is exactly when a
+            board most needs the button. */}
+        {schedule && !locked && (
+          <div className="mb-6">
+            <RegenerateCharges token={token} />
+          </div>
+        )}
 
         {payable.length > 0 && (
           <div className="mb-6">
@@ -120,6 +159,12 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
           />
         </div>
 
+        {paymentRows.length > 0 && (
+          <div className="mb-6">
+            <PaymentsTable token={token} payments={paymentRows} />
+          </div>
+        )}
+
         <div className="mb-6">
           <DepositTable token={token} deposits={deposits} />
         </div>
@@ -128,7 +173,9 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
           <div className={cardClass}>
             <p className="text-body text-muted">
               No team has been billed yet. Charges are generated when a team is accepted, from the
-              comp&apos;s fee schedule — a comp with no schedule bills nothing.
+              comp&apos;s fee schedule — a comp with no schedule bills nothing. Regenerating re-runs
+              that schedule over every billable team, which is how a late fee reaches a team accepted
+              months before its date.
             </p>
           </div>
         ) : (

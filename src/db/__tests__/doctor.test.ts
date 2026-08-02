@@ -3,8 +3,8 @@ import type { Observed } from "../health";
 import { summarizeHealth } from "../health";
 
 const healthy: Observed = {
-  migrationsApplied: 11,
-  migrationsExpected: 11,
+  migrationsApplied: 12,
+  migrationsExpected: 12,
   compFound: true,
   boardAssignments: 1,
   boardName: "Ananya Krishnan",
@@ -18,11 +18,13 @@ const healthy: Observed = {
   moneyGuaranteeEnforced: true,
   driftingPayments: [],
   orphanedAllocations: [],
+  forkedDeposits: [],
+  unexplainedRefunds: [],
 };
 
 const unseeded: Observed = {
-  migrationsApplied: 11,
-  migrationsExpected: 11,
+  migrationsApplied: 12,
+  migrationsExpected: 12,
   compFound: false,
   boardAssignments: 0,
   boardName: null,
@@ -36,6 +38,8 @@ const unseeded: Observed = {
   moneyGuaranteeEnforced: true,
   driftingPayments: [],
   orphanedAllocations: [],
+  forkedDeposits: [],
+  unexplainedRefunds: [],
 };
 
 const expected = { judges: 3, teams: 8 };
@@ -137,15 +141,55 @@ describe("summarizeHealth", () => {
     expect(health.ok).toBe(true);
   });
 
-  it("reports missing money constraints, and names the migration rather than a reseed", () => {
+  /**
+   * It used to say *"this database predates migration 0009"*, and that was false as soon as
+   * `MONEY_CONSTRAINTS` grew past `0009`: `deposit_events_terminal_unique` ships in `0010` and
+   * `payments_refunded_check` in `0011`, so a database missing either was told to apply a migration
+   * it already had. The verdict was right and the sentence was wrong, which is the failure mode
+   * `db:doctor` exists to not have — so it names no migration, and `schemaProblems` reports the
+   * distance from the journal, which is the number that was always true.
+   */
+  it("reports missing money constraints without naming a migration it cannot know", () => {
     const health = summarizeHealth({ ...healthy, moneyGuaranteeEnforced: false }, expected);
     expect(health.ok).toBe(false);
     if (health.ok) throw new Error("unreachable");
     const money = health.problems.find((p) => p.includes("allocated past"));
-    expect(money).toMatch(/predates migration 0009/);
     expect(money).toMatch(/db:migrate/);
+    expect(money).not.toMatch(/00\d\d/);
     // Reseeding does not create a constraint, so it must not be offered as the remedy.
     expect(money).not.toMatch(/db:seed/);
+  });
+
+  // `forkedComps`' sentence about a smaller question. Unrepresentable since `0011` rekeyed the
+  // terminal index to `(comp_id, team_id)`, which is exactly why the doctor still looks.
+  it("reports a deposit that ended twice, and does not offer to reseed it away", () => {
+    const health = summarizeHealth(
+      { ...healthy, forkedDeposits: [{ teamId: "team-4", endings: 2 }] },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const forked = health.problems.find((p) => p.includes("team-4"));
+    expect(forked).toMatch(/2 deposit endings/);
+    expect(forked).toMatch(/a deposit ends once/);
+    expect(forked).toMatch(/human must decide/);
+    expect(forked).not.toMatch(/db:seed/);
+  });
+
+  // The residual ADR-0015 accepted, and it is `allocated_cents`' twice over: a CHECK constrains
+  // `refunded_cents` against the payment's own gross, and nothing can make it agree with the deposit
+  // chain, because that agreement spans tables.
+  it("reports money marked refunded with no ending to account for it", () => {
+    const health = summarizeHealth(
+      { ...healthy, unexplainedRefunds: [{ paymentId: "pay-3", refundedCents: 10000 }] },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const orphan = health.problems.find((p) => p.includes("pay-3"));
+    expect(orphan).toMatch(/10000 cents refunded/);
+    expect(orphan).toMatch(/never returned/);
+    expect(orphan).not.toMatch(/db:seed/);
   });
 
   // ADR-0014's named residual: the CHECK constrains the counter, not the sum it stands for. This is
@@ -227,18 +271,28 @@ describe("summarizeHealth", () => {
  * while every other check here passed.
  */
 describe("summarizeHealth migration lag", () => {
+  /**
+   * Lags are expressed relative to the journal rather than written down, for the reason
+   * `migrationsExpected` reads the journal instead of carrying a number: a literal here is a second
+   * definition of how many migrations exist, and it is wrong the next time somebody generates one.
+   * These assertions were `/4 migrations behind/` until `0011` made them `/5/`.
+   */
+  const behindBy = (n: number) => ({ ...healthy, migrationsApplied: healthy.migrationsExpected - n });
+
   it("fails a database behind the repo, and names how far", () => {
-    const health = summarizeHealth({ ...healthy, migrationsApplied: 7 }, expected);
+    const health = summarizeHealth(behindBy(4), expected);
 
     expect(health.ok).toBe(false);
     if (health.ok) throw new Error("unreachable");
     expect(health.problems[0]).toMatch(/4 migrations behind/);
-    expect(health.problems[0]).toMatch(/7 applied, 11 in drizzle/);
+    expect(health.problems[0]).toMatch(
+      new RegExp(`${healthy.migrationsExpected - 4} applied, ${healthy.migrationsExpected} in drizzle`),
+    );
     expect(health.problems[0]).toMatch(/db:migrate/);
   });
 
   it("says migration, singular, when it is one behind", () => {
-    const health = summarizeHealth({ ...healthy, migrationsApplied: 10 }, expected);
+    const health = summarizeHealth(behindBy(1), expected);
 
     expect(health.ok).toBe(false);
     if (health.ok) throw new Error("unreachable");
@@ -247,7 +301,7 @@ describe("summarizeHealth migration lag", () => {
 
   /** Reseeding does not apply a migration, so it must not be offered as the remedy. */
   it("never offers a reseed for a schema that is behind", () => {
-    const health = summarizeHealth({ ...healthy, migrationsApplied: 7 }, expected);
+    const health = summarizeHealth(behindBy(4), expected);
 
     expect(health.ok).toBe(false);
     if (health.ok) throw new Error("unreachable");
@@ -260,7 +314,10 @@ describe("summarizeHealth migration lag", () => {
    * and especially then, because `db:seed` runs this check and would otherwise seed onto it.
    */
   it("reports a behind schema even when the comp is not seeded", () => {
-    const health = summarizeHealth({ ...unseeded, migrationsApplied: 6 }, expected);
+    const health = summarizeHealth(
+      { ...unseeded, migrationsApplied: unseeded.migrationsExpected - 5 },
+      expected,
+    );
 
     expect(health.ok).toBe(false);
     if (health.ok) throw new Error("unreachable");

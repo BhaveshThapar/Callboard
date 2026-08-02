@@ -78,6 +78,13 @@
       "when": 1785594980355,
       "tag": "0010_daily_earthquake",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1785684104430,
+      "tag": "0011_premium_scarlet_witch",
+      "breakpoints": true
     }
   ]
 }

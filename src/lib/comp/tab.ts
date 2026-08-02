@@ -44,7 +44,7 @@ export const getRubric = async (compId: string): Promise<Rubric> => {
   };
 };
 
-export const buildTabulationInput = async (compId: string): Promise<TabulationInput> => {
+const buildTabulationInput = async (compId: string): Promise<TabulationInput> => {
   const [teamRows, judgeRows, scoreRows, deductionRows] = await Promise.all([
     db
       .select({ id: teams.id })

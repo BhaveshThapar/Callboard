@@ -12,6 +12,7 @@ export type ApplicationValues = {
   contactName: string;
   contactEmail: string;
   rosterSize: string;
+  rooms: string;
   auditionUrl: string;
   waiverAccepted: boolean;
   /**
@@ -36,6 +37,7 @@ export const EMPTY: ApplicationValues = {
   contactName: "",
   contactEmail: "",
   rosterSize: "",
+  rooms: "",
   auditionUrl: "",
   waiverAccepted: false,
   custom: {},

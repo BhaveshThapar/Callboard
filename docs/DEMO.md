@@ -39,7 +39,7 @@ It confirms a board link *and* a judge link resolve and that both the board and 
 **Read the second line of the output, every time.** It names the compute the verdict is about:
 
 ```
-✓ Demo healthy: board "Ananya Krishnan", 3 judges, 8 teams.
+✓ Demo healthy: board "Ananya Krishnan", 3 judges, 9 teams.
   ep-round-fire-a6dyy8t8-pooler · the deployed demo
 ```
 
@@ -57,7 +57,7 @@ NEXT_PUBLIC_BASE_URL='https://<your-app>.vercel.app' \
   bun run db:seed
 ```
 
-A leading environment variable wins over `.env.local`, so nothing needs editing. This wipes and reseeds the demo comp — Mayuri 2027, eight competing teams, three judges, a four-criterion fusion rubric normalized by z-score with a head-to-head tiebreak — and prints four links:
+A leading environment variable wins over `.env.local`, so nothing needs editing. This wipes and reseeds the demo comp — Mayuri 2027, eight competing teams **and one applicant**, three judges, a four-criterion fusion rubric normalized by z-score with a head-to-head tiebreak — and prints four links:
 
 ```
 Board (open on a laptop):
@@ -70,6 +70,14 @@ Judges (one per phone):
 ```
 
 The raw tokens are shown exactly once. Only their sha256 is stored. Text the judge links; open the board link on the laptop you are screen-sharing.
+
+**The comp seeds with registration `open` and a live public form**, which is what the money beat's
+closing step and ADJ·3's page both need. Two payments are seeded as background — UMD Moksha settled
+in full, Pitt Nrityamala's hotel still outstanding — so the money screen opens on real numbers
+rather than nine zeroes. **Neither is a step below.** PRD §14's two exhibits, BU Dheem's $97.01 and
+the $2,160 lump, are deliberately *not* seeded, because the beat types them in front of the
+prospect: a row the script asks for that already exists does not merely look redundant, it is
+refused by the allocation ceiling, mid-call.
 
 The seed proves each of these links resolves against the live schema before printing them, so a clean `db:seed` is itself the health check — a seed that cannot mint a working board *or* judge link fails loudly instead of handing you a dead one. If you forget the `NEXT_PUBLIC_BASE_URL` above, the links fall back to `localhost` and the seed prints a `⚠` saying so — localhost links open on your laptop and 404 on a phone. Run `db:doctor` any time afterward to re-confirm without reseeding.
 
@@ -107,6 +115,71 @@ So ask about money first, and ask about the last comp, not the next one:
 You are listening for their version of the $2,837-vs-"true amount around 8k" gap in [PAYMENTS.md](PAYMENTS.md). Let them say it. It is far stronger out of their mouth than yours, and it tells you whether this is a real prospect or a polite one.
 
 Then demo. **Ask for their rubric before the call** and pre-seed it (see above) — a board that bothers to send you their criteria is qualifying itself, and their four criteria with their tiebreak land differently than Mayuri's.
+
+## The money beat — first, and only if discovery found a gap
+
+**Run this before the scoring beat, not after it**, and the reason is a property of the product
+rather than a preference about selling: **the roster freezes at the lock.** `teams` lives inside
+`tab_runs.inputs`, so once placements are locked nothing on the roster can move — no acceptance, no
+room count, no status change. A money beat placed after the lock has no moves left in it. That is
+not hypothetical: this section sat at step 11, after the lock at step 5, and opened with *"accept a
+team"* on a roster where every team was already competing. **It could not be run at all**, and
+nobody found out until it was rehearsed end to end against the deployed host.
+
+Order it this way and it also matches what just happened in the room. You asked about money first,
+they described their version of the $5k gap, and this answers it while it is still in the air.
+Scoring is the credential; this is the pain.
+
+Follow **Who owes what** from the board screen.
+
+The demo seeds **RU Natya** as `applied` — Mayuri 2026 had 38 teams apply for 8 slots, so an
+applicant is the normal state of that roster, and it is the team this whole beat runs on.
+
+**1. Money arrives before obligations do.** **A team sent one $2,160 Venmo labelled "hotel,
+security deposit & reg fees"** — this is the real Mayuri 2026 lump, and the hand-unbundling of it is
+PRD §14's headline exhibit. Record it against RU Natya, which has not been accepted yet and
+therefore owes nothing. It holds as **unattached credit** rather than being refused. Say why: a team
+pays a deposit to hold a slot, and a system that can only accept money against an existing bill
+cannot record the payment that actually happened.
+
+**2. Accept the team.** It now owes what the schedule says — per dancer, per room, deposit —
+generated in the same act that accepted it. There is no separate step where somebody remembers to
+bill.
+
+**3. Point at the line it would not bill.** RU Natya has no room count, so the hotel line reads
+**"not billed — room count unknown"** rather than $0.00. Say why out loud: a $0 hotel charge is a
+lie a treasurer believes in December and finds in April. Then fill the room count in on the roster
+screen — the two boxes beside the team — and watch $560 appear. The bill follows the fact, in the
+same act, and the team's total lands at **$1,780**.
+
+**4. Now unbundle the lump.** Split it across all three charges from the unattributed panel. Note
+out loud that **the balance did not move** when you attached it: the money was always counted, and
+what changed is that you can now say what it was for. $2,160 against $1,780 leaves **$380 still
+unattached**, stated on the screen rather than lost — which is what a $5,000 gap is made of.
+
+**5. Record the one that arrives short.** **BU Dheem's $100 deposit landed as $97.01**: type the
+gross and the fee the bank shows, and the team is credited the full $100 while the processor's cut
+is recorded as the org's cost rather than a hole.
+
+**6. Tick a row off against the bank.** Under **What arrived**, mark a payment matched. That is the
+column a treasurer works down beside a statement, and the reason the second pass through a season
+does not start from nothing.
+
+**7. Download both CSVs and put them beside the totals on screen.** *Who owes* is one row per team
+and matches the screen, because the total is arithmetic over exactly the rows above it. *Payments*
+is one row per transaction — the bank's own shape — with gross, fee, net and the reconciliation
+mark.
+
+Then the closing question for this half:
+
+> When a team says it already paid, how long does it take you to find out whether that's true?
+
+**Say what is not built, because they will find out anyway.** No card processing and no Stripe:
+every row here is entered by hand on a rail the system records and never moves. That is deliberate —
+the reconciliation gap is closed by the ledger, and routing would buy automatic ingestion, not
+correctness. Also no receipts and no automatic reminders; both need a comms layer that does not
+exist. If they want card rails, that is a thing to hear from a founding partner rather than a thing
+to guess at, which makes it an ask, not an apology.
 
 ## The five minutes
 
@@ -154,18 +227,11 @@ The proof lives in the lock: the snapshot re-runs and returns the same placement
 
 **Aside, if a judge's link comes up.** Any judge can be revoked from the board screen mid-comp. The link stops opening; their scores stand and still count. Revoking is not a retraction.
 
-**11. The money beat — only if the discovery in step 0 found a reconciliation gap.** Scoring is the credential; this is the pain. Follow **Who owes what** from the board screen.
-
-- Accept a team on the roster and come back. It now owes what the schedule says — per dancer, per room, deposit — generated in the same act that accepted it. There is no separate step where somebody remembers to bill.
-- Record the payment the way it actually arrives. **BU Dheem's $100 deposit landed as $97.01**: type the gross and the fee the bank shows, and the team is credited the full $100 while the processor's cut is recorded as the org's cost rather than a hole.
-- Then the one that lands: **NCSU sent one $2,160 Venmo labelled "hotel, security deposit & reg fees."** Record it against a team that has not been accepted yet — it holds as credit, because money arrives before obligations do. Accept the team, then split the lump across all three charges from the unattributed panel. Note out loud that the balance did not move when you attached it: the money was always counted, what changed is that you can now say what it was for.
-- Download the CSV and put it beside the totals on screen. Same number, because the total is arithmetic over exactly the rows above it.
-
-Then the closing question for this half:
-
-> When a team says it already paid, how long does it take you to find out whether that's true?
-
-**Say what is not built, because they will find out anyway.** No card processing and no Stripe: every row here is entered by hand on a rail the system records and never moves. That is deliberate — the reconciliation gap is closed by the ledger, and routing would buy automatic ingestion, not correctness. Also no receipts and no automatic reminders; both need a comms layer that does not exist. If they want card rails, that is a thing to hear from a founding partner rather than a thing to guess at, which makes it an ask, not an apology.
+**11. Close the registration window, if they asked how a season starts.** On the roster screen, the
+window says `open` and carries the public form's address. Closing it is one click and the form stops
+accepting applications — including for a captain who already had the page open, because the action
+re-resolves the comp rather than trusting the render. It runs forward only: nothing reopens a comp
+whose roster is being scored.
 
 ## What to say when they push back
 
@@ -175,9 +241,9 @@ Then the closing question for this half:
 
 **"Our league might build this."** Good — introduce me. If Origins or NDDL wants an official tabulation layer, that is the best outcome on the board, not the worst.
 
-**"What about payments?"** Not an objection — it is the buying signal, and it is the pain. **Show it rather than describing it**: run the money beat in step 11. Obligations generated by an acceptance, a $97.01 deposit recorded as $100 credited plus a fee, a $2,160 lump split across three charges, a CSV that matches the screen. [PAYMENTS.md](PAYMENTS.md) is still the thing to send afterward for the part that is *not* built — ACH-first routing and what card rails would cost them. Then ask them to sign.
+**"What about payments?"** Not an objection — it is the buying signal, and it is the pain. **Show it rather than describing it**: run the money beat above, before the lock. Obligations generated by an acceptance, a hotel line withheld with a stated reason and then filled in, a $97.01 deposit recorded as $100 credited plus a fee, a $2,160 lump split across three charges, a CSV that matches the screen. [PAYMENTS.md](PAYMENTS.md) is still the thing to send afterward for the part that is *not* built — ACH-first routing and what card rails would cost them. Then ask them to sign.
 
-**"Could you also do hospitality / rooming?"** Not built, and not next. Say why, because the why *is* the close: you cannot assign rooms to teams you do not have a paid roster for. Rooming sits directly on top of registration and payments — the system already bills per room (`per_room_cents`, a `hotel` charge) and there is nothing underneath it. So: **signing is what builds the thing that makes room management possible.** Write the request down as evidence in [PIPELINE.md](PIPELINE.md); do not write it into the build.
+**"Could you also do hospitality / rooming?"** Not built, and not next. Say why, because the why *is* the close: you cannot assign rooms to teams you do not have a paid roster for. Rooming sits directly on top of registration and payments — the system already records a room count and bills per room (`per_room_cents`, a `hotel` charge), and there is nothing above it. So: **signing is what builds the thing that makes room management possible.** Write the request down as evidence in [PIPELINE.md](PIPELINE.md); do not write it into the build.
 
 Free sharpens this trap rather than dulling it. With no price to haggle over, "build me X and we'll use it" becomes the only thing a board has left to offer — and it is not an offer. Trade the feature for the signature, never for the roadmap.
 

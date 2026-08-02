@@ -6,7 +6,6 @@ const charge = (id: string, amountCents: number, paidCents = 0): ChargeLineView 
   id,
   kind: "registration",
   amountCents,
-  dueAt: null,
   paidCents,
 });
 

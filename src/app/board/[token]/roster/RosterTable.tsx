@@ -6,7 +6,7 @@ import type { CustomField, TeamStatus } from "@/db/schema";
 import type { RosterTeamView } from "@/lib/auth/scope";
 import { describeBalance, formatCents } from "@/lib/money/format";
 import { allowedFrom } from "@/lib/roster/transitions";
-import { setTeamStatusAction, setWaitlistRankAction } from "../actions";
+import { setTeamBillingAction, setTeamStatusAction, setWaitlistRankAction } from "../actions";
 import { IDLE } from "../state";
 
 const stepClass =
@@ -46,6 +46,80 @@ function BalanceCell({ team }: { team: RosterTeamView }) {
         {formatCents(paidCents)} of {formatCents(owedCents)}
       </span>
     </div>
+  );
+}
+
+const countClass =
+  "tabular w-12 rounded border border-border bg-transparent px-1 py-0.5 text-caption text-heading focus:border-primary focus:outline-none";
+
+/**
+ * The two numbers a team is billed on, and the only place either can be stated.
+ *
+ * `rooms` had no writer outside the seed until now, so a comp charging per room could not bill one
+ * to any team that registered through the product — `generateCharges` withheld the line and said
+ * "room count unknown", correctly and permanently. `rosterSize` arrived on the application and then
+ * could never be corrected, so a team that lost two dancers in February kept February's bill.
+ *
+ * Blank is *not yet known* and 0 is a stated zero — the distinction `BillableTeam` draws and the
+ * whole gap machinery rests on — so the input is left empty rather than defaulted, and the server
+ * parses "" back to null rather than to `Number("")`.
+ */
+function BillingCell({
+  team,
+  token,
+  locked,
+  action,
+  pending,
+}: {
+  team: RosterTeamView;
+  token: string;
+  locked: boolean;
+  action: (payload: FormData) => void;
+  pending: boolean;
+}) {
+  if (locked) {
+    return (
+      <span className="tabular text-caption text-muted">
+        {team.rosterSize ?? "—"} / {team.rooms ?? "—"}
+      </span>
+    );
+  }
+
+  return (
+    <form action={action} className="flex items-center gap-1">
+      <input type="hidden" name="token" value={token} />
+      <input type="hidden" name="teamId" value={team.id} />
+      <input
+        type="number"
+        name="rosterSize"
+        min={0}
+        step={1}
+        defaultValue={team.rosterSize ?? ""}
+        placeholder="—"
+        aria-label={`Dancers for ${team.name}`}
+        data-testid={`billing-dancers-${team.bidCode}`}
+        className={countClass}
+      />
+      <input
+        type="number"
+        name="rooms"
+        min={0}
+        step={1}
+        defaultValue={team.rooms ?? ""}
+        placeholder="—"
+        aria-label={`Rooms for ${team.name}`}
+        data-testid={`billing-rooms-${team.bidCode}`}
+        className={countClass}
+      />
+      <button
+        type="submit"
+        disabled={pending}
+        data-testid={`billing-save-${team.bidCode}`}
+        className={stepClass}
+      >
+        save
+      </button>
+    </form>
   );
 }
 
@@ -123,6 +197,7 @@ export function RosterTable({
 }) {
   const [state, formAction, pending] = useActionState(setTeamStatusAction, IDLE);
   const [rankState, rankAction, rankPending] = useActionState(setWaitlistRankAction, IDLE);
+  const [billingState, billingAction, billingPending] = useActionState(setTeamBillingAction, IDLE);
 
   const counts = roster.reduce<Record<string, number>>((acc, team) => {
     acc[team.status] = (acc[team.status] ?? 0) + 1;
@@ -160,7 +235,9 @@ export function RosterTable({
           <tr className="border-b border-border-soft text-left">
             <th className={cx(eyebrowClass, "pb-2")}>Team</th>
             <th className={cx(eyebrowClass, "pb-2")}>Bid</th>
-            <th className={cx(eyebrowClass, "pb-2")}>Dancers</th>
+            <th className={cx(eyebrowClass, "pb-2")} title="What this team is billed on">
+              Dancers / rooms
+            </th>
             <th className={cx(eyebrowClass, "pb-2")}>Application</th>
             <th className={cx(eyebrowClass, "pb-2")}>Balance</th>
             <th className={cx(eyebrowClass, "pb-2")}>Status</th>
@@ -191,7 +268,15 @@ export function RosterTable({
                 )}
               </td>
               <td className="tabular py-2.5 pr-3 text-muted">{team.bidCode}</td>
-              <td className="tabular py-2.5 pr-3 text-muted">{team.rosterSize ?? "—"}</td>
+              <td className="py-2.5 pr-3">
+                <BillingCell
+                  team={team}
+                  token={token}
+                  locked={locked}
+                  action={billingAction}
+                  pending={billingPending}
+                />
+              </td>
               <td className="py-2.5 pr-3">
                 <ApplicationCell team={team} fields={fields} />
               </td>
@@ -257,6 +342,19 @@ export function RosterTable({
           ))}
         </tbody>
       </table>
+
+      {billingState.message && (
+        <p
+          role="status"
+          data-testid="roster-billing-message"
+          className={cx(
+            "mt-3 text-caption",
+            billingState.status === "error" ? "text-danger" : "text-muted",
+          )}
+        >
+          {billingState.message}
+        </p>
+      )}
 
       {rankState.message && (
         <p

@@ -510,3 +510,56 @@ test("the lock freezes the roster, and the server is what says so", async ({ bro
 
   await context.close();
 });
+
+/**
+ * The registration window, and the instrument that did not exist for it.
+ *
+ * `comps.status` gates the public form and had one writer in the whole repo — the seed script. So a
+ * board could open registration from a config and then had no way to close it: the only other path
+ * was a reseed, which replaces the comp and reissues every token (ADR-0013), killing the board and
+ * judge links already handed out. Closing a form meant destroying the comp.
+ */
+test("a board opens and closes its own registration, and the public form follows", async ({
+  browser,
+}) => {
+  const comp = seed();
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  await page.goto(`/board/${comp.boardToken}/roster`);
+  await expect(page.getByTestId("comp-status")).toHaveText("open");
+
+  // The board can see the address of the thing it is opening and closing.
+  await expect(page.getByTestId("public-form-link")).toHaveText(`/register/${ORG}/${COMP}`);
+
+  const applicant = await context.newPage();
+  await applicant.goto(`/register/${ORG}/${COMP}`);
+  await expect(applicant.getByTestId("registration-form")).toBeVisible();
+
+  await page.getByTestId("comp-status-live").click();
+  await expect(page.getByTestId("comp-status-message")).toContainText("registration form is closed");
+  await expect(page.getByTestId("comp-status")).toHaveText("live");
+
+  // The form is gone for anyone arriving now...
+  const late = await context.newPage();
+  await late.goto(`/register/${ORG}/${COMP}`);
+  await expect(late.getByTestId("registration-form")).toHaveCount(0);
+
+  // ...and for the applicant who already had it open, which is the case the page check cannot
+  // catch and `applyAction` re-resolves for.
+  await applicant.getByLabel("Team name").fill("Too Late");
+  await applicant.getByLabel("Contact name").fill("Too Late");
+  await applicant.getByLabel("Contact email").fill("late@example.com");
+  await applicant.getByLabel("Audition video link").fill("https://example.com/audition");
+  await applicant.getByLabel("Roster size").fill("20");
+  await applicant.getByLabel("Accept the waiver").check();
+  await applicant.getByRole("button", { name: "Apply" }).click();
+  await expect(applicant.getByText("Registration for this comp is not open.")).toBeVisible();
+
+  // The lifecycle runs forward only: nothing offers a way back to open, because an application
+  // must not land against a comp whose roster is being scored.
+  await expect(page.getByTestId("comp-status-open")).toHaveCount(0);
+
+  await context.close();
+});
