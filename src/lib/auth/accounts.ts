@@ -19,6 +19,7 @@ import {
   comps,
   invitations,
   memberships,
+  orgs,
   people,
   sessions,
   teams,
@@ -234,6 +235,42 @@ export const resolveLiaisonActor = async (
     personId: user.personId,
     personName: membership.personName,
   };
+};
+
+export type SignedInComp = {
+  compId: string;
+  compName: string;
+  orgSlug: string;
+  compSlug: string;
+  role: AccountRole;
+  teamId: string | null;
+};
+
+/**
+ * Every comp this session has a live membership at.
+ *
+ * The landing page's read, and the reason it exists rather than the app guessing: a person may be a
+ * captain at one comp and a liaison at another, and the same login covers both. Nothing here is a
+ * window — it resolves no row in a comp, it lists which comps the holder may open at all.
+ */
+export const compsForSession = async (token: string): Promise<SignedInComp[]> => {
+  const user = await resolveSessionUser(token);
+  if (!user) return [];
+
+  return db
+    .select({
+      compId: comps.id,
+      compName: comps.name,
+      orgSlug: orgs.slug,
+      compSlug: comps.slug,
+      role: memberships.role,
+      teamId: memberships.teamId,
+    })
+    .from(memberships)
+    .innerJoin(comps, eq(comps.id, memberships.compId))
+    .innerJoin(orgs, eq(orgs.id, comps.orgId))
+    .where(and(eq(memberships.personId, user.personId), isNull(memberships.revokedAt)))
+    .orderBy(comps.compDate);
 };
 
 export type InvitationView = {

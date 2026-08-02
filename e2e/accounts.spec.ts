@@ -216,3 +216,90 @@ test("a captain is invited for a team, and nobody else is", async ({ page }) => 
   await page.getByTestId("invite-role").selectOption("captain");
   await expect(page.getByTestId("invite-team")).toBeEnabled();
 });
+
+/**
+ * The fourth window, driven through a browser: a captain sees their own team and nothing else.
+ *
+ * The page holds no `teamId` and takes none from the URL — the comp is in the path and the team
+ * comes off the actor's membership — so there is no id here to swap for somebody else's. That is
+ * exactly why `ownTeamForCaptain` was allowed to be a fourth window at all, and it is worth a test
+ * that proves the shape rather than trusting the argument.
+ */
+test("a captain sees their own team's money and no other team", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Meera Iyer",
+    email: "meera@example.com",
+    role: "captain",
+    team: "Accepted Beta",
+  });
+
+  await page.goto(link);
+  await page.getByTestId("credential-password").fill(PASSWORD);
+  await page.getByTestId("credential-confirm").fill(PASSWORD);
+  await page.getByTestId("credential-submit").click();
+
+  // Accepting lands somewhere that goes somewhere -- the journey does not end on a marketing page.
+  await expect(page.getByTestId("my-comps")).toBeVisible();
+  await page.getByTestId(`my-comp-${COMP}`).click();
+
+  // M-2 is accepted in the seed: 20 x $70 + 5 x $140 + $100 = $2,200, all unpaid.
+  await expect(page.getByTestId("my-team")).toBeVisible();
+  await expect(page.getByTestId("my-balance")).toHaveAttribute("data-balance-cents", "220000");
+  await expect(page.getByTestId("my-charge-registration")).toBeVisible();
+
+  // Their own team, and the other one is nowhere on the page.
+  await expect(page.getByText("Accepted Beta")).toBeVisible();
+  await expect(page.getByText("Accepted Gamma")).toHaveCount(0);
+  await expect(page.getByText("M-3")).toHaveCount(0);
+});
+
+test("a captain's session is not authority at a comp they are not in", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Sana Khan",
+    email: "sana@example.com",
+    role: "captain",
+    team: "Accepted Beta",
+  });
+  await page.goto(link);
+  await page.getByTestId("credential-password").fill(PASSWORD);
+  await page.getByTestId("credential-confirm").fill(PASSWORD);
+  await page.getByTestId("credential-submit").click();
+  await expect(page.getByTestId("my-comps")).toBeVisible();
+
+  // A perfectly valid session, pointed at a comp the membership does not name. Two lookups rather
+  // than one is what makes this a 404 instead of a view of somebody else's comp.
+  const response = await page.goto(`/my/${crypto.randomUUID()}`);
+  expect(response?.status()).toBe(404);
+});
+
+test("signing out kills the session rather than only the cookie", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Kiran Das",
+    email: "kiran@example.com",
+    role: "captain",
+    team: "Accepted Beta",
+  });
+  await page.goto(link);
+  await page.getByTestId("credential-password").fill(PASSWORD);
+  await page.getByTestId("credential-confirm").fill(PASSWORD);
+  await page.getByTestId("credential-submit").click();
+  await expect(page.getByTestId("my-comps")).toBeVisible();
+
+  const cookie = (await page.context().cookies()).find((c) => c.name === "callboard_session");
+  expect(cookie?.value).toBeTruthy();
+
+  await page.getByTestId("sign-out").first().click();
+  await expect(page).toHaveURL(/\/sign-in/);
+
+  // Putting the cookie back proves the row is what died, not the browser's copy of it. A JWT could
+  // not have given us this, which is the whole reason a session is a row (ADR-0016).
+  await page.context().addCookies([{ ...cookie!, value: cookie!.value }]);
+  await page.goto("/");
+  await expect(page.getByTestId("my-comps")).toHaveCount(0);
+});
