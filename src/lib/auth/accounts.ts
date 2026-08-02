@@ -302,6 +302,54 @@ export type Invited = { token: string; invitationId: string };
  * the unspent rows, so the previous envelope is revoked here and the index refuses a second one if
  * two board members click at the same moment.
  */
+/**
+ * The org a comp belongs to. A `BoardActor` carries a `compId` and not an `orgId`, because until now
+ * nothing above the comp was writable — and people are org-scoped, so inviting one needs it.
+ */
+export const orgOfComp = async (compId: string): Promise<string | null> => {
+  const [row] = await db
+    .select({ orgId: comps.orgId })
+    .from(comps)
+    .where(eq(comps.id, compId))
+    .limit(1);
+  return row?.orgId ?? null;
+};
+
+export type InvitedPerson = {
+  personId: string;
+  name: string;
+  email: string | null;
+  role: AccountRole;
+  teamName: string | null;
+  acceptedAt: Date | null;
+  revokedAt: Date | null;
+  expiresAt: Date;
+};
+
+/**
+ * Who has been invited to this comp and where each stands. Comp-scoped off the actor, resolving no
+ * id — `registrationWindowFor`'s shape, not a window.
+ */
+export const listInvitationsForBoard = async (actor: {
+  compId: string;
+}): Promise<InvitedPerson[]> =>
+  db
+    .select({
+      personId: invitations.personId,
+      name: people.name,
+      email: people.email,
+      role: invitations.role,
+      teamName: teams.name,
+      acceptedAt: invitations.acceptedAt,
+      revokedAt: invitations.revokedAt,
+      expiresAt: invitations.expiresAt,
+    })
+    .from(invitations)
+    .innerJoin(people, eq(people.id, invitations.personId))
+    .leftJoin(teams, eq(teams.id, invitations.teamId))
+    .where(and(eq(invitations.compId, actor.compId), eq(invitations.purpose, "invite")))
+    .orderBy(invitations.createdAt) as Promise<InvitedPerson[]>;
+
 export const invite = async (
   actor: { compId: string; personId: string; orgId: string },
   input: { email: string; name: string; role: AccountRole; teamId?: string | null },

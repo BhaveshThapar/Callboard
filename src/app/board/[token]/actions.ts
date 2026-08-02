@@ -15,6 +15,9 @@ import {
 } from "@/db/schema";
 import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
+import { invite, orgOfComp } from "@/lib/auth/accounts";
+import type { AccountRole } from "@/db/schema";
+import { ACCOUNT_ROLES } from "@/db/schema";
 import type { DepositState } from "@/lib/money/deposit";
 import { DEPOSIT_STATES } from "@/lib/money/deposit";
 import { advanceDeposit } from "@/lib/money/deposits";
@@ -35,6 +38,7 @@ import {
   listBoardForBoard,
   NOT_COMPETING,
   resolveBoardActor,
+  resolveRosterTeamForBoard,
   resolveTeamForBoard,
 } from "@/lib/auth/scope";
 import { setCompStatus } from "@/lib/comp/status";
@@ -814,4 +818,60 @@ export const addDeductionAction = async (
 
   revalidatePath(`/board/${token}`);
   return { status: "ok", message: `Applied −${points} to the team.` };
+};
+
+/**
+ * The minting path, reachable at last ([ADR-0016]).
+ *
+ * ADR-0011 refused to build this and named the reason: *"issuing a credential to a person for a comp
+ * is board management, and that is the thin end of Module A."* It still is; the difference is that
+ * Module A is now built and the features that need to reach a specific human are what is left.
+ *
+ * What arrives here is an email and a role, never a `personId`: the board is naming somebody who may
+ * not exist yet, and `invite` finds-or-creates the person the way `findOrCreatePeople` already does.
+ * A `teamId` **is** a claim and resolves through `listRosterForBoard`, because inviting a captain
+ * for another comp's team is exactly the shape `resolveRosterTeamForBoard` exists to refuse.
+ *
+ * [ADR-0016]: ../../../../docs/decisions/0016-accounts-for-people-who-stay-links-for-people-who-visit.md
+ */
+export const inviteAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const email = String(formData.get("email") ?? "").trim();
+  const name = String(formData.get("name") ?? "").trim();
+  const role = String(formData.get("role") ?? "");
+  const teamId = String(formData.get("teamId") ?? "").trim();
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (!ACCOUNT_ROLES.includes(role as AccountRole)) {
+    return { status: "error", message: "Pick what they are being invited as." };
+  }
+  if (role === "captain" && !teamId) {
+    return { status: "error", message: "A captain is invited for a team. Pick one." };
+  }
+  // The teamId is a claim, resolved against the read that produced the form it arrived on.
+  if (teamId && !(await resolveRosterTeamForBoard(actor, teamId))) {
+    return { status: "error", message: "That team is not in this comp." };
+  }
+
+  const orgId = await orgOfComp(actor.compId);
+  if (!orgId) return { status: "error", message: "This comp is no longer here." };
+
+  const result = await invite(
+    { compId: actor.compId, personId: actor.personId, orgId },
+    { email, name, role: role as AccountRole, teamId: role === "captain" ? teamId : null },
+  );
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/board/${token}/people`);
+  return {
+    status: "ok",
+    // The link is shown once, exactly as a seeded token is: only its sha256 is stored, so nothing
+    // in the product can recover it afterwards. Until the comms engine exists, a human sends it.
+    message: `Invitation for ${email}: ${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/invite/${result.value.token}`,
+  };
 };

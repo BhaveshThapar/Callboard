@@ -46,6 +46,13 @@ export default async function RosterPage({ params }: { params: Promise<{ token: 
               Who owes what →
             </Link>
             <Link
+              href={`/board/${token}/people`}
+              data-testid="people-link"
+              className="text-caption text-muted underline underline-offset-2 hover:text-primary"
+            >
+              People →
+            </Link>
+            <Link
               href={`/board/${token}`}
               className="text-caption text-muted underline underline-offset-2 hover:text-primary"
             >
