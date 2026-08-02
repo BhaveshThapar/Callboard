@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
+import { hostnameOf } from "../src/db/protected";
 import { MONEY_CONSTRAINTS } from "../src/db/schema/money";
 import { CHAIN_INDEXES } from "../src/db/schema/scores";
 
@@ -42,12 +43,52 @@ const doctor = (): { ok: boolean; output: string } => {
   }
 };
 
-test("db:doctor passes on a freshly seeded demo", () => {
+test("db:doctor passes on a freshly seeded demo, and names the database it checked", () => {
   seed();
 
   const health = doctor();
   expect(health.ok).toBe(true);
   expect(health.output).toContain("healthy");
+
+  // The verdict is worthless without its subject: a clean bill of health for `dev` is what let the
+  // deployed demo stay broken for nineteen days. Derived from the connection string this run used,
+  // not hardcoded, because CI and a laptop point at different branches.
+  const compute = hostnameOf(process.env.DATABASE_URL ?? "")?.split(".")[0];
+  expect(compute).toBeTruthy();
+  expect(health.output).toContain(compute as string);
+});
+
+/**
+ * The check that did not exist on July 13, 2026, when migration `0007` landed and the deployed demo
+ * began returning 500s that nothing noticed for nineteen days.
+ *
+ * The rewind leaves the *schema* intact and moves only the record of it, which is what makes this
+ * the honest test: every other check the doctor runs still passes, so the migration count is the
+ * only thing that can fail. `0007` and `0008` add no index and no CHECK, so no constraint-shaped
+ * check could ever have seen them.
+ */
+test("db:doctor fails a database that is behind the repo, and does not offer to reseed", () => {
+  seed();
+
+  const row = run("e2e/support/break-db.ts", "migration-def").trim();
+  expect(row).toContain("|");
+
+  try {
+    run("e2e/support/break-db.ts", "drop-migration");
+
+    const health = doctor();
+    expect(health.ok).toBe(false);
+    expect(health.output).toContain("1 migration behind");
+    expect(health.output).toContain("db:migrate");
+
+    // A seed does not apply a migration. Offering it would send the operator to the one command
+    // that reissues every link a prospect is holding, and would fix nothing.
+    expect(health.output).not.toContain("db:seed");
+  } finally {
+    run("e2e/support/break-db.ts", "restore-migration", row);
+  }
+
+  expect(doctor().ok).toBe(true);
 });
 
 test("db:doctor fails a database whose chain indexes are missing, and does not offer to reseed", () => {

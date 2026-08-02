@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { isProtectedDatabase, protectedComputeId } from "../protected";
+import { hostnameOf, isProtectedDatabase, protectedComputeId } from "../protected";
 
 const url = (host: string) => `postgresql://neondb_owner:pw@${host}/neondb?sslmode=require`;
 
@@ -63,5 +63,25 @@ describe("isProtectedDatabase", () => {
     expect(protectedComputeId()).toBe(CI);
     expect(isProtectedDatabase(url(`${CI}-pooler.${REGION}`))).toBe(true);
     expect(isProtectedDatabase(url(`${PROD}-pooler.${REGION}`))).toBe(false);
+  });
+});
+
+/**
+ * `db:doctor` prints this beside its verdict, because a preflight that says "healthy" without
+ * naming its target is how the deployed demo stayed broken for nineteen days while a green check
+ * scrolled past for the `dev` branch.
+ */
+describe("hostnameOf", () => {
+  it.each([
+    ["unpooled", `${PROD}.${REGION}`],
+    ["pooled", `${PROD}-pooler.${REGION}`],
+    ["per-binding", `${PROD}-fwr.${REGION}`],
+    ["dev", `${DEV}-pooler.${REGION}`],
+  ])("reads the host out of a %s connection string", (_label, host) => {
+    expect(hostnameOf(url(host))).toBe(host);
+  });
+
+  it("is undefined for a string that will not parse, so the caller can say so", () => {
+    expect(hostnameOf("not a connection string")).toBeUndefined();
   });
 });

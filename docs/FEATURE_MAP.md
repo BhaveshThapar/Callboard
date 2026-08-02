@@ -10,13 +10,17 @@ This map **sequences; it does not authorize.** The PRD argues against building (
 
 | | |
 |---|---|
-| **Live** | shipped and deployed at `callboard-eta.vercel.app` |
+| **Live** | shipped, deployed **and migrated** at `callboard-eta.vercel.app` |
 | **Designed** | specced in `docs/`, not built |
 | **Won't build** | the tarpit — stays in the tools that already do it |
 
 Counts: **19 live** — 10 (Module B) + 7 (Module A) + 2 (Adjacent) · **7 designed** (Module A) · **6 designed** (the Gita) · the rest below.
 
 **"Live" means a board can reach it.** That sentence had to be added because it was not being kept: A7 and A8 were marked Live for a day while `recordPayment`, `advanceDeposit` and `listDepositsForBoard` had no caller anywhere in the repo — a library the product never executed, and A9's screen with nothing linking to it. Meanwhile `setTeamStatus` generated real charges, so a board using it watched every team it accepted become a permanent debtor. A status word that means "the code exists" is a status word this map cannot be trusted with.
+
+**And "reach it" means on the deployed database, which is the second half and it was false for nineteen days.** From **July 13 to August 1, 2026** every row below marked Live in Module A and ADJ·3 was unreachable: Neon `main` sat at migration `0006` while Vercel served code expecting `0010`, so `/register` and `/c/[org]/[comp]` returned HTTP 500 and the roster and money screens read four tables that did not exist. A1 shipped on July 13 with the migration that broke it; the money spine and ADJ·3 landed on top of an already-broken demo and nobody found out, because the fix for the *first* defect above — checking that code has callers — says nothing about whether the schema underneath it arrived.
+
+Merging is not deploying, and deploying is not migrating. `db:doctor` now counts applied migrations against `drizzle/meta/_journal.json` and prints which compute it just checked, because the preflight that would have caught this on day one was run against `dev` the whole time and printed the same green line.
 
 ---
 

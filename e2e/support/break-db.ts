@@ -205,6 +205,48 @@ switch (command) {
     break;
   }
 
+  /**
+   * The newest applied migration, captured before it is removed so it can be put back verbatim.
+   * Same discipline as `index-def`: the row is never written down a second time, because
+   * `drizzle/meta/_journal.json` is the one definition of what this database ought to have.
+   */
+  case "migration-def": {
+    const result = await db.execute<{ hash: string; created_at: string }>(
+      sql`select hash, created_at from drizzle.__drizzle_migrations order by created_at desc limit 1`,
+    );
+    const row = result.rows[0];
+    if (!row) throw new Error("this database has applied no migrations");
+    console.log(`${row.hash}|${row.created_at}`);
+    break;
+  }
+
+  /**
+   * Rewinds the migration *record* by one without touching the schema it describes.
+   *
+   * That is deliberately not the same thing as un-applying a migration, and it is the sharper test:
+   * the columns stay, so every other check the doctor runs still passes, and the only thing wrong is
+   * that the database says it is behind the repo. A check that only fired once a column went missing
+   * would be the check that already existed.
+   */
+  case "drop-migration": {
+    await db.execute(
+      sql`delete from drizzle.__drizzle_migrations
+           where created_at = (select max(created_at) from drizzle.__drizzle_migrations)`,
+    );
+    console.log("rewound");
+    break;
+  }
+
+  case "restore-migration": {
+    const [hash, createdAt] = need("restore-migration").split("|");
+    await db.execute(
+      sql`insert into drizzle.__drizzle_migrations (hash, created_at)
+          values (${hash}, ${Number(createdAt)})`,
+    );
+    console.log("restored");
+    break;
+  }
+
   default:
     throw new Error(`unknown command: ${command}`);
 }
