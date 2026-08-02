@@ -98,6 +98,16 @@ export const people = pgTable(
     name: text("name").notNull(),
     email: text("email"),
     phone: text("phone"),
+    /**
+     * Suppresses **broadcast** mail and nothing else ([ADR-0020]). A board is entitled to tell
+     * somebody who owes them money that they owe it; a board is not entitled to keep announcing at
+     * somebody who left. A timestamp rather than a boolean, for `waiver_accepted_at`'s reason: a
+     * boolean records a claim and a timestamp records an event, and this is the one somebody would
+     * be asked to produce.
+     *
+     * [ADR-0020]: ../../../docs/decisions/0020-a-message-sends-once.md
+     */
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("people_org_email_unique").on(t.orgId, t.email)],
