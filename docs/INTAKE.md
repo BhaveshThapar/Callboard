@@ -8,8 +8,9 @@ It exists because PRD §13 and the demo script were asking for **two different l
 |---|---|---|---|
 | **Part 1 — your comp** | Rubric, teams, judges, board | It stands up *your* competition, so the next thing you see is your teams and your rubric, not a demo org's | **Yes** — `comp-config.json` → `bun run db:seed --config` |
 | **Part 2 — your money** | Fee schedule, last season's payments | It is what registration and payments get built against, and it is what replaces the deposit | **The fee schedule, yes** — it configures your comp and the product bills from it. **Last season's payments, no** — see below, stated plainly rather than hidden |
+| **Part 3 — your run-of-show** | The Gita workbook, your rooms, your buffers | It is the only place the numbers a schedule engine runs on actually exist | **Not yet** — the engine is being built *from* this, so it is asked for before the code rather than after |
 
-Part 1 is small and has a fast payoff. Part 2 is the one that costs real hours, and that is the point of it.
+Part 1 is small and has a fast payoff. Part 2 is the one that costs real hours, and that is the point of it. Part 3 is the one nobody has been asked for yet, and it is the one that decides whether comp-day mode is real.
 
 ---
 
@@ -68,6 +69,54 @@ This one **is** entered into the product: it becomes your comp's configuration, 
 **Last season's records are different, and we are not going to pretend otherwise.** They are not imported. They go in a folder, and they are what the build is checked against — the $2,160 lump and the $97.01 deposit are test cases before they are anything else. There is no bulk import, and building one before seeing three real boards' exports would be guessing at the format.
 
 **Why ask for it now, then?** Because the founding season is free, and free makes "yes" the cheapest word in the language. There is no deposit to prove a board means it. This is what proves it instead: it costs a treasurer real hours and real internal buy-in, and a board that will not go dig it out was never going to run its comp on this. It is also the difference between a payments system built against a founder's guesses and one built against a real $2,160 lump.
+
+---
+
+## Part 3 — what comp-day mode gets built against
+
+**Send the Gita.** The actual workbook, not a description of it, and not a cleaned copy — the one
+with the formulas in it, the tab somebody inherited from another comp, and the cell where a previous
+author gave up. That last one is not a joke: the honest version of this file is more useful than a
+tidy one, for Part 2's reason.
+
+This is asked for **before** the schedule engine is written rather than after, and that ordering is
+deliberate. The money spine was built against a fee schedule that was the repo's own best guess —
+five fields, calibrated on one comp, and no board had handed one over. It worked, but only because
+five numbers is a small enough guess to be wrong about cheaply. A run-of-show is not five numbers,
+and a wrong one is not discovered by a treasurer in April. It is discovered on stage.
+
+**Your rooms.** How many spaces run in parallel, and what each is for — stage, green room, stretch
+space, tech booth, holding. *(Mayuri runs six.)* The product currently has no idea rooms exist, and
+almost every timing in a Gita is really a statement about a room being free.
+
+**Your buffers — the numbers between the events.** This is the part that only exists in your
+spreadsheet's formulas, and it is the single thing this section is really asking for:
+
+- How long before a team performs does it start walking? Where does it walk *from*?
+- Lobby, stretch, props, tech-in and tech-out — how long is each, and what does each hang off?
+- How much slack is engineered in on purpose — filler acts, exhibition padding, the gap you keep
+  between the last score and the announcement?
+- **How long do the judges actually get to deliberate, and how long do you tell them they get?**
+  *(Mayuri: 20 minutes told, 30 minutes held. If you do something like this, say so — it is real
+  scheduling slack and a system that does not know about it will spend it without telling you.)*
+- Food: when does it arrive, and who eats when?
+- Transport: what has to depart when, and what is it waiting on?
+
+**And the one nobody writes down: what happens when you run late.** Tell the story. The comp where
+you fell forty minutes behind — what moved, what got cut, what you told people, and at what point
+the slack ran out and something had to actually give. This is the requirement for the feature this
+whole section exists for, and it is the one thing that cannot be inferred from a spreadsheet, because
+the spreadsheet is exactly what stops working at that moment.
+
+### Be straight about what happens to it
+
+Nothing is imported. The workbook goes in a folder beside last season's payment records, and the
+buffers become **configuration** — the same shape your fee schedule and your rubric already take, so
+the first real one to arrive is data rather than a migration.
+
+**And a warning that is worth more than the ask:** if your Gita does not fit the shape the engine
+ends up with, that is a fact about the design, not a bug in a parser. Say so loudly. A schedule
+engine calibrated on one comp's workbook is a schedule engine that runs one comp.
 
 ---
 
