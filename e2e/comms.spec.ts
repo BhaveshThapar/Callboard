@@ -33,7 +33,7 @@ const CONFIG = {
   },
   teams: [{ name: "Accepted Beta", bidCode: "M-2", status: "accepted", rosterSize: 20, rooms: 5 }],
   judges: [{ name: "Judge One" }],
-  board: [{ name: "Comms Chair" }],
+  board: [{ name: "Comms Chair", email: "chair@example.com" }],
   feeSchedule: {
     perDancerCents: 7000,
     perRoomCents: 14000,
@@ -101,6 +101,24 @@ test("an unsubscribe stops an announcement and does not stop a dues reminder", (
   comms("queue-twice", COMP, "dues:2027-04");
   expect(comms("sweep", COMP)).toBe("1 1 0 0");
   expect(comms("head", COMP)).toBe("sent");
+});
+
+/**
+ * A person with no address is bounced, not silently skipped and not thrown over.
+ *
+ * Found by accident: a fixture picked an emailless board member and every assertion in this file
+ * quietly became an assertion about suppression instead of about sending. The behaviour was right;
+ * nothing was testing it on purpose. A board that invites somebody by name and never gets an address
+ * for them is ordinary, and "we tried and there was nowhere to send it" has to be in the record.
+ */
+test("a message to somebody with no address bounces, and says why", () => {
+  seed();
+
+  expect(comms("queue-unreachable", COMP, "dues:noaddress")).toBe("queued");
+  expect(comms("sweep", COMP)).toBe("0 0 0 1");
+  expect(comms("head", COMP)).toBe("bounced");
+  // Bounced rather than failed: no number of retries produces an address.
+  expect(comms("states", COMP)).toBe("queued,bounced");
 });
 
 test("the cron endpoint refuses anybody without the secret", async ({ request }) => {

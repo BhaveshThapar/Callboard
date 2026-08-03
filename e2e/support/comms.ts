@@ -5,7 +5,7 @@ config({ path: ".env.local", quiet: true });
 // Imported after dotenv, because `@/db` reads DATABASE_URL when it loads.
 const { db } = await import("@/db");
 const { comps, messageEvents, messages, orgs, people } = await import("@/db/schema");
-const { and, desc, eq } = await import("drizzle-orm");
+const { and, desc, eq, isNotNull, isNull } = await import("drizzle-orm");
 const { enqueue, sweep } = await import("@/lib/comms/outbox");
 
 /**
@@ -25,16 +25,36 @@ if (!command || !compSlug) {
 }
 
 const [comp] = await db
-  .select({ id: comps.id })
+  .select({ id: comps.id, orgId: comps.orgId })
   .from(comps)
   .innerJoin(orgs, eq(orgs.id, comps.orgId))
   .where(eq(comps.slug, compSlug))
   .limit(1);
 if (!comp) throw new Error(`no comp ${compSlug}`);
 
+/**
+ * One person, and always the same one.
+ *
+ * Both halves matter and both were wrong. **Scoped to this comp's org**, because `people` is
+ * org-scoped and survives a comp being replaced — an unscoped pick returns somebody another spec
+ * seeded, so the run marks one person unsubscribed and queues a message to a different one. And
+ * **ordered**, because `limit(1)` without an `ORDER BY` lets Postgres return a different row per
+ * call, which turns the same mismatch into a coin flip that only shows up in a full suite.
+ *
+ * Passing alone and failing in a run of 92 is the signature of exactly this, and it is a bug in the
+ * fixture rather than in the product.
+ */
 const somebody = async (): Promise<string> => {
-  const [row] = await db.select({ id: people.id }).from(people).limit(1);
-  if (!row) throw new Error("no people seeded");
+  const [row] = await db
+    .select({ id: people.id })
+    .from(people)
+    // Reachable, because a person with no address is a *different* test -- the sweep bounces those
+    // with "no email address on file", which is right and which quietly turned every assertion in
+    // this file into an assertion about suppression instead of about sending.
+    .where(and(eq(people.orgId, comp.orgId), isNotNull(people.email)))
+    .orderBy(people.createdAt, people.id)
+    .limit(1);
+  if (!row) throw new Error(`nobody in the org behind ${compSlug} has an email address`);
   return row.id;
 };
 
@@ -124,6 +144,30 @@ switch (command) {
         boardName: "Comms Chair",
       },
       dedupeKey: rest[0] ?? "announce:test",
+    });
+    console.log(result.ok ? "queued" : result.reason);
+    break;
+  }
+
+  /**
+   * Queues to somebody with **no address**, which a seeded board member without an email is. The
+   * sweep must bounce it rather than throw or send nothing quietly.
+   */
+  case "queue-unreachable": {
+    const [row] = await db
+      .select({ id: people.id })
+      .from(people)
+      .where(and(eq(people.orgId, comp.orgId), isNull(people.email)))
+      .orderBy(people.createdAt, people.id)
+      .limit(1);
+    if (!row) throw new Error(`everybody in the org behind ${compSlug} has an address`);
+
+    const result = await enqueue({
+      compId: comp.id,
+      personId: row.id,
+      template: "dues.reminder",
+      payload,
+      dedupeKey: rest[0] ?? "dues:unreachable",
     });
     console.log(result.ok ? "queued" : result.reason);
     break;
