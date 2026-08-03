@@ -150,14 +150,16 @@ PRD §9, the highest-value hard problem. The existing spreadsheet is a *compiler
 
 ---
 
-## Phase 06 — Spine completion · coordination & comms · **Designed**
+## Phase 06 — Spine completion · coordination & comms · **C2's engine built, not yet reachable · C1 designed**
 
 Built after paying customers exist. The comms engine is the keystone: it reads the same record and is the transport under late-payer reminders (A10) and Gita pushes (G5).
 
-| ID | Feature | Detail | Source |
-|---|---|---|---|
-| **C1** | Liaison & volunteer coordination | Person ↔ duty ↔ time assignments, plus an SWA-training checklist. The `assignments` table is already modeled. | PRD §7.3 |
-| **C2** | Comms engine | Announcements and pushes firing off the same record — dues reminders off payment status, schedule pushes off the Gita. Not sold standalone; delivered as the record's automatic output. | PRD §7.3, §12 |
+**C2's engine landed on August 3, 2026 and C2 is deliberately still not `Live`**, which is this map's own rule applied to the thing that would most like to break it. The outbox, the chain, the claim, the transport, the scheduler and the `db:doctor` checks are all built, migrated (`0013`) and on the deployed database — and **no feature queues a message**, so there is nothing a board can reach. A status word that records what was written rather than what a board can reach is not a record of anything; that sentence was written about A7 and A8 and it applies here before anybody has a chance to be wrong about it. It becomes `Live` when A10 gives it a caller, and not one commit sooner.
+
+| ID | Feature | Status | Detail | Source |
+|---|---|---|---|---|
+| **C1** | Liaison & volunteer coordination | Designed | Person ↔ duty ↔ time assignments, plus an SWA-training checklist. `comp_roles` is the table being kept for it, and it is still the one table in the schema with a writer and no reader. | PRD §7.3 |
+| **C2** | Comms engine | Engine built · **not reachable** | Announcements and pushes firing off the same record — dues reminders off payment status, schedule pushes off the Gita. Not sold standalone; delivered as the record's automatic output. **A message sends once and a unique index is what says so** ([ADR-0020](decisions/0020-a-message-sends-once.md)): `messages_comp_dedupe_unique` refuses a second enqueue, and `messages.state` is denormalized because a chain cannot be claimed atomically, so the claim is one guarded `UPDATE` — `releaseAllocation`'s shape. `failed` is retryable and `bounced` is not; a message stuck mid-send is **reported and never auto-retried**, because that is the crash-after-send footprint and retrying it emails somebody twice. Sending is opt-in: without a key and a from-address the transport records instead, so a preview deployment cannot mail a real board. Scheduled from GitHub Actions rather than Vercel Cron, which refused a five-minute schedule on the current plan. | ADR-0020, PRD §7.3, §12, `messages`, `message_events` |
 
 ---
 
