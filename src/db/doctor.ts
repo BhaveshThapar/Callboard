@@ -13,6 +13,7 @@ import {
   CHAIN_INDEX_NAMES,
   comps,
   ACCOUNT_CONSTRAINT_NAMES,
+  COMMS_CONSTRAINT_NAMES,
   MONEY_CONSTRAINT_NAMES,
   judgeAssignments,
   orgs,
@@ -35,6 +36,14 @@ type MoneyObservation = Pick<
 type SchemaObservation = Pick<Observed, "migrationsApplied" | "migrationsExpected">;
 
 type AccountObservation = Pick<Observed, "accountGuaranteeEnforced" | "duplicateInvitations">;
+
+type CommsObservation = Pick<
+  Observed,
+  "commsGuaranteeEnforced" | "driftingMessages" | "stuckMessages"
+>;
+
+/** The tables migration `0013` creates. Absent means C2 has not been applied here. */
+const COMMS_TABLES = ["messages", "message_events"] as const;
 
 /** The tables migration `0012` creates. Absent means P1 has not been applied here. */
 const ACCOUNT_TABLES = ["users", "memberships", "sessions", "invitations"] as const;
@@ -278,6 +287,70 @@ const observeAccounts = async (): Promise<AccountObservation> => {
 };
 
 /**
+ * Whether the outbox can still send something twice, and whether anything is stuck mid-send.
+ *
+ * The only subsystem where the doctor reports on something the product cannot take back. A stuck
+ * message is deliberately *not* swept up by a retry (ADR-0020): claimed-and-never-resolved is what a
+ * send that succeeded and then crashed looks like, and retrying it emails somebody a second time.
+ */
+const observeComms = async (): Promise<CommsObservation> => {
+  const [present, tables] = await Promise.all([
+    db.execute<{ name: string }>(sql`
+      select indexname as name from pg_indexes where schemaname = 'public'
+      union
+      select conname as name from pg_constraint
+    `),
+    db.execute<{ tablename: string }>(sql`
+      select tablename from pg_tables where schemaname = 'public'
+    `),
+  ]);
+
+  const names = new Set(present.rows.map((row) => row.name));
+  const commsGuaranteeEnforced = COMMS_CONSTRAINT_NAMES.every((name) => names.has(name));
+
+  const existing = new Set(tables.rows.map((row) => row.tablename));
+  if (!COMMS_TABLES.every((table) => existing.has(table))) {
+    return { commsGuaranteeEnforced, driftingMessages: [], stuckMessages: [] };
+  }
+
+  // The cache against the record. `distinct on` takes each chain's head by `seq`, which is the same
+  // definition `currentState` uses one directory over.
+  const drifting = await db.execute<{ message_id: string; state: string; head: string }>(sql`
+    select m.id as message_id, m.state, h.state as head
+      from messages m
+      join (
+        select distinct on (message_id) message_id, state
+          from message_events
+         order by message_id, seq desc
+      ) h on h.message_id = m.id
+     where m.state <> h.state
+  `);
+
+  const stuck = await db.execute<{ message_id: string; minutes: number }>(sql`
+    select m.id as message_id,
+           floor(extract(epoch from (now() - max(e.created_at))) / 60)::int as minutes
+      from messages m
+      join message_events e on e.message_id = m.id and e.state = 'sending'
+     where m.state = 'sending'
+     group by m.id
+    having now() - max(e.created_at) > interval '15 minutes'
+  `);
+
+  return {
+    commsGuaranteeEnforced,
+    driftingMessages: drifting.rows.map((row) => ({
+      messageId: row.message_id,
+      state: row.state,
+      head: row.head,
+    })),
+    stuckMessages: stuck.rows.map((row) => ({
+      messageId: row.message_id,
+      minutes: row.minutes,
+    })),
+  };
+};
+
+/**
  * Whether a comp's locked results can still fork on this database, and whether one already has.
  *
  * Unlike everything else here this is a fact about the database, not about the seeded demo, so it is
@@ -330,11 +403,12 @@ const observeChain = async (): Promise<ChainObservation> => {
  * against, and was not.
  */
 export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
-  const [schema, chain, money, accounts, [comp]] = await Promise.all([
+  const [schema, chain, money, accounts, comms, [comp]] = await Promise.all([
     observeSchema(),
     observeChain(),
     observeMoney(),
     observeAccounts(),
+    observeComms(),
     db
       .select({ id: comps.id, name: comps.name })
       .from(comps)
@@ -350,6 +424,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
         ...chain,
         ...money,
         ...accounts,
+        ...comms,
         compFound: false,
         boardAssignments: 0,
         boardName: null,
@@ -437,6 +512,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
       ...chain,
       ...money,
       ...accounts,
+      ...comms,
       compFound: true,
       boardAssignments: board.length,
       boardName: first?.personName ?? null,
