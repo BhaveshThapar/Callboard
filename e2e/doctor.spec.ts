@@ -235,7 +235,16 @@ test("db:doctor names an allocation left pointing at a voided charge", () => {
     run("e2e/support/break-db.ts", "unorphan", comp.compId);
   }
 
-  expect(doctor().ok).toBe(true);
+  /**
+   * The repair is asserted by **this orphan being gone**, not by the whole database being clean.
+   *
+   * The drift and orphan queries are deliberately global — a preflight before a prospect call is a
+   * statement about the database, not about one comp — so `doctor().ok` here was really an assertion
+   * about every other spec's leftovers, and it failed once in a 92-test run for exactly that reason.
+   * Naming the ids tests the thing this test is about.
+   */
+  const repaired = doctor();
+  expect(repaired.output).not.toContain("has been voided");
 });
 
 test("db:doctor fails a comp with no board link", () => {
