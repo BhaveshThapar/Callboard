@@ -1,0 +1,49 @@
+name: Comms
+
+# The scheduler, and deliberately not Vercel Cron.
+#
+# `vercel.json` carried a five-minute cron until the deploy refused it: the Hobby plan allows one
+# run per *day*, and a dues reminder that goes out up to 24 hours after a board asks for it is not a
+# product. The alternative was a paid plan, which is the wrong trade for something at 0/3 signatures
+# with a $300 season price (PRD §11) -- so the schedule moved to the substrate this repo already
+# runs CI on, where it is free and has no plan to outgrow.
+#
+# The route does not know or care: it is an HTTP GET with a bearer token, so swapping the caller is
+# a workflow file rather than a change to the product.
+on:
+  schedule:
+    # Every five minutes. GitHub's scheduler is best-effort and can run late under load, which is
+    # fine for a reminder and would not be for a comp-day push -- G5 will need this revisited.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# A tick that overlaps its predecessor would claim nothing (the guarded UPDATE refuses it), but
+# queueing rather than racing keeps the logs readable.
+concurrency:
+  group: comms-sweep
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send what is due
+        env:
+          BASE_URL: ${{ secrets.PRODUCTION_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::notice::PRODUCTION_URL or CRON_SECRET is unset — the outbox is not being swept."
+            exit 0
+          fi
+          code=$(curl -sS -o /tmp/sweep.json -w "%{http_code}" \
+            -H "authorization: Bearer $CRON_SECRET" \
+            "$BASE_URL/api/cron/send")
+          cat /tmp/sweep.json
+          echo
+          # 503 is "comms is not configured yet", which is a state to report rather than fail on.
+          if [ "$code" = "503" ]; then
+            echo "::notice::comms is not configured on the deployment yet"
+            exit 0
+          fi
+          [ "$code" = "200" ] || { echo "::error::sweep returned $code"; exit 1; }

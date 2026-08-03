@@ -35,26 +35,39 @@ export const DEMO_CONFIG: CompConfig = {
       { label: "Stage Presence", maxPoints: 20, weightBp: 10_000, sortOrder: 3 },
     ],
   },
+  /**
+   * Every team carries a captain, and every address is `@example.com` on purpose.
+   *
+   * A10 chases a team's `contact_person_id`, so a demo roster without one is a roster the reminder
+   * button silently declines to chase — the beat would show a board pressing a button and nothing
+   * happening. `example.com` is reserved by RFC 2606 and can never be a real mailbox, so a demo
+   * comp cannot mail a real person even if `RESEND_API_KEY` and `COMMS_FROM` are set on the very
+   * deployment being demonstrated.
+   */
   teams: [
-    { bidCode: "A-114", name: "NCSU Nazaare", school: "NC State" },
-    { bidCode: "B-207", name: "BU Dheem", school: "Boston University" },
-    { bidCode: "C-331", name: "NSU Veera", school: "Northeastern" },
-    { bidCode: "D-402", name: "GT Ramblin' Raas", school: "Georgia Tech" },
-    { bidCode: "E-518", name: "UMD Moksha", school: "Maryland" },
-    { bidCode: "F-623", name: "Pitt Nrityamala", school: "Pittsburgh" },
-    { bidCode: "G-745", name: "Cornell Yalla", school: "Cornell" },
-    { bidCode: "H-860", name: "UVA Aayaam", school: "Virginia" },
+    { bidCode: "A-114", name: "NCSU Nazaare", school: "NC State", captain: "Meera Iyer" },
+    { bidCode: "B-207", name: "BU Dheem", school: "Boston University", captain: "Rohan Kapoor" },
+    { bidCode: "C-331", name: "NSU Veera", school: "Northeastern", captain: "Anika Bose" },
+    { bidCode: "D-402", name: "GT Ramblin' Raas", school: "Georgia Tech", captain: "Vikram Shah" },
+    { bidCode: "E-518", name: "UMD Moksha", school: "Maryland", captain: "Sana Reddy" },
+    { bidCode: "F-623", name: "Pitt Nrityamala", school: "Pittsburgh", captain: "Kiran Nair" },
+    { bidCode: "G-745", name: "Cornell Yalla", school: "Cornell", captain: "Dev Malhotra" },
+    { bidCode: "H-860", name: "UVA Aayaam", school: "Virginia", captain: "Priya Menon" },
     // Room counts are deliberately partial. The demo must show the *gap* case as well as the happy
     // one: a team whose rooms are unknown gets no hotel charge and a stated reason, rather than a
     // $0 hotel line a treasurer would read as "nothing owed".
   ]
-    .map((team, i) => ({
+    .map(({ captain, ...team }, i) => ({
       ...team,
       division: "fusion",
       rosterSize: 16,
       rooms: i < 6 ? 4 : undefined,
       performanceOrder: i + 1,
       status: "competing" as TeamStatus,
+      contact: {
+        name: captain,
+        email: `${captain.split(" ")[0]?.toLowerCase()}.${team.bidCode.toLowerCase()}@example.com`,
+      },
     }))
     .concat([
       /**
@@ -81,6 +94,7 @@ export const DEMO_CONFIG: CompConfig = {
         rooms: undefined,
         performanceOrder: 9,
         status: "applied" as TeamStatus,
+        contact: { name: "Arjun Patel", email: "arjun.i-902@example.com" },
       },
     ]),
   judges: [

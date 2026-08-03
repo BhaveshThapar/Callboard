@@ -44,6 +44,15 @@ export type CompConfig = {
     waitlistRank?: number;
     /** Hotel rooms. Omitted means *not yet known*, which bills nothing and states a gap. */
     rooms?: number;
+    /**
+     * The captain to reach about this team — the same thing the registration form collects, for a
+     * team that never filled one in.
+     *
+     * Without it a seeded team has no `contact_person_id`, so A10 skips it as unreachable and the
+     * dues-reminder beat cannot be rehearsed on the demo comp at all. `people` is org-scoped and
+     * found rather than re-inserted, so the same captain across two comps is one person.
+     */
+    contact?: { name: string; email: string };
   }[];
   judges: { name: string; email?: string }[];
   board: { name: string; email?: string }[];
@@ -105,6 +114,22 @@ const int = (value: unknown, path: string): number =>
 
 const optInt = (value: unknown, path: string): number | undefined =>
   value === undefined || value === null ? undefined : int(value, path);
+
+/**
+ * A captain, or nothing. The address is checked here rather than at send time for the reason every
+ * other config field is: a board's own file is what is wrong, and the person holding it gets a
+ * sentence naming the field instead of a bounced message three weeks later.
+ */
+const parseContact = (
+  value: unknown,
+  path: string,
+): { name: string; email: string } | undefined => {
+  if (value === undefined || value === null) return undefined;
+  const c = record(value, path);
+  const email = str(c.email, `${path}.email`).trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) fail(`${path}.email`, "an email address");
+  return { name: str(c.name, `${path}.name`).trim(), email };
+};
 
 const oneOf = <T extends string>(value: unknown, allowed: readonly T[], path: string): T =>
   typeof value === "string" && (allowed as readonly string[]).includes(value)
@@ -252,6 +277,7 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
       status,
       waitlistRank: optInt(t.waitlistRank, `teams[${i}].waitlistRank`),
       rooms: optInt(t.rooms, `teams[${i}].rooms`),
+      contact: parseContact(t.contact, `teams[${i}].contact`),
     };
   });
   if (teams.length === 0) fail("teams", "at least one team");

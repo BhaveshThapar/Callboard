@@ -2,7 +2,7 @@
 
 The record is comp-scoped and multi-tenant: many orgs, many comps per org, isolated. Every table carries `comp_id`, or `org_id` where it outlives a single comp.
 
-Two groups of tables follow. The first group exists in Postgres, through migration `0011`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
+Two groups of tables follow. The first group exists in Postgres, through migration `0012`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
 
 It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `show_order`, `schedule_segments` and `assignments` — the Gita (PRD §9) and coordination (§7.3), both gated well behind it.
 
@@ -35,6 +35,38 @@ It is what gates the public form, and it is **written by the board**, forward on
 **`board_assignments`** — `id`, `comp_id`, `person_id`, `token_hash` (unique), `revoked_at`, `created_at`
 
 The board's access token, the same primitive judges use, and deliberately **one per board member rather than one per comp**. A lock and an override must name the human who authorized them (PRD B6); a link shared by the whole board can only name the board. Revoking works exactly as it does for a judge.
+
+### Accounts
+
+Migrated in `0012` ([ADR-0016](decisions/0016-accounts-for-people-who-stay-links-for-people-who-visit.md)). **Accounts for people who stay, links for people who visit** — a judge deliberately still has none, because a judge scores once as a favour and an account is friction charged to a volunteer. Board members and captains sign in.
+
+The whole set exists to answer one question in two halves: *which human is this*, and *what may they do at this comp*. Keeping those two lookups apart is what stops a session at one comp becoming authority at the next.
+
+**`users`** — `id`, `org_id`, `person_id`, `email`, `password_hash`, `email_verified_at`, `last_login_at`, `disabled_at`, `created_at`. Unique on `(org_id, email)`, plus a CHECK that `email` is already lower-cased.
+
+Login is **org-scoped**, not global, and hangs off `people` so that a board member who is also a captain is one human rather than two. `password_hash` is scrypt from `node:crypto`, stored as `scrypt$N$r$p$salt$hash` — the algorithm and its cost are *data*, so raising the cost is a rehash on next login rather than a flag day. Not argon2: it is a native module in Node, and this repo has five runtime dependencies.
+
+**`memberships`** — `id`, `comp_id`, `person_id`, `role`, `team_id`, `revoked_at`, `created_at`. Unique on `(comp_id, person_id, role)`.
+
+`role` ∈ `board | captain | liaison`, from `ACCOUNT_ROLES`. Deliberately **not** `comp_roles.role`: that column says what a person *is* at a comp (including `attendee`, who will never have an account), and this says what a session is allowed to resolve to. Two questions, two lists. A CHECK enforces that `team_id` is set exactly when `role = 'captain'` — a captain with no team could see nothing, and a liaison with a team would imply a claim nothing reads.
+
+`revoked_at` is the only way somebody comes back off a comp, and it is read by every membership filter, so a revoked membership stops resolving on the next request. The session is left alone on purpose: killing it would sign that person out of comps this board has no say over.
+
+**What can be *handed out* is narrower than what can be held.** `INVITABLE_ROLES` is `board | captain`; `liaison` is a real role with a real actor and **no reader**, because *what does a liaison see* is C1's question and C1 needs `assignments`, which is in the designed-not-migrated group below. Offering it let a board mint a credential whose journey ended on a page that refused to load — the failure [ADR-0011](decisions/0011-nothing-mints-a-link.md) spent a decision refusing, arriving through the door ADR-0016 opened. It goes back on the list in the same commit that gives it a screen.
+
+**`sessions`** — `id`, `user_id`, `token_hash` (unique), `expires_at`, `revoked_at`, `user_agent`, `created_at`
+
+A row, **not a JWT**. The token gets exactly the treatment ADR-0003 gave a judge link: 32 random bytes in the cookie, sha256 in the database, the raw value never stored. A stateless session cannot be revoked, and revocability is the property ADR-0011 spent an entire decision on — so a leaked session has to be killable from a screen, which means it has to be a row.
+
+**`invitations`** — `id`, `org_id`, `comp_id`, `person_id`, `purpose`, `role`, `team_id`, `token_hash` (unique), `expires_at`, `accepted_at`, `revoked_at`, `created_by_person_id`, `created_at`
+
+The minting path ADR-0011 refused and named its own successor for. An invitation **names who it is for before it is accepted**, so accepting one cannot make you somebody else. `invitations_live_unique` is partial over the unspent rows, so a re-invite supersedes rather than leaving two valid envelopes in the world.
+
+`purpose` ∈ `invite | verify_email | reset_password`. Only `invite` is written today; the other two are the shapes a password reset and an email confirmation will take, and both need a delivery channel that does not exist yet.
+
+Accepting is the fourth sanctioned `withTransaction` caller ([ADR-0012](decisions/0012-transactions-for-writes-that-span-statements.md)): an invitation is spent exactly when the authority it grants exists, and either half alone is a state a human has to find — an envelope marked used that granted nothing, or a membership with no account behind it.
+
+`ACCOUNT_CONSTRAINTS` names all five indexes once, for `CHAIN_INDEXES`' and `MONEY_CONSTRAINTS`' reason: the schema declares them, the auth paths read one off a failed insert to say something true to a person, and `db:doctor` looks them up to prove the guarantee is live on the database in front of it.
 
 ### Teams
 

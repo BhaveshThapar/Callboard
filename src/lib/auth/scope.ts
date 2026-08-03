@@ -107,6 +107,13 @@ export type RosterTeamView = BoardTeamView & {
   contactName: string | null;
   contactEmail: string | null;
   /**
+   * Who to reach, as an id rather than an address. A10 enqueues against a `person_id`, because the
+   * outbox's recipient is a person the org already knows and not a string typed onto a form — and
+   * because a person with no address on file is a fact the engine records (`bounced`, with a reason)
+   * rather than one this window has to pre-judge.
+   */
+  contactPersonId: string | null;
+  /**
    * Answers to the questions this comp added to its own form. Keyed by field id, so the labels to
    * display them under come from `comps.registration` — a board that asked a question is the only
    * thing that can say what it was.
@@ -289,6 +296,7 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
         waiverAcceptedAt: teams.waiverAcceptedAt,
         contactName: people.name,
         contactEmail: people.email,
+        contactPersonId: teams.contactPersonId,
         customAnswers: teams.customAnswers,
       })
       .from(teams)
