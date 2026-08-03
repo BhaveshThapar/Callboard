@@ -174,12 +174,30 @@ Then the closing question for this half:
 
 > When a team says it already paid, how long does it take you to find out whether that's true?
 
+**8. Chase what is outstanding.** One button, and every team with a balance gets an email carrying
+its own charge lines — signed by the treasurer, not by Callboard. Two things to say out loud while
+it runs. First, **click it twice**: the second click reports *already sent this month* rather than
+sending again, and the reason is a unique index rather than a disabled button — a captain being
+billed twice is the exact failure this whole product is sold against. Second, **read the line about
+who was not reached**: a team that owes money with no captain on file is named on screen rather than
+quietly skipped, because "we reminded six of eight" and "everybody was reminded" are different facts.
+
+Then: *how long does chasing eight teams take you today?*
+
+**Nothing is sent from the demo deployment unless it is configured to send** — `RESEND_API_KEY` and
+`COMMS_FROM` are both required, and without them the engine records instead of sending. The demo
+roster's captains are all `@example.com`, which RFC 2606 reserves and no mail can ever reach, so a
+rehearsal cannot email a real person even by accident.
+
 **Say what is not built, because they will find out anyway.** No card processing and no Stripe:
 every row here is entered by hand on a rail the system records and never moves. That is deliberate —
 the reconciliation gap is closed by the ledger, and routing would buy automatic ingestion, not
-correctness. Also no receipts and no automatic reminders; both need a comms layer that does not
-exist. If they want card rails, that is a thing to hear from a founding partner rather than a thing
-to guess at, which makes it an ask, not an apology.
+correctness. **Receipts are still not built** — a reminder is a board deciding to chase, and a
+receipt fires off a payment landing, which is the next thing rather than the same thing. Reminders
+are also **only ever sent by a board pressing the button**: nothing here decides on its own to email
+somebody, and saying so is worth more than it sounds to a treasurer who has been burned by software
+that mails their teams unprompted. If they want card rails, that is a thing to hear from a founding
+partner rather than a thing to guess at, which makes it an ask, not an apology.
 
 ## The captain's beat — when they ask "does the team see any of this?"
 

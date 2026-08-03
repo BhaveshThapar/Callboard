@@ -358,4 +358,39 @@ describe("parseCompConfig", () => {
       expect(() => parseCompConfig(config)).toThrow(/teams\[0\].rooms/);
     });
   });
+
+  /**
+   * The captain A10 chases. Absent is legitimate — a scoring-only config has no reason to name one —
+   * and the consequence of absence is stated rather than silent: the reminder button declines to
+   * chase a team it cannot reach, and says which.
+   */
+  describe("teams[].contact", () => {
+    it("is undefined when unstated, which is a team nothing can chase", () => {
+      expect(parseCompConfig(minimal()).teams[0]?.contact).toBeUndefined();
+    });
+
+    it("normalizes the address, so one captain across two comps is one person", () => {
+      const config = minimal();
+      (config.teams as Record<string, unknown>[])[0]!.contact = {
+        name: "  Meera Iyer ",
+        email: "  Meera@Example.COM ",
+      };
+      expect(parseCompConfig(config).teams[0]?.contact).toEqual({
+        name: "Meera Iyer",
+        email: "meera@example.com",
+      });
+    });
+
+    it("refuses an address that is not one, naming the field rather than bouncing later", () => {
+      const config = minimal();
+      (config.teams as Record<string, unknown>[])[0]!.contact = { name: "M", email: "not-an-email" };
+      expect(() => parseCompConfig(config)).toThrow(/teams\[0\].contact.email/);
+    });
+
+    it("refuses a contact with no name to address", () => {
+      const config = minimal();
+      (config.teams as Record<string, unknown>[])[0]!.contact = { email: "m@example.com" };
+      expect(() => parseCompConfig(config)).toThrow(/teams\[0\].contact.name/);
+    });
+  });
 });

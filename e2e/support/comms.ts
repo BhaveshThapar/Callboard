@@ -113,6 +113,32 @@ switch (command) {
     break;
   }
 
+  /**
+   * Who the outbox is addressed to, and what each message claims they owe.
+   *
+   * A count proves something was queued; this proves the *right* person was queued for the *right*
+   * number, which is the only version of A10 worth having — a reminder naming the wrong balance is
+   * the failure this product is sold against, with a stamp on it.
+   */
+  case "recipients": {
+    const balanceOf = (payload: unknown): string =>
+      typeof payload === "object" && payload !== null && "balance" in payload
+        ? String((payload as Record<string, unknown>).balance)
+        : "";
+
+    const rows = await db
+      .select({ template: messages.template, email: people.email, payload: messages.payload })
+      .from(messages)
+      .innerJoin(people, eq(people.id, messages.personId))
+      .where(eq(messages.compId, comp.id))
+      .orderBy(people.email);
+
+    console.log(
+      rows.map((row) => `${row.template} ${row.email} ${balanceOf(row.payload)}`).join("\n"),
+    );
+    break;
+  }
+
   /** How many times the sweep actually handed something to a transport. */
   case "sent": {
     const rows = await db

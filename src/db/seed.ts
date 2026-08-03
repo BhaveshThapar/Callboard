@@ -269,9 +269,20 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
     })),
   );
 
+  // Captains, resolved before the teams that point at them. Same find-or-create as the board and the
+  // judges, so a captain who also sits on the board is one person and a reseed reuses them both.
+  // Without this a seeded team has no `contact_person_id`, and A10 correctly refuses to chase a team
+  // it has no way to reach — which made the reminder beat unrehearsable on the demo comp.
+  const contactPeople = await findOrCreatePeople(
+    org.id,
+    config.teams.flatMap((team) => (team.contact ? [team.contact] : [])),
+  );
+  const contacts = new Map(contactPeople.flatMap((p) => (p.email ? [[p.email, p] as const] : [])));
+
   await db.insert(teams).values(
     config.teams.map((team) => ({
       compId: comp.id,
+      contactPersonId: team.contact ? (contacts.get(team.contact.email)?.id ?? null) : null,
       name: team.name,
       school: team.school ?? null,
       bidCode: team.bidCode,
