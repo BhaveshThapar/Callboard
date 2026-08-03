@@ -65,6 +65,20 @@ export type Observed = {
    * `forkedComps` and `forkedDeposits`' sibling, one table further out.
    */
   duplicateInvitations: { personId: string; live: number }[];
+  /** Every constraint in `COMMS_CONSTRAINTS` exists: a second send is unrepresentable. */
+  commsGuaranteeEnforced: boolean;
+  /**
+   * Messages whose cached `state` disagrees with the head of their own chain — ADR-0020's named
+   * residual, and ADR-0014's twice over: the database can enforce the terminal index and the dedupe
+   * key, and cannot enforce that a cache agrees with the record it caches.
+   */
+  driftingMessages: { messageId: string; state: string; head: string }[];
+  /**
+   * Claimed and never resolved. **The crash-after-send footprint**, and the one state that must be
+   * reported rather than retried: retrying emails somebody twice, and a duplicate is invisible from
+   * inside the system.
+   */
+  stuckMessages: { messageId: string; minutes: number }[];
 };
 
 const RESEED = "reseed with 'bun run db:seed'";
@@ -237,6 +251,39 @@ const accountProblems = (observed: Observed): string[] => {
   return problems;
 };
 
+/**
+ * The comms half. A sent email cannot be voided, so this is the only subsystem where the doctor is
+ * reporting on something the product cannot take back — which is why a stuck message is named here
+ * rather than swept up by a retry.
+ */
+const commsProblems = (observed: Observed): string[] => {
+  const problems: string[] = [];
+
+  if (!observed.commsGuaranteeEnforced) {
+    problems.push(
+      "a message can still be queued twice, or end twice: the comms constraints are missing. " +
+        "Apply the migrations with 'bun run db:migrate'.",
+    );
+  }
+
+  for (const { messageId, state, head } of observed.driftingMessages) {
+    problems.push(
+      `message ${messageId} is cached as ${state} but its own history ends at ${head}. The chain ` +
+        "is the record; a human must decide what actually happened before trusting either.",
+    );
+  }
+
+  for (const { messageId, minutes } of observed.stuckMessages) {
+    problems.push(
+      `message ${messageId} has been sending for ${minutes} minutes. It was claimed and never ` +
+        "resolved, which is what a send that succeeded and then crashed looks like — so it is not " +
+        "retried automatically. A human must check whether it arrived before releasing it.",
+    );
+  }
+
+  return problems;
+};
+
 export const summarizeHealth = (
   observed: Observed,
   expected: { judges: number; teams: number },
@@ -249,6 +296,7 @@ export const summarizeHealth = (
         ...chainProblems(observed),
         ...moneyProblems(observed),
         ...accountProblems(observed),
+        ...commsProblems(observed),
         "comp not seeded — run 'bun run db:seed'",
       ],
     };
@@ -259,6 +307,7 @@ export const summarizeHealth = (
     ...chainProblems(observed),
     ...moneyProblems(observed),
     ...accountProblems(observed),
+    ...commsProblems(observed),
   ];
 
   if (observed.boardAssignments === 0) {

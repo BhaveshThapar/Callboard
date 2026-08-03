@@ -22,6 +22,9 @@ const healthy: Observed = {
   unexplainedRefunds: [],
   accountGuaranteeEnforced: true,
   duplicateInvitations: [],
+  commsGuaranteeEnforced: true,
+  driftingMessages: [],
+  stuckMessages: [],
 };
 
 const unseeded: Observed = {
@@ -44,6 +47,9 @@ const unseeded: Observed = {
   unexplainedRefunds: [],
   accountGuaranteeEnforced: true,
   duplicateInvitations: [],
+  commsGuaranteeEnforced: true,
+  driftingMessages: [],
+  stuckMessages: [],
 };
 
 const expected = { judges: 3, teams: 8 };
@@ -181,6 +187,39 @@ describe("summarizeHealth", () => {
     expect(duplicate).toMatch(/an invitation is spent once/);
     expect(duplicate).toMatch(/human must decide/);
     expect(duplicate).not.toMatch(/db:seed/);
+  });
+
+  /**
+   * The one state the doctor reports on that the product cannot take back. A send that succeeded and
+   * then crashed before recording it leaves exactly this, and retrying emails somebody twice -- so
+   * the sentence has to send a human to check rather than promise a machine will handle it.
+   */
+  it("reports a message stuck mid-send, and does not promise a retry", () => {
+    const health = summarizeHealth(
+      { ...healthy, stuckMessages: [{ messageId: "msg-2", minutes: 90 }] },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const stuck = health.problems.find((p) => p.includes("msg-2"));
+    expect(stuck).toMatch(/90 minutes/);
+    expect(stuck).toMatch(/not retried automatically/);
+    expect(stuck).toMatch(/whether it arrived/);
+    expect(stuck).not.toMatch(/db:seed/);
+  });
+
+  // ADR-0014's residual, twice over: a cache the database cannot make agree with its record.
+  it("reports a message whose cached state disagrees with its own chain", () => {
+    const health = summarizeHealth(
+      { ...healthy, driftingMessages: [{ messageId: "msg-9", state: "queued", head: "sent" }] },
+      expected,
+    );
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    const drift = health.problems.find((p) => p.includes("msg-9"));
+    expect(drift).toMatch(/cached as queued/);
+    expect(drift).toMatch(/ends at sent/);
+    expect(drift).toMatch(/chain is the record/);
   });
 
   it("reports missing account constraints without naming a migration", () => {

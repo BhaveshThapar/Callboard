@@ -45,6 +45,7 @@ const team = (
     auditionUrl: null,
     waiverAcceptedAt: null,
     contactName: null,
+    contactPersonId: null,
     contactEmail: null,
     customAnswers: null,
     charges,

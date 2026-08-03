@@ -4,4 +4,5 @@ export * from "./rubrics";
 export * from "./scores";
 export * from "./money";
 export * from "./accounts";
+export * from "./comms";
 export * from "./audit";

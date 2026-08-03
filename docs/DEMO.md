@@ -174,12 +174,58 @@ Then the closing question for this half:
 
 > When a team says it already paid, how long does it take you to find out whether that's true?
 
+**8. Chase what is outstanding.** One button, and every team with a balance gets an email carrying
+its own charge lines — signed by the treasurer, not by Callboard. Two things to say out loud while
+it runs. First, **click it twice**: the second click reports *already sent this month* rather than
+sending again, and the reason is a unique index rather than a disabled button — a captain being
+billed twice is the exact failure this whole product is sold against. Second, **read the line about
+who was not reached**: a team that owes money with no captain on file is named on screen rather than
+quietly skipped, because "we reminded six of eight" and "everybody was reminded" are different facts.
+
+Then: *how long does chasing eight teams take you today?*
+
+**Nothing is sent from the demo deployment unless it is configured to send** — `RESEND_API_KEY` and
+`COMMS_FROM` are both required, and without them the engine records instead of sending. The demo
+roster's captains are all `@example.com`, which RFC 2606 reserves and no mail can ever reach, so a
+rehearsal cannot email a real person even by accident.
+
 **Say what is not built, because they will find out anyway.** No card processing and no Stripe:
 every row here is entered by hand on a rail the system records and never moves. That is deliberate —
 the reconciliation gap is closed by the ledger, and routing would buy automatic ingestion, not
-correctness. Also no receipts and no automatic reminders; both need a comms layer that does not
-exist. If they want card rails, that is a thing to hear from a founding partner rather than a thing
-to guess at, which makes it an ask, not an apology.
+correctness. **Receipts are still not built** — a reminder is a board deciding to chase, and a
+receipt fires off a payment landing, which is the next thing rather than the same thing. Reminders
+are also **only ever sent by a board pressing the button**: nothing here decides on its own to email
+somebody, and saying so is worth more than it sounds to a treasurer who has been burned by software
+that mails their teams unprompted. If they want card rails, that is a thing to hear from a founding
+partner rather than a thing to guess at, which makes it an ask, not an apology.
+
+## The captain's beat — when they ask "does the team see any of this?"
+
+Short, and only if it comes up. It usually does, right after the money beat: a treasurer who has just
+watched a $2,160 lump get unbundled asks whether the team can see its own balance without being
+texted a screenshot.
+
+Run it from **People** on the board screen.
+
+**1. Invite a captain.** Name, email, the team. The screen hands back a link **once** — nothing in
+the product can recover it afterwards, because only its sha256 is stored, the same treatment a judge
+link gets. Say out loud that a human still has to send it: **there is no comms engine yet**, so the
+screen says "copy this" rather than implying an email went out.
+
+**2. Open it and set a password.** The invitation **names who it is for before it is accepted**, so
+the address is fixed and readonly — accepting somebody else's link cannot make you them.
+
+**3. Land on their own team.** They see what their team owes, charge by charge, and *no other team* —
+no roster, no scores, and no bid code but their own. Say why that last one matters: a competitor
+holding the name-to-code mapping is the end of blind judging for that comp, arriving from inside the
+product instead of from the street.
+
+**4. Take them back off.** Hit **Remove** on the People screen. The next request they make is
+refused. Worth saying: the *membership* is what died, not their login — the same person keeps
+working at any other comp they belong to, because authority here is per comp and identity is per org.
+
+The one sentence to close on: **a board can now reach one specific human**, which is what everything
+still unbuilt — dues reminders, receipts, schedule pushes — has been waiting on.
 
 ## The five minutes
 

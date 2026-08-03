@@ -15,6 +15,10 @@ import {
 } from "@/db/schema";
 import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
+import { planDuesReminders } from "@/lib/comms/dues";
+import { enqueue } from "@/lib/comms/outbox";
+import { feeScheduleFor, today } from "@/lib/money/charges";
+import { whoOwes } from "@/lib/money/who-owes";
 import { invite, listInvitationsForBoard, orgOfComp, revokeAccess } from "@/lib/auth/accounts";
 import type { InvitableRole } from "@/db/schema";
 import { INVITABLE_ROLES } from "@/db/schema";
@@ -36,6 +40,7 @@ import {
 } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
+  listRosterForBoard,
   NOT_COMPETING,
   resolveBoardActor,
   resolveRosterTeamForBoard,
@@ -920,5 +925,109 @@ export const revokeAccessAction = async (
     message: result.value.removedMembership
       ? `${target.name} can no longer open this comp.`
       : `The invitation for ${target.name} no longer opens.`,
+  };
+};
+
+/**
+ * A10 — the button that makes the outbox reachable.
+ *
+ * The engine shipped complete and with **no product caller**: `sweep` was wired to cron, but nothing
+ * anywhere called `enqueue`, so in production the queue could only ever be empty. That is the defect
+ * this repo has now recorded five times — `recordPayment`, `advanceDeposit`, `listDepositsForBoard`
+ * and `releaseAllocation` each shipped audited and transactional with nobody calling them — and it
+ * is why A10 lands beside the engine rather than a phase later.
+ *
+ * No new window. The debtor list is `whoOwes` over `listRosterForBoard`, which is the same read the
+ * screen the button sits on was rendered from, so a `teamId` arriving here resolves against the plan
+ * that read produced: a team in another comp, a settled team and a team that was never billed are
+ * all refused by the same `find`, without a second definition of "which teams may be chased".
+ *
+ * Sending twice is not an error. `messages_comp_dedupe_unique` refuses the second insert and
+ * `enqueue` reports `duplicate`, so a board that clicks again is told what actually happened —
+ * nothing sent twice — rather than shown a failure over a system working correctly.
+ */
+export const sendDuesRemindersAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const teamId = String(formData.get("teamId") ?? "").trim();
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  const [roster, schedule] = await Promise.all([
+    listRosterForBoard(actor),
+    feeScheduleFor(actor.compId),
+  ]);
+
+  const asOf = today();
+  const plan = planDuesReminders(whoOwes(roster, schedule, asOf), roster, {
+    compName: actor.compName,
+    boardName: actor.personName,
+    // The billing period the dedupe key is scoped to, stated here rather than inside the pure
+    // planner: one reminder per team per calendar month is a policy, and it belongs at the call
+    // site where a board's own answer can replace it.
+    period: asOf.slice(0, 7),
+  });
+
+  const targets = teamId ? plan.send.filter((row) => row.teamId === teamId) : plan.send;
+
+  if (teamId && targets.length === 0) {
+    return { status: "error", message: "That team is not one this comp can chase right now." };
+  }
+  if (targets.length === 0) {
+    const nobody =
+      plan.skipped.length > 0
+        ? `Nobody could be reminded: ${plan.skipped.length} team(s) owe money with no captain on file.`
+        : "Nobody owes anything right now.";
+    return { status: "error", message: nobody };
+  }
+
+  let queued = 0;
+  let already = 0;
+  let failed = 0;
+
+  for (const target of targets) {
+    const result = await enqueue({
+      compId: actor.compId,
+      personId: target.personId,
+      template: "dues.reminder",
+      payload: target.payload,
+      dedupeKey: target.dedupeKey,
+      createdByPersonId: actor.personId,
+    });
+    if (result.ok) queued += 1;
+    else if (result.reason === "duplicate") already += 1;
+    else failed += 1;
+  }
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "dues.remind",
+    entity: "comp",
+    entityId: actor.compId,
+    after: { queued, already, failed, skipped: plan.skipped.length, teamId: teamId || null },
+  });
+
+  revalidatePath(`/board/${token}/money`);
+
+  const parts = [
+    queued > 0 ? `${queued} reminder${queued === 1 ? "" : "s"} queued` : null,
+    already > 0 ? `${already} already sent this month` : null,
+    failed > 0 ? `${failed} could not be queued` : null,
+    // Only when chasing everybody: a board that asked about one team is not being told about others.
+    !teamId && plan.skipped.length > 0
+      ? `${plan.skipped.length} owe money with no captain on file (${plan.skipped
+          .map((row) => row.teamName)
+          .join(", ")})`
+      : null,
+  ].filter((part) => part !== null);
+
+  return {
+    status: failed > 0 ? "error" : "ok",
+    message: `${parts.join(" · ")}. Sending happens in the background; watch the outbox.`,
   };
 };

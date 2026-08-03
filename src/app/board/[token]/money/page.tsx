@@ -10,6 +10,8 @@ import { describeBalance, formatCents } from "@/lib/money/format";
 import { listOpenPayments, listPaymentsForBoard } from "@/lib/money/ledger";
 import { describeGap, summarizeOpenPayments, whoOwes } from "@/lib/money/who-owes";
 import { DepositTable } from "./DepositTable";
+import type { DebtorOption } from "./DuesReminders";
+import { DuesReminders } from "./DuesReminders";
 import type { PaymentRowView } from "./PaymentsTable";
 import { PaymentsTable } from "./PaymentsTable";
 import type { PayableTeam } from "./RecordPayment";
@@ -50,6 +52,17 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
   ]);
   const report = whoOwes(roster, schedule, today());
   const credit = summarizeOpenPayments(openPayments);
+
+  // The same rows the reminder action will plan over, so the count on the button and the number of
+  // emails that leave cannot disagree — both are `whoOwes` over this comp's roster.
+  const debtors: DebtorOption[] = report.rows
+    .filter((row) => row.balanceCents > 0)
+    .map((row) => ({
+      id: row.teamId,
+      name: row.name,
+      bidCode: row.bidCode,
+      balance: formatCents(row.balanceCents),
+    }));
 
   const chargesByTeam = new Map(roster.map((team) => [team.id, team.charges]));
   const openViews: OpenPaymentView[] = openPayments.map((payment) => ({
@@ -167,6 +180,13 @@ export default async function MoneyPage({ params }: { params: Promise<{ token: s
 
         <div className="mb-6">
           <DepositTable token={token} deposits={deposits} />
+        </div>
+
+        {/* Above the table it acts on, and rendered even with nobody outstanding: a board that has
+            just chased everybody should still see the panel that says so, rather than watching the
+            instrument disappear at the moment it worked. */}
+        <div className="mb-6">
+          <DuesReminders token={token} debtors={debtors} />
         </div>
 
         {report.rows.length === 0 ? (
