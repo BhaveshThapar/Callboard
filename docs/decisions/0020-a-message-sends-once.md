@@ -47,4 +47,8 @@ One atomic read-modify-write taking its own row lock — the shape `releaseAlloc
 
 **A provider is a swap, not a rewrite.** `Transport` is an interface with one method; Resend is the first implementation. PRD §10 names SMS as well, and it arrives as a second transport behind the same outbox rather than as a second outbox — but it is **not** built here, because per-message cost and STOP/consent handling are a policy question for a board rather than a technical one, and PRD §12 already warns that comms is where this product is competing with a free incumbent.
 
+**The scheduler is GitHub Actions, not Vercel Cron**, and that was settled by a failed deployment rather than in advance. Vercel's Hobby plan allows one cron run per *day*; a dues reminder that goes out up to 24 hours after a board asks for it is not a product, and the alternative was a paid plan — the wrong trade for something at 0/3 signatures against a $300 season price (PRD §11). The route is an HTTP `GET` with a bearer token, so which machine calls it is a workflow file rather than a property of the design.
+
+That swap has a cost worth naming: GitHub's scheduler is best-effort and runs late under load. Fine for a reminder. **Not** fine for G5's push-on-change, where the whole point is that a delay reaches a phone before the person acts on a stale time — so G5 will have to revisit this rather than inherit it.
+
 **What this does not build:** no open tracking, no click tracking, no delivery analytics. A board does not need to know whether a captain opened an email, and building the surface that answers it means building the surface that leaks it.
