@@ -17,6 +17,7 @@ import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { planAnnouncement } from "@/lib/comms/announce";
 import { planDuesReminders } from "@/lib/comms/dues";
+import { planFeedbackDelivery } from "@/lib/comms/feedback";
 import { enqueue } from "@/lib/comms/outbox";
 import { planDepositReturned, planPaymentReceipt } from "@/lib/comms/receipts";
 import { captainsByTeam } from "@/lib/comms/recipients";
@@ -44,14 +45,17 @@ import {
 } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
+  listJudgeLabelsForBoard,
   listRosterForBoard,
   NOT_COMPETING,
   resolveBoardActor,
   resolveRosterTeamForBoard,
   resolveTeamForBoard,
 } from "@/lib/auth/scope";
+import { notesForBoard } from "@/lib/comp/feedback";
 import { setCompStatus } from "@/lib/comp/status";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
+import { noteKey } from "@/lib/export/feedback";
 import type { BoardActionState } from "./state";
 
 const CHAIN_INDEXES = new Set<string>(CHAIN_INDEX_NAMES);
@@ -1281,4 +1285,108 @@ export const sendAnnouncementAction = async (
     status: "ok",
     message: `${parts.join(" · ")}. Anyone who unsubscribed will not receive it.`,
   };
+};
+
+/**
+ * ADJ·2 — delivering the judges' notes, which the map has carried as the unbuilt half since B8.
+ *
+ * Refused before the lock, and that is not a convenience: the placement and the deduction come from
+ * the frozen `tab_runs` snapshot, so what a team receives is what the placements were announced
+ * from. Notes are read live because they are deliberately not in the snapshot and are refused after
+ * the lock, so both halves are fixed at the same moment.
+ *
+ * Keyed on the team **and the run**, so a correction is deliverable. An override supersedes the run,
+ * which mints new keys; pressing send twice against the same run reaches nobody twice.
+ */
+export const sendFeedbackAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  const locked = await latestLockedRun(actor.compId);
+  if (!locked) {
+    return { status: "error", message: "Results are not locked yet, so there is no feedback to send." };
+  }
+
+  const [roster, judges, notes, captains] = await Promise.all([
+    listRosterForBoard(actor),
+    // Revoked judges included: their scores still counted, so their feedback still ships.
+    listJudgeLabelsForBoard(actor),
+    notesForBoard(actor),
+    captainsByTeam(actor.compId),
+  ]);
+
+  const deductionReasons = new Map<string, string[]>();
+  for (const deduction of locked.inputs.deductions) {
+    const reasons = deductionReasons.get(deduction.teamId) ?? [];
+    reasons.push(deduction.reason);
+    deductionReasons.set(deduction.teamId, reasons);
+  }
+
+  const plan = planFeedbackDelivery(
+    {
+      runId: locked.id,
+      placements: locked.results.placements,
+      deductionReasons,
+      judges: new Map(judges.map((judge) => [judge.assignmentId, judge.label])),
+      scoredBy: new Set(locked.inputs.scores.map((score) => noteKey(score.judgeId, score.teamId))),
+      notes,
+    },
+    roster,
+    captains,
+    { compName: actor.compName, boardName: actor.personName },
+  );
+
+  if (plan.send.length === 0) {
+    return {
+      status: "error",
+      message:
+        plan.skipped.length > 0
+          ? `Nobody could be reached: ${plan.skipped.length} placed team(s) have no captain on file.`
+          : "Nothing placed in the locked results, so there is no feedback to send.",
+    };
+  }
+
+  let queued = 0;
+  let already = 0;
+  for (const target of plan.send) {
+    const result = await enqueue({
+      compId: actor.compId,
+      personId: target.personId,
+      template: "feedback.delivered",
+      payload: target.payload,
+      dedupeKey: target.dedupeKey,
+      createdByPersonId: actor.personId,
+    });
+    if (result.ok) queued += 1;
+    else if (result.reason === "duplicate") already += 1;
+  }
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "feedback.deliver",
+    entity: "tab_run",
+    entityId: locked.id,
+    after: { queued, already, skipped: plan.skipped.length },
+  });
+
+  revalidatePath(`/board/${token}/results`);
+
+  const parts = [
+    queued > 0 ? `Feedback sent to ${queued} team${queued === 1 ? "" : "s"}` : null,
+    already > 0 ? `${already} already had it for this result` : null,
+    plan.skipped.length > 0
+      ? `${plan.skipped.length} have no captain on file (${plan.skipped
+          .map((row) => row.teamName)
+          .join(", ")})`
+      : null,
+  ].filter((part) => part !== null);
+
+  return { status: "ok", message: `${parts.join(" · ")}. No scores are included.` };
 };

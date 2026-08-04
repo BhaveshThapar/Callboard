@@ -54,6 +54,25 @@ export type MessagePayloads = {
     balance: string;
     boardName: string;
   };
+  /**
+   * ADJ·2 — what a team is told after the lock.
+   *
+   * **There is no score in this payload and there must never be one.** A team learns where it
+   * placed, what it was docked and why, and what each judge wrote under `Judge N` — the same
+   * projection `toTeamFeedbackCsv` carries, for [ADR-0008](../../../docs/decisions/0008-judge-scores-are-de-identified.md)'s
+   * reason: publishing numbers invites a team to litigate a 27-vs-28 on Execution, an argument no
+   * board can win and no rubric can settle. Adding a field here would be the leak, so the type is
+   * the enforcement.
+   */
+  "feedback.delivered": {
+    teamName: string;
+    compName: string;
+    place: number;
+    deductionPoints: number;
+    deductionReasons: string[];
+    notes: { judge: string; note: string }[];
+    boardName: string;
+  };
   "invitation.created": {
     personName: string;
     compName: string;
@@ -75,6 +94,7 @@ export const TEMPLATE_NAMES = [
   "dues.reminder",
   "payment.receipt",
   "deposit.returned",
+  "feedback.delivered",
   "invitation.created",
   "announcement.sent",
 ] as const satisfies readonly TemplateName[];
@@ -84,6 +104,9 @@ export const TEMPLATE_KIND: Record<TemplateName, "transactional" | "broadcast"> 
   "dues.reminder": "transactional",
   "payment.receipt": "transactional",
   "deposit.returned": "transactional",
+  // Transactional: a team that competed is owed its feedback, and a board muting announcements
+  // must not thereby be unable to deliver it.
+  "feedback.delivered": "transactional",
   "invitation.created": "transactional",
   "announcement.sent": "broadcast",
 };
@@ -143,6 +166,27 @@ const RENDER: { [K in TemplateName]: (payload: MessagePayloads[K]) => Rendered }
       // money stops counting as paid, so the balance does not lurch. Saying so is what stops a
       // captain reading the refund as a new bill.
       `That clears the deposit from what you owe, so your balance is still ${p.balance}.`,
+      signOff(p.compName, p.boardName),
+    ]),
+  }),
+
+  "feedback.delivered": (p) => ({
+    subject: `${p.compName}: feedback for ${p.teamName}`,
+    body: lines([
+      `Hi ${p.teamName},`,
+      "",
+      `You placed ${p.place}.`,
+      p.deductionPoints > 0 ? `Deduction: ${p.deductionPoints} point(s).` : null,
+      ...p.deductionReasons.map((reason) => `  ${reason}`),
+      "",
+      "What the judges wrote:",
+      // A judge who scored and wrote nothing still appears, so a team can see it was judged by all
+      // of them rather than wondering which one skipped it.
+      ...p.notes.map((n) => `  ${n.judge}: ${n.note === "" ? "(no note)" : n.note}`),
+      "",
+      // Said out loud, because the absence is a decision rather than an oversight, and a team that
+      // does not know that will simply ask.
+      "Scores are not published — you have where you placed and what the judges said.",
       signOff(p.compName, p.boardName),
     ]),
   }),
