@@ -10,6 +10,7 @@ import {
   COMP_STATUSES,
   deductions,
   judgeAssignments,
+  memberships,
   PAYMENT_RAILS,
   TEAM_STATUSES,
 } from "@/db/schema";
@@ -956,15 +957,37 @@ export const sendDuesRemindersAction = async (
   const actor = await resolveBoardActor(token);
   if (!actor) return { status: "error", message: "This board link is no longer valid." };
 
-  const [roster, schedule] = await Promise.all([
+  const [roster, schedule, captains] = await Promise.all([
     listRosterForBoard(actor),
     feeScheduleFor(actor.compId),
+    /**
+     * The captains who accepted an invitation, which is the only contact a **seeded** roster has.
+     *
+     * `teams.contact_person_id` is written by the registration form, and setup is founder-run by
+     * design — so without this every founding partner's A10 button reports "nobody could be
+     * reminded" and the feature is decorative for exactly the boards it was built for.
+     */
+    db
+      .select({ teamId: memberships.teamId, personId: memberships.personId })
+      .from(memberships)
+      .where(
+        and(
+          eq(memberships.compId, actor.compId),
+          eq(memberships.role, "captain"),
+          isNull(memberships.revokedAt),
+        ),
+      ),
   ]);
 
   const asOf = today();
   const plan = planDuesReminders(whoOwes(roster, schedule, asOf), roster, {
     compName: actor.compName,
     boardName: actor.personName,
+    // A registered contact wins; a captain's membership is the fallback, never the override -- the
+    // person who filled in the form is the one who said they were the contact.
+    contactFor: new Map(
+      captains.flatMap((row) => (row.teamId ? [[row.teamId, row.personId] as const] : [])),
+    ),
     // The billing period the dedupe key is scoped to, stated here rather than inside the pure
     // planner: one reminder per team per calendar month is a policy, and it belongs at the call
     // site where a board's own answer can replace it.
@@ -1031,3 +1054,4 @@ export const sendDuesRemindersAction = async (
     message: `${parts.join(" · ")}. Sending happens in the background; watch the outbox.`,
   };
 };
+
