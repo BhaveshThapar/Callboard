@@ -159,7 +159,10 @@ unattached**, stated on the screen rather than lost — which is what a $5,000 g
 
 **5. Record the one that arrives short.** **BU Dheem's $100 deposit landed as $97.01**: type the
 gross and the fee the bank shows, and the team is credited the full $100 while the processor's cut
-is recorded as the org's cost rather than a hole.
+is recorded as the org's cost rather than a hole. Leave **"email a receipt"** ticked and say what it
+does: the captain is told what arrived, what it cost and what is left, and the receipt carries the
+gross — the team is credited what it sent, not what survived the processor. Then say why the box is
+a box: backfilling last season must not mail thirty captains who were expecting nothing.
 
 **6. Tick a row off against the bank.** Under **What arrived**, mark a payment matched. That is the
 column a treasurer works down beside a statement, and the reason the second pass through a season

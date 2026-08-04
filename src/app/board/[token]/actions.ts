@@ -10,7 +10,6 @@ import {
   COMP_STATUSES,
   deductions,
   judgeAssignments,
-  memberships,
   PAYMENT_RAILS,
   TEAM_STATUSES,
 } from "@/db/schema";
@@ -18,6 +17,8 @@ import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import { planDuesReminders } from "@/lib/comms/dues";
 import { enqueue } from "@/lib/comms/outbox";
+import { planDepositReturned, planPaymentReceipt } from "@/lib/comms/receipts";
+import { captainsByTeam } from "@/lib/comms/recipients";
 import { feeScheduleFor, today } from "@/lib/money/charges";
 import { whoOwes } from "@/lib/money/who-owes";
 import { invite, listInvitationsForBoard, orgOfComp, revokeAccess } from "@/lib/auth/accounts";
@@ -25,7 +26,7 @@ import type { InvitableRole } from "@/db/schema";
 import { INVITABLE_ROLES } from "@/db/schema";
 import type { DepositState } from "@/lib/money/deposit";
 import { DEPOSIT_STATES } from "@/lib/money/deposit";
-import { advanceDeposit } from "@/lib/money/deposits";
+import { advanceDeposit, listDepositsForBoard } from "@/lib/money/deposits";
 import { formatCents, parseDollars } from "@/lib/money/format";
 import {
   allocatePayment,
@@ -609,14 +610,72 @@ export const recordPaymentAction = async (
   });
   if (!result.ok) return { status: "error", message: result.message };
 
+  /**
+   * A7's receipt, and it is queued **after** the ledger's transaction rather than inside it.
+   *
+   * `recordPayment` is one of the four sanctioned `withTransaction` callers because a payment row,
+   * its allocations and the counter that constrains them are one act. A receipt is not part of that
+   * act: it is a consequence of it. Putting the enqueue inside would mean a comms failure rolls back
+   * money that genuinely arrived, which is the reconciliation gap this product is sold against,
+   * caused by the feature that announces it.
+   *
+   * So the money is already safe by the time this runs, and a failure here costs a notification.
+   * The receipt is opt-out rather than automatic — a treasurer backfilling last season's payments on
+   * a Sunday must not mail thirty captains, and the checkbox is where they say so.
+   */
+  let receipt: "queued" | "already" | "no-contact" | "off" = "off";
+  if (String(formData.get("receipt") ?? "") !== "") {
+    const [roster, captains] = await Promise.all([
+      listRosterForBoard(actor),
+      captainsByTeam(actor.compId),
+    ]);
+    const team = roster.find((row) => row.id === teamId);
+    const plan = team
+      ? planPaymentReceipt(
+          team,
+          captains,
+          {
+            id: result.paymentId,
+            grossCents,
+            feeCents,
+            rail: rail as PaymentRail,
+          },
+          { compName: actor.compName },
+        )
+      : null;
+
+    if (!plan) {
+      receipt = "no-contact";
+    } else {
+      const queued = await enqueue({
+        compId: actor.compId,
+        personId: plan.personId,
+        template: "payment.receipt",
+        payload: plan.payload,
+        dedupeKey: plan.dedupeKey,
+        createdByPersonId: actor.personId,
+      });
+      receipt = queued.ok ? "queued" : queued.reason === "duplicate" ? "already" : "no-contact";
+    }
+  }
+
+  const RECEIPT_SAID: Record<typeof receipt, string> = {
+    queued: " A receipt is on its way to the captain.",
+    already: " A receipt for this payment already went out.",
+    // Named rather than swallowed: a board that ticked the box and got nothing sent has to be told,
+    // for the same reason A10 names the teams it could not chase.
+    "no-contact": " No receipt — this team has no captain on file.",
+    off: "",
+  };
+
   revalidatePath(`/board/${token}/money`);
   revalidatePath(`/board/${token}/roster`);
   return {
     status: "ok",
     message:
-      result.creditCents > 0
+      (result.creditCents > 0
         ? `Recorded. ${formatCents(result.creditCents)} of it is not attached to anything yet.`
-        : "Recorded.",
+        : "Recorded.") + RECEIPT_SAID[receipt],
   };
 };
 
@@ -767,13 +826,56 @@ export const advanceDepositAction = async (
   const result = await advanceDeposit(actor, teamId, to as DepositState, reason || null);
   if (!result.ok) return { status: "error", message: result.message };
 
+  /**
+   * A7's other receipt, and only for `refunded`.
+   *
+   * There is deliberately no `forfeited` notice. A forfeit moves no money and is a board keeping
+   * something a team believed was coming back; delivering that by form letter is the wrong
+   * instrument, and the reason the board had to type is one they should say themselves.
+   *
+   * Outside the deposit's transaction for the receipt's reason: the money and its terminal event
+   * land together or not at all, and a comms failure must not undo a refund that already happened.
+   */
+  let told = false;
+  if (result.state === "refunded") {
+    const [deposits, roster, captains] = await Promise.all([
+      listDepositsForBoard(actor),
+      listRosterForBoard(actor),
+      captainsByTeam(actor.compId),
+    ]);
+    const deposit = deposits.find((row) => row.teamId === teamId);
+    const team = roster.find((row) => row.id === teamId);
+
+    const plan =
+      deposit && team
+        ? planDepositReturned(team, captains, deposit, {
+            compName: actor.compName,
+            boardName: actor.personName,
+          })
+        : null;
+
+    if (plan) {
+      const queued = await enqueue({
+        compId: actor.compId,
+        personId: plan.personId,
+        template: "deposit.returned",
+        payload: plan.payload,
+        dedupeKey: plan.dedupeKey,
+        createdByPersonId: actor.personId,
+      });
+      told = queued.ok;
+    }
+  }
+
   revalidatePath(`/board/${token}/money`);
   revalidatePath(`/board/${token}/roster`);
   return {
     status: "ok",
     message:
       result.state === "refunded"
-        ? "Deposit returned. It is no longer owed and no longer counted as paid."
+        ? `Deposit returned. It is no longer owed and no longer counted as paid.${
+            told ? " The captain has been told." : ""
+          }`
         : `Deposit is now ${result.state.replace("_", " ")}.`,
   };
 };
@@ -966,28 +1068,20 @@ export const sendDuesRemindersAction = async (
      * `teams.contact_person_id` is written by the registration form, and setup is founder-run by
      * design — so without this every founding partner's A10 button reports "nobody could be
      * reminded" and the feature is decorative for exactly the boards it was built for.
+     *
+     * Shared with the receipt path rather than queried twice: two copies of "who do we write to
+     * about this team" is how a board gets chased at one address and receipted at another.
      */
-    db
-      .select({ teamId: memberships.teamId, personId: memberships.personId })
-      .from(memberships)
-      .where(
-        and(
-          eq(memberships.compId, actor.compId),
-          eq(memberships.role, "captain"),
-          isNull(memberships.revokedAt),
-        ),
-      ),
+    captainsByTeam(actor.compId),
   ]);
 
   const asOf = today();
   const plan = planDuesReminders(whoOwes(roster, schedule, asOf), roster, {
     compName: actor.compName,
     boardName: actor.personName,
-    // A registered contact wins; a captain's membership is the fallback, never the override -- the
-    // person who filled in the form is the one who said they were the contact.
-    contactFor: new Map(
-      captains.flatMap((row) => (row.teamId ? [[row.teamId, row.personId] as const] : [])),
-    ),
+    // Precedence lives in `contactPersonFor`, which this planner applies: a registered contact wins
+    // and a captain's membership is the fallback, never the override.
+    contactFor: captains,
     // The billing period the dedupe key is scoped to, stated here rather than inside the pure
     // planner: one reminder per team per calendar month is a policy, and it belongs at the call
     // site where a board's own answer can replace it.

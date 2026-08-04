@@ -12,7 +12,10 @@
 import type { RosterTeamView } from "@/lib/auth/scope";
 import { formatCents } from "@/lib/money/format";
 import type { WhoOwes } from "@/lib/money/who-owes";
+import { contactPersonFor } from "./contact";
 import type { MessagePayloads } from "./render";
+
+const EMPTY: ReadonlyMap<string, string> = new Map();
 
 export type DuesRecipient = {
   teamId: string;
@@ -82,9 +85,7 @@ export const planDuesReminders = (
     const team = byId.get(row.teamId);
     if (!team) continue;
 
-    // The registered contact wins and the membership is the fallback, never the override: the
-    // person who filled in the form is the one who said they were the contact for this team.
-    const personId = team.contactPersonId ?? context.contactFor?.get(row.teamId);
+    const personId = contactPersonFor(team, context.contactFor ?? EMPTY);
     if (!personId) {
       skipped.push({ teamId: row.teamId, teamName: row.name, reason: "no-contact" });
       continue;

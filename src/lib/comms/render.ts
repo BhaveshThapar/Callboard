@@ -36,6 +36,24 @@ export type MessagePayloads = {
     rail: string;
     balance: string;
   };
+  /**
+   * A deposit that went back. The other half of A7, and deliberately **not** `payment.receipt` with
+   * a negative number in it: a refund is not a negative payment ([ADR-0015]), and a template that
+   * pretended otherwise would be that mistake reappearing in the one place a team actually reads.
+   *
+   * There is no `forfeited` sibling. A forfeit moves no money and is a decision a board should
+   * deliver itself, with a reason it is willing to say out loud — a form letter is the wrong
+   * instrument for telling somebody they lost $100.
+   *
+   * [ADR-0015]: ../../../docs/decisions/0015-a-refund-moves-the-money.md
+   */
+  "deposit.returned": {
+    teamName: string;
+    compName: string;
+    amount: string;
+    balance: string;
+    boardName: string;
+  };
   "invitation.created": {
     personName: string;
     compName: string;
@@ -56,6 +74,7 @@ export type TemplateName = keyof MessagePayloads;
 export const TEMPLATE_NAMES = [
   "dues.reminder",
   "payment.receipt",
+  "deposit.returned",
   "invitation.created",
   "announcement.sent",
 ] as const satisfies readonly TemplateName[];
@@ -64,6 +83,7 @@ export const TEMPLATE_NAMES = [
 export const TEMPLATE_KIND: Record<TemplateName, "transactional" | "broadcast"> = {
   "dues.reminder": "transactional",
   "payment.receipt": "transactional",
+  "deposit.returned": "transactional",
   "invitation.created": "transactional",
   "announcement.sent": "broadcast",
 };
@@ -109,6 +129,21 @@ const RENDER: { [K in TemplateName]: (payload: MessagePayloads[K]) => Rendered }
       "",
       `Your balance is now ${p.balance}.`,
       signOff(p.compName, "your board"),
+    ]),
+  }),
+
+  "deposit.returned": (p) => ({
+    subject: `${p.compName}: your ${p.amount} deposit has been returned`,
+    body: lines([
+      `Hi ${p.teamName},`,
+      "",
+      `Your deposit of ${p.amount} has been returned.`,
+      "",
+      // Both halves move together, which is the whole of ADR-0015: the obligation is voided and the
+      // money stops counting as paid, so the balance does not lurch. Saying so is what stops a
+      // captain reading the refund as a new bill.
+      `That clears the deposit from what you owe, so your balance is still ${p.balance}.`,
+      signOff(p.compName, p.boardName),
     ]),
   }),
 

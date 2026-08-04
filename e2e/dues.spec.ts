@@ -139,6 +139,60 @@ test("one team can be chased on its own, without mailing the rest of the comp", 
 });
 
 /**
+ * The defect that made A10 decorative for exactly the boards it exists for.
+ *
+ * `teams.contact_person_id` is written by the registration form, and setup is founder-run by design
+ * (PRD §12) — so a founding partner's roster is *seeded*, carries no contact on any team, and the
+ * button reported "nobody could be reminded" for every one of them. It would have looked finished
+ * and done nothing.
+ *
+ * P1 already built the other door: a captain who accepted an invitation is the same human. This is
+ * the only test that proves it, because the unit tests can prove the planner *accepts* a map and
+ * nothing but a browser can prove the action *builds the right one* — the membership query is where
+ * this would break, and it is not reachable from a pure test.
+ */
+test("a captain who accepted an invitation can be chased, with nothing registered", async ({
+  page,
+}) => {
+  const comp = seed();
+
+  // M-4 owes exactly what M-3 does and has no registered contact: the seeded-roster case.
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await page.getByTestId("remind-all").click();
+  await expect(page.getByTestId("dues-message")).toContainText("No Captain");
+  expect(comms("count", COMP)).toBe("2");
+
+  // The board invites its captain, and they set a password.
+  await page.goto(`/board/${comp.boardToken}/people`);
+  await page.getByTestId("invite-name").fill("Nadia Sheikh");
+  await page.getByTestId("invite-email").fill("nadia@example.com");
+  await page.getByTestId("invite-role").selectOption("captain");
+  const option = page.locator('[data-testid="invite-team"] option').filter({ hasText: "No Captain" });
+  await page.getByTestId("invite-team").selectOption((await option.first().getAttribute("value")) ?? "");
+  await page.getByTestId("invite-submit").click();
+
+  const text = (await page.getByTestId("invite-message").textContent()) ?? "";
+  const link = text.match(/\/invite\/([\w-]+)/);
+  expect(link, `no invitation link in: ${text}`).toBeTruthy();
+
+  await page.goto(`/invite/${link?.[1]}`);
+  await page.getByTestId("credential-password").fill("a passphrase long enough to pass");
+  await page.getByTestId("credential-confirm").fill("a passphrase long enough to pass");
+  await page.getByTestId("credential-submit").click();
+  await expect(page.getByTestId("my-comps")).toBeVisible();
+
+  // Now the team the board could not reach is reachable, and nothing about the roster changed.
+  await page.goto(`/board/${comp.boardToken}/money`);
+  await page.getByTestId("remind-all").click();
+  const message = page.getByTestId("dues-message");
+  await expect(message).toContainText("1 reminder queued");
+  await expect(message).not.toContainText("No Captain");
+
+  expect(comms("count", COMP)).toBe("3");
+  expect(comms("recipients", COMP)).toContain("dues.reminder nadia@example.com $1,080.00");
+});
+
+/**
  * The whole path, end to end: the board presses a button and the engine hands two messages to a
  * transport. Everything before this test proves the queue is correct; this proves it drains.
  */
