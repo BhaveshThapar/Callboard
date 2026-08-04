@@ -84,6 +84,11 @@ const pay = async (
   if (fields.toDeposit) await page.getByTestId("payment-allocation-deposit").fill(fields.toDeposit);
   if (fields.receipt === false) await page.getByTestId("payment-receipt").uncheck();
   await page.getByTestId("payment-submit").click();
+
+  // Wait for the action to answer before returning. Without this a caller that navigates straight
+  // afterwards races the server action, and reads a deposit that has not been paid yet — which is
+  // exactly how this passed alone and failed in a full run, where everything is slower.
+  await expect(page.getByTestId("payment-message")).toBeVisible();
 };
 
 test("a receipt tells the captain what arrived, what it cost, and what is left", async ({
