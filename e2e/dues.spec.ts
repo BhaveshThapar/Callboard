@@ -188,8 +188,13 @@ test("a captain who accepted an invitation can be chased, with nothing registere
   await expect(message).toContainText("1 reminder queued");
   await expect(message).not.toContainText("No Captain");
 
-  expect(comms("count", COMP)).toBe("3");
-  expect(comms("recipients", COMP)).toContain("dues.reminder nadia@example.com $1,080.00");
+  // Counted by template, not by row: inviting the captain queued an `invitation.created` of its
+  // own, and a bare count would make this assertion drift every time something else learns to send.
+  const reminders = comms("recipients", COMP)
+    .split("\n")
+    .filter((line) => line.startsWith("dues.reminder"));
+  expect(reminders).toHaveLength(3);
+  expect(reminders).toContain("dues.reminder nadia@example.com $1,080.00");
 });
 
 /**

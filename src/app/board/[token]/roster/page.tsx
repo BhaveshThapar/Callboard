@@ -7,12 +7,16 @@ import {
   listRosterForBoard,
   resolveBoardActor,
 } from "@/lib/auth/scope";
+import { ANNOUNCEABLE_STATUSES } from "@/db/schema/teams";
 import { registrationWindowFor } from "@/lib/comp/status";
 import { latestLockedRun } from "@/lib/comp/tab";
+import { Announce } from "./Announce";
 import { RegistrationWindow } from "./RegistrationWindow";
 import { RosterTable } from "./RosterTable";
 
 export const dynamic = "force-dynamic";
+
+const ANNOUNCEABLE: readonly string[] = ANNOUNCEABLE_STATUSES;
 
 export default async function RosterPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -66,6 +70,15 @@ export default async function RosterPage({ params }: { params: Promise<{ token: 
         )}
 
         <RosterTable token={token} roster={roster} locked={locked !== null} fields={fields} />
+
+        {/* Below the roster, because the roster is the audience: the count here and the teams
+            above it are the same read, so the button cannot promise more than it reaches. */}
+        <div className="mt-6">
+          <Announce
+            token={token}
+            audience={roster.filter((team) => ANNOUNCEABLE.includes(team.status)).length}
+          />
+        </div>
       </main>
     </div>
   );

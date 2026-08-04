@@ -15,6 +15,7 @@ import {
 } from "@/db/schema";
 import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
+import { planAnnouncement } from "@/lib/comms/announce";
 import { planDuesReminders } from "@/lib/comms/dues";
 import { enqueue } from "@/lib/comms/outbox";
 import { planDepositReturned, planPaymentReceipt } from "@/lib/comms/receipts";
@@ -1188,3 +1189,96 @@ export const sendDuesRemindersAction = async (
   };
 };
 
+
+/**
+ * The board saying something to every team that is coming.
+ *
+ * The first **broadcast** send in the product, which is what makes `people.unsubscribed_at` load
+ * bearing rather than decorative: `sweep` bounces a broadcast to somebody who opted out and delivers
+ * a transactional one, so this is the path that respects it. A board is told how many that was —
+ * silently reaching fewer people than the screen implies is the failure this whole feature would
+ * otherwise introduce.
+ *
+ * No window is added. The audience is `listRosterForBoard` filtered by `ANNOUNCEABLE_STATUSES`, and
+ * no id arrives on the form at all — the subject is the actor's own comp, which is `setCompStatus`'
+ * and `regenerateCharges`' shape. There is nothing here to check because there is no claim.
+ */
+export const sendAnnouncementAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const subject = String(formData.get("subject") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (!subject) return { status: "error", message: "An announcement needs a subject line." };
+  if (!body) return { status: "error", message: "An announcement needs something to say." };
+
+  const [roster, captains] = await Promise.all([
+    listRosterForBoard(actor),
+    captainsByTeam(actor.compId),
+  ]);
+
+  const plan = planAnnouncement(roster, captains, {
+    compName: actor.compName,
+    boardName: actor.personName,
+    subject,
+    body,
+  });
+
+  if (plan.send.length === 0) {
+    return {
+      status: "error",
+      message:
+        plan.skipped.length > 0
+          ? `Nobody could be reached: ${plan.skipped.length} team(s) have no captain on file.`
+          : "No team is accepted or competing yet, so there is nobody to announce to.",
+    };
+  }
+
+  let queued = 0;
+  let already = 0;
+  for (const target of plan.send) {
+    const result = await enqueue({
+      compId: actor.compId,
+      personId: target.personId,
+      template: "announcement.sent",
+      payload: target.payload,
+      dedupeKey: target.dedupeKey,
+      createdByPersonId: actor.personId,
+    });
+    if (result.ok) queued += 1;
+    else if (result.reason === "duplicate") already += 1;
+  }
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "announcement.send",
+    entity: "comp",
+    entityId: actor.compId,
+    // The text, because an announcement is a thing a board said and the record should hold what.
+    after: { subject, queued, already, skipped: plan.skipped.length },
+  });
+
+  revalidatePath(`/board/${token}/roster`);
+
+  const parts = [
+    queued > 0 ? `Sent to ${queued} team${queued === 1 ? "" : "s"}` : null,
+    already > 0 ? `${already} already had this exact message` : null,
+    plan.skipped.length > 0
+      ? `${plan.skipped.length} have no captain on file (${plan.skipped
+          .map((row) => row.teamName)
+          .join(", ")})`
+      : null,
+  ].filter((part) => part !== null);
+
+  return {
+    status: "ok",
+    message: `${parts.join(" · ")}. Anyone who unsubscribed will not receive it.`,
+  };
+};
