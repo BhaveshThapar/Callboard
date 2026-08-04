@@ -213,7 +213,10 @@ Run it from **People** on the board screen.
 **1. Invite a captain.** Name, email, the team. The screen hands back a link **once** — nothing in
 the product can recover it afterwards, because only its sha256 is stored, the same treatment a judge
 link gets. Say out loud that a human still has to send it: **there is no comms engine yet**, so the
-screen says "copy this" rather than implying an email went out.
+screen tells you which: on a deployment with `RESEND_API_KEY` and `COMMS_FROM` set it is emailed
+to them as well, and without them it says so rather than implying an email went out. **The link is
+shown either way**, because nothing can recover it afterwards and a board that closed the tab
+trusting an email that was never configured would have destroyed the credential.
 
 **2. Open it and set a password.** The invitation **names who it is for before it is accepted**, so
 the address is fixed and readonly — accepting somebody else's link cannot make you them.

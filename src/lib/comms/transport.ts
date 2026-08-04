@@ -106,3 +106,13 @@ export const transportFromEnv = (): Transport => {
   const from = process.env.COMMS_FROM;
   return key && from ? resendTransport(key, from) : recordingTransport();
 };
+
+/**
+ * Whether a message queued right now would actually leave the building.
+ *
+ * Derived from the same two variables `transportFromEnv` reads, so the two cannot disagree — a
+ * screen that says "emailed" while the recording transport is selected is a board handing out a
+ * credential nobody received, and only the *screen* can tell them otherwise before they close it.
+ */
+export const sendingConfigured = (): boolean =>
+  Boolean(process.env.RESEND_API_KEY && process.env.COMMS_FROM);

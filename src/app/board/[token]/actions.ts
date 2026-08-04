@@ -19,6 +19,7 @@ import { planDuesReminders } from "@/lib/comms/dues";
 import { enqueue } from "@/lib/comms/outbox";
 import { planDepositReturned, planPaymentReceipt } from "@/lib/comms/receipts";
 import { captainsByTeam } from "@/lib/comms/recipients";
+import { sendingConfigured } from "@/lib/comms/transport";
 import { feeScheduleFor, today } from "@/lib/money/charges";
 import { whoOwes } from "@/lib/money/who-owes";
 import { invite, listInvitationsForBoard, orgOfComp, revokeAccess } from "@/lib/auth/accounts";
@@ -978,12 +979,50 @@ export const inviteAction = async (
   );
   if (!result.ok) return { status: "error", message: result.message };
 
+  const url = `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/invite/${result.value.token}`;
+
+  /**
+   * The invitation now goes out by itself, and **the link is still shown anyway**.
+   *
+   * That is not belt-and-braces, it is the only safe order. Only the sha256 of the token is stored,
+   * so nothing in the product can recover this link once the screen is gone — and sending is opt-in
+   * on two environment variables. A board on a deployment without them, told "emailed", would close
+   * the tab having destroyed the credential. So the link is shown, and the sentence beside it says
+   * whether an email is actually coming.
+   *
+   * **The consequence worth naming: the raw token now lives in `messages.payload`.** ADR-0003's rule
+   * is that only the hash is stored, and emailing a link cannot honour that — the outbox has to hold
+   * the thing it is going to send. So a read-only database leak, which previously yielded no working
+   * credential at all, now yields any *unspent* invitation. What bounds it is that an invitation
+   * names the person it is for before it is accepted, so a stolen one grants exactly that person's
+   * role at that comp and cannot make the holder somebody else; it is single-use and expires in two
+   * weeks. Scrubbing the payload once a message reaches `sent` would close the tail and is the
+   * obvious next hardening — it is not done here because it trades against the payload being the
+   * bytes that went in, and that trade deserves deciding rather than assuming.
+   */
+  const queued = await enqueue({
+    compId: actor.compId,
+    personId: result.value.personId,
+    template: "invitation.created",
+    payload: {
+      personName: name,
+      compName: actor.compName,
+      role,
+      invitedBy: actor.personName,
+      url,
+    },
+    dedupeKey: `invite:${result.value.invitationId}`,
+    createdByPersonId: actor.personId,
+  });
+
   revalidatePath(`/board/${token}/people`);
   return {
     status: "ok",
-    // The link is shown once, exactly as a seeded token is: only its sha256 is stored, so nothing
-    // in the product can recover it afterwards. Until the comms engine exists, a human sends it.
-    message: `Invitation for ${email}: ${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/invite/${result.value.token}`,
+    message: `Invitation for ${email}: ${url} — ${
+      queued.ok && sendingConfigured()
+        ? "also emailed to them."
+        : "sending is not configured, so send this link yourself."
+    }`,
   };
 };
 

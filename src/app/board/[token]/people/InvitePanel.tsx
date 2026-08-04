@@ -48,8 +48,10 @@ const INVITE_LABEL: Record<InvitableRole, string> = {
  *
  * The invitation link is shown **once**, in the message, and nothing in the product can recover it —
  * only its sha256 is stored, which is ADR-0003's rule applied to a credential that is minted rather
- * than seeded. Until the comms engine can send it, a human copies it, and the screen says so rather
- * than implying an email went out.
+ * than seeded. It is now also **emailed** to the person it names — and shown here regardless,
+ * because sending is opt-in on two environment variables and a board told "emailed" on a
+ * deployment without them would close the tab holding the only copy. The message says which of
+ * the two actually happened.
  */
 export function InvitePanel({
   token,

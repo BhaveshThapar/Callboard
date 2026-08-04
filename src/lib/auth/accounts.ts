@@ -325,7 +325,8 @@ export const describeInvitation = async (token: string): Promise<InvitationView 
   };
 };
 
-export type Invited = { token: string; invitationId: string };
+/** `personId` so the caller can address a message at the invitee without a second lookup. */
+export type Invited = { token: string; invitationId: string; personId: string };
 
 /**
  * The minting path ADR-0011 refused and ADR-0016 authorizes.
@@ -573,7 +574,7 @@ export const invite = async (
       after: { email, role: input.role, teamId: input.teamId ?? null },
     });
 
-    return { ok: true, value: { token, invitationId: row.id } };
+    return { ok: true, value: { token, invitationId: row.id, personId: person.id } };
   } catch (error) {
     if (violatedConstraint(error) === ACCOUNT_CONSTRAINTS.inviteLive) {
       return {
