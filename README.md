@@ -28,7 +28,7 @@ bun run db:seed                # 8 teams, 3 judges — prints the judge links
 bun run dev
 ```
 
-The seed prints three `/judge/<token>` URLs and one `/board/<token>` URL. Open one judge link per phone, the board link on a laptop, and watch scores land.
+The seed prints three `/judge/<token>` URLs, one `/board/<token>` URL and one `/invite/<token>` URL. Open one judge link per phone and the board link on a laptop — the board link exchanges itself for a cookie and lands you in the product at `/app/<org>/<comp>` ([ADR-0022](docs/decisions/0022-a-link-is-exchanged-for-a-cookie.md)). The invitation is the same screens reached by signing in instead.
 
 To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 
