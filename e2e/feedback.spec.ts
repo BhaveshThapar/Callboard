@@ -82,8 +82,12 @@ test("a judge's note reaches the feedback export, and the emcee gets a printable
   // Before the lock there is nothing to export: the snapshot the export reads does not exist.
   const early = await boardPage.goto(`/board/${demo.boardToken}/feedback?team=A-114`);
   expect(early?.status()).toBe(409);
+  // 200 with an empty state rather than a 404 since ADR-0022: the shell now *links* Results, and a
+  // nav item that 404s is the defect this repo has been bitten by twice. The page still shows no
+  // placements, which is the assertion that matters — there are none to show.
   const earlyResults = await boardPage.goto(`/board/${demo.boardToken}/results`);
-  expect(earlyResults?.status()).toBe(404);
+  expect(earlyResults?.status()).toBe(200);
+  await expect(boardPage.getByTestId("results-not-locked")).toBeVisible();
 
   await boardPage.goto(`/board/${demo.boardToken}`);
   await boardPage.getByTestId("lock-button").click();

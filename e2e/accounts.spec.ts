@@ -108,7 +108,7 @@ test("a board invites a captain who has no account, and the captain signs in", a
   await page.getByTestId("credential-password").fill(PASSWORD);
   await page.getByTestId("credential-confirm").fill(PASSWORD);
   await page.getByTestId("credential-submit").click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/app$/);
 
   // And the board can see that it landed.
   await page.goto(`/board/${comp.boardToken}/people`);
@@ -136,7 +136,7 @@ test("an invitation cannot be used twice", async ({ page, browser }) => {
   await page.getByTestId("credential-password").fill(PASSWORD);
   await page.getByTestId("credential-confirm").fill(PASSWORD);
   await page.getByTestId("credential-submit").click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/app$/);
 
   // A second person opening the same link -- a forwarded email, a shared screenshot.
   const other = await browser.newPage();
@@ -189,7 +189,7 @@ test("a failed sign-in never says which half was wrong", async ({ page }) => {
   await page.getByTestId("credential-password").fill(PASSWORD);
   await page.getByTestId("credential-confirm").fill(PASSWORD);
   await page.getByTestId("credential-submit").click();
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/app$/);
 
   const attempt = async (email: string, password: string): Promise<string> => {
     await page.goto("/sign-in");
@@ -301,15 +301,29 @@ test("a board member signs in and is told where their way in actually is", async
   await page.getByTestId("credential-confirm").fill(PASSWORD);
   await page.getByTestId("credential-submit").click();
 
-  // Their comp is named, and so is the reason there is nothing here to click.
+  // Their comp is named, and it *opens* — which is what ADR-0022 changed. This assertion used to
+  // read "emailed to you", because a signed-in board member had an account that authorized nothing
+  // and the honest thing was to say so. Now the same session resolves a `BoardActor`.
   await expect(page.getByTestId("my-comps")).toBeVisible();
-  await expect(page.getByTestId(`my-comp-${COMP}`)).toBeVisible();
-  await expect(page.getByTestId(`my-comp-${COMP}-note`)).toContainText(/emailed to you/i);
+  await page.getByTestId(`my-comp-${COMP}`).click();
+  await expect(page).toHaveURL(new RegExp(`/app/[^/]+/${COMP}$`));
+  await expect(page.getByTestId("comp-name")).toBeVisible();
 
-  // And the captain's page does not pretend their comp is missing. A 404 here is the bug; the
-  // landing page is where the sentence lives, so that is where they go.
+  // Signed in, so the shell offers a way out — a board *link* has nothing to sign out of, and the
+  // header says which of the two you are holding rather than pretending they are the same.
+  await expect(page.getByTestId("sign-out")).toBeVisible();
+  await expect(page.getByTestId("via-link")).toHaveCount(0);
+
+  // Every board screen, by session alone. No token was ever in this browser.
+  for (const section of ["roster", "money", "people"]) {
+    const response = await page.goto(`/app/${ORG}/${COMP}/${section}`);
+    expect(response?.status(), section).toBe(200);
+  }
+
+  // And the old captain URL still answers, because it went out in email. It redirects rather than
+  // 404ing; this board member is not a captain, so the team page sends them back to the dashboard.
   await page.goto(`/my/${comp.compId}`);
-  await expect(page).toHaveURL(/\/$/);
+  await expect(page).toHaveURL(/\/app$/);
   await expect(page.getByTestId("my-comps")).toBeVisible();
 });
 

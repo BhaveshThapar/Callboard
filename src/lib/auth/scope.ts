@@ -18,14 +18,24 @@ import type { JudgeLabelView } from "./labels";
 import { judgeLabel } from "./labels";
 import { hashToken } from "./token";
 
-/** `personId` is not optional: an unattributed lock is the thing PRD B6 forbids. */
+/**
+ * `personId` is not optional: an unattributed lock is the thing PRD B6 forbids.
+ *
+ * `boardAssignmentId` **is** optional, and its nullability is the only trace downstream that a board
+ * actor has two origins ([ADR-0022](../../../docs/decisions/0022-a-link-is-exchanged-for-a-cookie.md)):
+ * a link names a row in `board_assignments`, an account names a membership, and there is no
+ * assignment behind the second. Nothing reads it — `revokeAccess` works from `listBoardForBoard`,
+ * which selects assignments directly — so this stays a fact about provenance rather than a thing to
+ * branch on. If something ever does branch on it, that is the moment to ask whether the two grants
+ * have quietly become two authorities.
+ */
 export type BoardActor = {
   kind: "board";
   compId: string;
   compName: string;
   personId: string;
   personName: string;
-  boardAssignmentId: string;
+  boardAssignmentId: string | null;
 };
 export type JudgeActor = {
   kind: "judge";
