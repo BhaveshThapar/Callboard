@@ -511,3 +511,53 @@ test("signing out kills the session rather than only the cookie", async ({ page 
   await page.goto("/");
   await expect(page.getByTestId("my-comps")).toHaveCount(0);
 });
+
+/**
+ * *Sign out* has to mean out of **every** credential this browser is holding.
+ *
+ * ADR-0022 gave a browser a second way to be somebody: a board link exchanged for a cookie. For one
+ * commit `signOutAction` cleared only the session, so signing out on a browser that had also opened
+ * a board link left the person inside the comp — the header simply flipped from offering *Sign out*
+ * to reading *via board link*. On the shared laptop at a comp, which is where this product is
+ * actually used, that is the failure.
+ *
+ * The link itself is untouched and still in their email. What ends is this browser's copy.
+ */
+test("signing out drops the board link this browser was holding, too", async ({ page }) => {
+  const comp = seed();
+
+  // Both credentials in one browser: a board link opened, and an account signed into.
+  await page.goto(`/board/${comp.boardToken}`);
+  await expect(page.getByTestId("comp-name")).toBeVisible();
+  expect(
+    (await page.context().cookies()).find((c) => c.name === "callboard_board_link")?.value,
+  ).toBeTruthy();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Sanjay Rao",
+    email: "sanjay@example.com",
+    role: "board",
+  });
+  await page.goto(link);
+  await page.getByTestId("credential-password").fill(PASSWORD);
+  await page.getByTestId("credential-confirm").fill(PASSWORD);
+  await page.getByTestId("credential-submit").click();
+  await expect(page).toHaveURL(/\/app$/);
+
+  await page.getByTestId("sign-out").first().click();
+  await expect(page).toHaveURL(/\/sign-in/);
+
+  // Neither credential is left in the browser...
+  const remaining = (await page.context().cookies()).map((c) => c.name);
+  expect(remaining).not.toContain("callboard_session");
+  expect(remaining).not.toContain("callboard_board_link");
+
+  // ...and the comp refuses, which is the assertion that would have caught this.
+  const response = await page.goto(`/app/${ORG}/${COMP}`);
+  expect(response?.status()).toBe(404);
+
+  // The link is not revoked, though — reopening it works, because signing out of an account is not
+  // a board revoking a credential (ADR-0011).
+  await page.goto(`/board/${comp.boardToken}`);
+  await expect(page.getByTestId("comp-name")).toBeVisible();
+});

@@ -74,10 +74,12 @@ export const BOARD_LINK_COOKIE_OPTIONS = {
   maxAge: 60 * 60 * 12,
 } as const;
 
-export const setBoardLinkCookie = async (token: string): Promise<void> => {
-  const jar = await cookies();
-  jar.set(BOARD_LINK_COOKIE, token, BOARD_LINK_COOKIE_OPTIONS);
-};
+/*
+ * There is deliberately no `setBoardLinkCookie`. The only writer is the door, and a route handler
+ * that both sets a cookie and redirects sets it on the response it is returning — one object, one
+ * act. A `cookies()`-based setter beside this would be a second way to write the same cookie with
+ * nobody calling it, which is the shape this repo has now recorded six times.
+ */
 
 export const readBoardLinkCookie = async (): Promise<string | null> => {
   const jar = await cookies();
