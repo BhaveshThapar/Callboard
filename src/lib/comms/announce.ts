@@ -56,7 +56,18 @@ export const announcementDedupeKey = (teamId: string, subject: string, body: str
 export const planAnnouncement = (
   roster: readonly RosterTeamView[],
   captains: ReadonlyMap<string, string>,
-  content: { compName: string; boardName: string; subject: string; body: string },
+  content: {
+    compName: string;
+    boardName: string;
+    subject: string;
+    body: string;
+    /**
+     * Where the product lives, so the opt-out can be addressed. Passed in rather than read from the
+     * environment for `asOf`'s reason — a planner that reads `process.env` produces a different plan
+     * on a different host, and this one is unit-tested.
+     */
+    baseUrl: string;
+  },
 ): AnnouncementPlan => {
   const send: AnnouncementRecipient[] = [];
   const skipped: AnnouncementSkip[] = [];
@@ -80,6 +91,7 @@ export const planAnnouncement = (
         subject: content.subject,
         body: content.body,
         boardName: content.boardName,
+        unsubscribeUrl: content.baseUrl ? `${content.baseUrl}/unsubscribe/${personId}` : null,
       },
     });
   }

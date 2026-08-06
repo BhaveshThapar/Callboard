@@ -80,11 +80,24 @@ export type MessagePayloads = {
     invitedBy: string | null;
     url: string;
   };
+  /**
+   * The only **broadcast** template, and therefore the only one that has to carry a way out.
+   *
+   * `unsubscribeUrl` is on the payload rather than assembled at send, so there is **one** definition
+   * of where the opt-out lives: the body's visible line and the `List-Unsubscribe` header are the
+   * same string, read from the same field. Built at enqueue, where the person and the base URL are
+   * both already in hand.
+   *
+   * Nullable because a deployment with no `NEXT_PUBLIC_BASE_URL` cannot form one — and when that
+   * happens the announcement visibly lacks its opt-out line, which is a thing a test and a human can
+   * both see. It used to be a header that silently did not get set.
+   */
   "announcement.sent": {
     compName: string;
     subject: string;
     body: string;
     boardName: string;
+    unsubscribeUrl: string | null;
   };
 };
 
@@ -98,6 +111,32 @@ export const TEMPLATE_NAMES = [
   "invitation.created",
   "announcement.sent",
 ] as const satisfies readonly TemplateName[];
+
+/**
+ * Which fields hold something that must not outlive the send ([ADR-0021]).
+ *
+ * Declared beside the templates rather than inside the outbox, because *this payload carries a
+ * secret* is a fact about the template and the sweep loop is only where it is acted on. A template
+ * added later with a credential in it is one line here; a template added later with a credential in
+ * it and nothing here is the leak, and this list is the one place a reader would look.
+ *
+ * Exactly one entry, and it is the only one that should ever be easy to justify: an invitation is a
+ * link, and a link is the credential itself.
+ *
+ * [ADR-0021]: ../../../docs/decisions/0021-the-outbox-holds-a-secret-only-until-it-sends.md
+ */
+export const SCRUBBED_FIELDS: Partial<Record<TemplateName, readonly string[]>> = {
+  "invitation.created": ["url"],
+};
+
+/**
+ * What a scrubbed field is replaced *with*, because the key is not removed.
+ *
+ * Deleting it would leave the stored row failing its own payload type, so a replay would render
+ * `undefined` into a sentence a person supposedly read. This says what happened instead, which is
+ * the honest answer to "what was in this email" for a message whose whole point was a link.
+ */
+export const SCRUBBED = "(link removed after sending)";
 
 /** Whether a template is a thing a board sends *at* people or a thing the record owes them. */
 export const TEMPLATE_KIND: Record<TemplateName, "transactional" | "broadcast"> = {
@@ -208,7 +247,17 @@ const RENDER: { [K in TemplateName]: (payload: MessagePayloads[K]) => Rendered }
 
   "announcement.sent": (p) => ({
     subject: `${p.compName}: ${p.subject}`,
-    body: lines([p.body, signOff(p.compName, p.boardName)]),
+    body: lines([
+      p.body,
+      signOff(p.compName, p.boardName),
+      // Written out, not left to the mail client. `List-Unsubscribe` is set from this same string,
+      // but it is a header — a header is honoured by Gmail and Apple Mail and by nothing a captain
+      // is reading this on at 1am. An opt-out only a mail client can find is one that a person
+      // cannot use, and `people.unsubscribed_at` is only load-bearing if somebody can reach it.
+      p.unsubscribeUrl ? "" : null,
+      p.unsubscribeUrl ? `Stop receiving announcements: ${p.unsubscribeUrl}` : null,
+      p.unsubscribeUrl ? "Receipts and anything you owe still reach you." : null,
+    ]),
   }),
 };
 
@@ -226,3 +275,40 @@ export const render = <K extends TemplateName>(
 
 export const isTemplate = (name: string): name is TemplateName =>
   (TEMPLATE_NAMES as readonly string[]).includes(name);
+
+/**
+ * The opt-out link a stored broadcast carries, or `null`.
+ *
+ * Read off the payload rather than rebuilt, so the `List-Unsubscribe` header cannot point somewhere
+ * the body does not. Takes `unknown` because the caller has a row from the database: a payload
+ * written before this field existed simply has no link, which is the same answer as a deployment
+ * that could not form one.
+ */
+export const unsubscribeUrlOf = (payload: unknown): string | null => {
+  if (payload === null || typeof payload !== "object") return null;
+  const url = (payload as { unsubscribeUrl?: unknown }).unsubscribeUrl;
+  return typeof url === "string" && url !== "" ? url : null;
+};
+
+/**
+ * The payload as it should be stored once the message is gone ([ADR-0021]).
+ *
+ * Pure and total, and deliberately forgiving of what it is handed: the template arrives from a
+ * stored row, so a renamed one gets its payload back untouched rather than throwing — a message
+ * that failed to render must still be able to record that it failed.
+ *
+ * Returning the same reference when there is nothing to scrub is what lets the caller decide
+ * whether to write the column at all, which keeps every other template's send one statement.
+ *
+ * [ADR-0021]: ../../../docs/decisions/0021-the-outbox-holds-a-secret-only-until-it-sends.md
+ */
+export const scrubPayload = (template: string, payload: unknown): unknown => {
+  const fields = isTemplate(template) ? SCRUBBED_FIELDS[template] : undefined;
+  if (!fields || payload === null || typeof payload !== "object") return payload;
+
+  const scrubbed: Record<string, unknown> = { ...(payload as Record<string, unknown>) };
+  for (const field of fields) {
+    if (field in scrubbed) scrubbed[field] = SCRUBBED;
+  }
+  return scrubbed;
+};

@@ -995,15 +995,15 @@ export const inviteAction = async (
    * the tab having destroyed the credential. So the link is shown, and the sentence beside it says
    * whether an email is actually coming.
    *
-   * **The consequence worth naming: the raw token now lives in `messages.payload`.** ADR-0003's rule
-   * is that only the hash is stored, and emailing a link cannot honour that — the outbox has to hold
-   * the thing it is going to send. So a read-only database leak, which previously yielded no working
-   * credential at all, now yields any *unspent* invitation. What bounds it is that an invitation
-   * names the person it is for before it is accepted, so a stolen one grants exactly that person's
-   * role at that comp and cannot make the holder somebody else; it is single-use and expires in two
-   * weeks. Scrubbing the payload once a message reaches `sent` would close the tail and is the
-   * obvious next hardening — it is not done here because it trades against the payload being the
-   * bytes that went in, and that trade deserves deciding rather than assuming.
+   * **The consequence worth naming: the raw token lives in `messages.payload` until it is sent**
+   * ([ADR-0021](../../../../docs/decisions/0021-the-outbox-holds-a-secret-only-until-it-sends.md)).
+   * ADR-0003's rule is that only the hash is stored, and emailing a link cannot honour that — the
+   * outbox has to hold the thing it is going to send. So the window is closed at the other end
+   * instead: `sweep` strips the field when the message reaches `sent`, which turns *every unspent
+   * invitation in the table* into *whatever was queued in the last cron interval*. What bounds the
+   * remainder is that an invitation names the person it is for before it is accepted, so a stolen
+   * one grants exactly that person's role at that comp and cannot make the holder somebody else; it
+   * is single-use and expires in two weeks.
    */
   const queued = await enqueue({
     compId: actor.compId,
@@ -1231,6 +1231,9 @@ export const sendAnnouncementAction = async (
     boardName: actor.personName,
     subject,
     body,
+    // The one place the opt-out address is decided. It lands on the payload, so the visible line in
+    // the body and the `List-Unsubscribe` header the transport sets are the same string.
+    baseUrl: process.env.NEXT_PUBLIC_BASE_URL ?? "",
   });
 
   if (plan.send.length === 0) {

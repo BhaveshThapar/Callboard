@@ -434,6 +434,42 @@ test("an invitation is queued as email, and the link is shown anyway", async ({ 
   await expect(page.getByTestId("credential-email")).toHaveValue("tara@example.com");
 });
 
+/**
+ * ADR-0021 — the outbox holds the credential only until it sends it.
+ *
+ * ADR-0003's rule is that only the sha256 is stored, and emailing a link cannot honour it: the
+ * outbox has to hold the thing it is going to send. So the window is closed at the other end, and
+ * this is the assertion that says the closing actually happens — nothing downstream would notice a
+ * payload that quietly kept its token, which is precisely why it needs a test.
+ */
+test("a sent invitation stops carrying its own link", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Uma Nair",
+    email: "uma@example.com",
+    role: "captain",
+    team: "Accepted Beta",
+  });
+  const token = link.split("/invite/")[1] ?? "";
+  expect(token).not.toBe("");
+
+  // Queued, and holding the link, because that is the whole reason the payload exists.
+  expect(comms("payload", COMP, "uma@example.com")).toContain(token);
+
+  expect(comms("sweep", COMP)).toBe("1 1 0 0");
+
+  // Sent, and no longer holding it. The key stays, so a replay a season later renders a sentence
+  // that says what happened rather than `undefined`.
+  const after = comms("payload", COMP, "uma@example.com");
+  expect(after).not.toContain(token);
+  expect(after).toContain("(link removed after sending)");
+
+  // And the credential itself still works — the scrub took the copy, not the invitation.
+  await page.goto(link);
+  await expect(page.getByTestId("credential-email")).toHaveValue("uma@example.com");
+});
+
 test("signing out kills the session rather than only the cookie", async ({ page }) => {
   const comp = seed();
 

@@ -19,7 +19,7 @@ import { COMMS_CONSTRAINTS, messageEvents, messages, people } from "@/db/schema"
 import type { MessageState } from "@/db/schema";
 import { backoffMs, MAX_ATTEMPTS } from "./state";
 import type { MessagePayloads, TemplateName } from "./render";
-import { isTemplate, render, TEMPLATE_KIND } from "./render";
+import { isTemplate, render, scrubPayload, TEMPLATE_KIND, unsubscribeUrlOf } from "./render";
 import type { Transport } from "./transport";
 import { transportFromEnv } from "./transport";
 
@@ -87,7 +87,12 @@ const advance = async (
   messageId: string,
   state: MessageState,
   detail: string | null,
-  extra: { attempts?: number; providerRef?: string | null; sendAfter?: Date } = {},
+  extra: {
+    attempts?: number;
+    providerRef?: string | null;
+    sendAfter?: Date;
+    payload?: unknown;
+  } = {},
 ): Promise<void> => {
   await db.insert(messageEvents).values({ messageId, state, detail });
   await db
@@ -164,7 +169,6 @@ export type SweepResult = { claimed: number; sent: number; failed: number; skipp
 export const sweep = async (
   limit = 25,
   transport: Transport = transportFromEnv(),
-  baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? "",
 ): Promise<SweepResult> => {
   const result: SweepResult = { claimed: 0, sent: 0, failed: 0, skipped: 0 };
 
@@ -195,17 +199,37 @@ export const sweep = async (
       candidate.payload as MessagePayloads[typeof candidate.template],
     );
 
+    // The header and the body's visible line are the same string, off the payload, because two
+    // constructions of "where do I go to stop this" is one of them being wrong.
+    const unsubscribeUrl = unsubscribeUrlOf(candidate.payload);
+
     const sent = await transport.send({
       to: candidate.email,
       subject: content.subject,
       body: content.body,
-      ...(candidate.kind === "broadcast" && baseUrl
-        ? { unsubscribeUrl: `${baseUrl}/unsubscribe/${candidate.personId}` }
-        : {}),
+      ...(candidate.kind === "broadcast" && unsubscribeUrl ? { unsubscribeUrl } : {}),
     });
 
     if (sent.ok) {
-      await advance(candidate.id, "sent", null, { providerRef: sent.providerRef });
+      /**
+       * The payload stops holding the credential the moment it stops needing to ([ADR-0021]).
+       *
+       * On `sent` only. A `bounced` invitation was never delivered, so stripping it destroys the
+       * last copy of a link nobody received; `failed` is retryable and the next attempt has to be
+       * able to send the same thing. Both of those are states where the payload is still doing its
+       * job — this is the one where it is finished.
+       *
+       * It rides the same `UPDATE` that moves the state rather than being a second statement, so
+       * there is no window where a message reads `sent` with the link still in it, and no new
+       * failure mode: the send already happened and this cannot un-happen it.
+       *
+       * [ADR-0021]: ../../../docs/decisions/0021-the-outbox-holds-a-secret-only-until-it-sends.md
+       */
+      const scrubbed = scrubPayload(candidate.template, candidate.payload);
+      await advance(candidate.id, "sent", null, {
+        providerRef: sent.providerRef,
+        ...(scrubbed === candidate.payload ? {} : { payload: scrubbed }),
+      });
       result.sent += 1;
       continue;
     }

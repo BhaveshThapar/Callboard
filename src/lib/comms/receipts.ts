@@ -28,14 +28,6 @@ export type ReceiptPlan = {
  */
 export const receiptDedupeKey = (paymentId: string): string => `receipt:${paymentId}`;
 
-/**
- * What to tell a team that a payment arrived, or `null` when there is nobody to tell.
- *
- * The balance is the team's balance **after** the payment, which is why the caller re-reads the
- * roster rather than doing arithmetic here: `paid` is every cent that arrived and `owed` moves when
- * a charge is voided, so a receipt computing its own total would be a second definition of the one
- * number this product exists to get right.
- */
 export type DepositReturnedPlan = {
   personId: string;
   dedupeKey: string;
@@ -80,6 +72,14 @@ export const planDepositReturned = (
   };
 };
 
+/**
+ * What to tell a team that a payment arrived, or `null` when there is nobody to tell.
+ *
+ * The balance is the team's balance **after** the payment, which is why the caller re-reads the
+ * roster rather than doing arithmetic here: `paid` is every cent that arrived and `owed` moves when
+ * a charge is voided, so a receipt computing its own total would be a second definition of the one
+ * number this product exists to get right.
+ */
 export const planPaymentReceipt = (
   team: RosterTeamView,
   captains: ReadonlyMap<string, string>,

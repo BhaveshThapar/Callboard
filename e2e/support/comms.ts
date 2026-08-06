@@ -213,6 +213,28 @@ switch (command) {
     break;
   }
 
+  /**
+   * The stored payload of the latest message to one person, verbatim.
+   *
+   * The bytes are the point. Two specs need to read them rather than a rendering: ADR-0021's scrub,
+   * where the assertion is about what the row *stopped* holding, and the announcement's opt-out
+   * link, which a spec then has to actually open.
+   */
+  case "payload": {
+    const email = rest[0];
+    if (!email) throw new Error("usage: payload <compSlug> <email>");
+    const [row] = await db
+      .select({ payload: messages.payload })
+      .from(messages)
+      .innerJoin(people, eq(people.id, messages.personId))
+      .where(and(eq(messages.compId, comp.id), eq(people.email, email)))
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
+    if (!row) throw new Error(`no message in ${compSlug} addressed to ${email}`);
+    console.log(JSON.stringify(row.payload));
+    break;
+  }
+
   /** Template, recipient and where each message ended up — what a spec needs after a sweep. */
   case "outbox": {
     const rows = await db
@@ -244,6 +266,9 @@ switch (command) {
         subject: "Bus times",
         body: "The bus leaves at seven.",
         boardName: "Comms Chair",
+        // Carried because the product carries it: a fixture missing this would prove the suppression
+        // rule against a payload `sendAnnouncementAction` never produces.
+        unsubscribeUrl: `http://localhost:3000/unsubscribe/${personId}`,
       },
       dedupeKey: rest[0] ?? "announce:test",
     });

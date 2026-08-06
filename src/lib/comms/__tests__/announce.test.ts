@@ -29,6 +29,7 @@ const CONTENT = {
   boardName: "Ananya Krishnan",
   subject: "Load-in moved to 7:30",
   body: "Doors at 7:30, not 8. Park in Lot 4.",
+  baseUrl: "https://callboard.example",
 };
 
 describe("planAnnouncement", () => {
@@ -57,7 +58,38 @@ describe("planAnnouncement", () => {
       subject: "Load-in moved to 7:30",
       body: "Doors at 7:30, not 8. Park in Lot 4.",
       boardName: "Ananya Krishnan",
+      unsubscribeUrl: "https://callboard.example/unsubscribe/p3",
     });
+  });
+
+  /**
+   * The opt-out is addressed to the **person**, not the team, because `unsubscribed_at` is on
+   * `people` and is org-wide: somebody who captains two teams at one org opted out once.
+   */
+  it("addresses the opt-out to whoever is actually being written to", () => {
+    const plan = planAnnouncement(
+      [team("M-3", "competing", null)],
+      new Map([["M-3", "person-captain"]]),
+      CONTENT,
+    );
+
+    expect(plan.send[0]?.payload.unsubscribeUrl).toBe(
+      "https://callboard.example/unsubscribe/person-captain",
+    );
+  });
+
+  /**
+   * A deployment with no base URL cannot form a link, and the announcement then visibly lacks its
+   * opt-out line. That is the point: it used to be a header that silently did not get set, which is
+   * indistinguishable from a working one until somebody wants out.
+   */
+  it("carries no link rather than a broken one when there is no base URL", () => {
+    const plan = planAnnouncement([team("M-3", "competing", "p3")], new Map(), {
+      ...CONTENT,
+      baseUrl: "",
+    });
+
+    expect(plan.send[0]?.payload.unsubscribeUrl).toBeNull();
   });
 
   it("names a team it cannot reach rather than quietly telling fewer people", () => {

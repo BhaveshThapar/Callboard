@@ -133,3 +133,37 @@ test("unsubscribing stops announcements and does not stop a bill", async ({ page
   expect(comms("sweep", COMP)).toBe("1 1 0 0");
   expect(comms("outbox", COMP)).toContain("dues.reminder ada@example.com sent");
 });
+
+/**
+ * The other half of that split, and the one that was missing: **a person has to be able to find the
+ * way out.**
+ *
+ * The opt-out used to be a `List-Unsubscribe` header and nothing else — honoured by Gmail and Apple
+ * Mail, invisible everywhere else, and silently absent altogether on a deployment with no base URL.
+ * `people.unsubscribed_at` is only load-bearing if somebody can reach it, so this walks the link the
+ * way a captain would: out of the announcement, onto the page, and back to a bounced broadcast.
+ */
+test("the link in an announcement is the one that actually unsubscribes somebody", async ({
+  page,
+}) => {
+  const comp = seed();
+
+  await announce(page, comp.boardToken, "Parking", "Lot 4, not Lot 2.");
+
+  const payload = JSON.parse(comms("payload", COMP, "ada@example.com")) as {
+    unsubscribeUrl: string | null;
+  };
+  expect(payload.unsubscribeUrl).toContain("/unsubscribe/");
+
+  // Straight to it, with no session and no confirmation step — a mail client following
+  // `List-Unsubscribe-Post` gets no chance to fill in a form, and neither does a person at 1am.
+  await page.goto(payload.unsubscribeUrl ?? "");
+  await expect(page.getByTestId("unsubscribed")).toContainText("Unsubscribed");
+
+  // And it took. Four messages are now queued across two announcements; both of Ada's bounce,
+  // including the one that was already sitting in the outbox when she opted out.
+  await announce(page, comp.boardToken, "Call time", "Doors at seven.");
+  expect(comms("sweep", COMP)).toBe("2 2 0 2");
+  expect(comms("outbox", COMP)).toContain("announcement.sent ada@example.com bounced");
+  expect(comms("outbox", COMP)).toContain("announcement.sent ben@example.com sent");
+});
