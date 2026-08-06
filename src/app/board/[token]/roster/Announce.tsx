@@ -24,6 +24,10 @@ export function Announce({ token, audience }: { token: string; audience: number 
         not anyone who dropped. Signed by you. Anyone who has unsubscribed will not receive it, and
         you will be told how many that was.
       </p>
+      <p className="mt-2 text-caption text-subtle">
+        Each one carries a link to stop receiving announcements. It does not stop receipts or
+        anything about money owed.
+      </p>
 
       <form action={formAction} className="mt-4">
         <input type="hidden" name="token" value={token} />
