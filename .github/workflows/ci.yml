@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A hand crank, because on Aug 6 there was none. Actions stopped scheduling for this repo for
+  # several hours; the run for a pushed commit was never created, and once Actions recovered
+  # nothing retried it -- so a PR sat reading CLEAN with no `check` or `acceptance` on it at all,
+  # which is worse than reading red. Re-running a workflow needs a trigger that a person can pull.
+  workflow_dispatch:
 
 jobs:
   check:
