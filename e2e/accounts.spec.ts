@@ -61,6 +61,9 @@ const seed = (): SeededComp => {
 
 const PASSWORD = "a passphrase long enough to pass";
 
+const comms = (...args: string[]): string =>
+  execFileSync("bunx", ["tsx", "e2e/support/comms.ts", ...args], { encoding: "utf8" }).trim();
+
 /** Invites somebody from the board's People screen and returns the link it showed exactly once. */
 const inviteFrom = async (
   page: Page,
@@ -396,6 +399,75 @@ test("a liaison cannot be invited, because there is nothing for one to open", as
   // The refusal is a sentence, and no envelope was minted behind it.
   await page.reload();
   await expect(page.getByTestId("invitee-lia@example.com")).toHaveCount(0);
+});
+
+/**
+ * The invitation sends itself now, and **the link is still on the screen** — which is the part worth
+ * a test rather than the part that is obvious.
+ *
+ * Only the sha256 of the token is stored, so nothing can recover this link once the tab is closed,
+ * and sending is opt-in on two environment variables that CI does not set. A screen that said
+ * "emailed" here would be telling a board to close a tab that is holding the only copy of a
+ * credential nobody received.
+ */
+test("an invitation is queued as email, and the link is shown anyway", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Tara Bhatt",
+    email: "tara@example.com",
+    role: "captain",
+    team: "Accepted Beta",
+  });
+
+  // The screen still carries the link, and says plainly that nothing was sent from here.
+  const message = page.getByTestId("invite-message");
+  await expect(message).toContainText("/invite/");
+  await expect(message).toContainText("sending is not configured");
+
+  // And the outbox holds exactly one invitation, addressed to the person it names.
+  expect(comms("count", COMP)).toBe("1");
+  expect(comms("recipients", COMP)).toContain("invitation.created tara@example.com");
+
+  // The queued link is the one that works, not merely a link-shaped string.
+  await page.goto(link);
+  await expect(page.getByTestId("credential-email")).toHaveValue("tara@example.com");
+});
+
+/**
+ * ADR-0021 — the outbox holds the credential only until it sends it.
+ *
+ * ADR-0003's rule is that only the sha256 is stored, and emailing a link cannot honour it: the
+ * outbox has to hold the thing it is going to send. So the window is closed at the other end, and
+ * this is the assertion that says the closing actually happens — nothing downstream would notice a
+ * payload that quietly kept its token, which is precisely why it needs a test.
+ */
+test("a sent invitation stops carrying its own link", async ({ page }) => {
+  const comp = seed();
+
+  const link = await inviteFrom(page, comp.boardToken, {
+    name: "Uma Nair",
+    email: "uma@example.com",
+    role: "captain",
+    team: "Accepted Beta",
+  });
+  const token = link.split("/invite/")[1] ?? "";
+  expect(token).not.toBe("");
+
+  // Queued, and holding the link, because that is the whole reason the payload exists.
+  expect(comms("payload", COMP, "uma@example.com")).toContain(token);
+
+  expect(comms("sweep", COMP)).toBe("1 1 0 0");
+
+  // Sent, and no longer holding it. The key stays, so a replay a season later renders a sentence
+  // that says what happened rather than `undefined`.
+  const after = comms("payload", COMP, "uma@example.com");
+  expect(after).not.toContain(token);
+  expect(after).toContain("(link removed after sending)");
+
+  // And the credential itself still works — the scrub took the copy, not the invitation.
+  await page.goto(link);
+  await expect(page.getByTestId("credential-email")).toHaveValue("uma@example.com");
 });
 
 test("signing out kills the session rather than only the cookie", async ({ page }) => {

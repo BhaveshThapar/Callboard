@@ -159,7 +159,10 @@ unattached**, stated on the screen rather than lost — which is what a $5,000 g
 
 **5. Record the one that arrives short.** **BU Dheem's $100 deposit landed as $97.01**: type the
 gross and the fee the bank shows, and the team is credited the full $100 while the processor's cut
-is recorded as the org's cost rather than a hole.
+is recorded as the org's cost rather than a hole. Leave **"email a receipt"** ticked and say what it
+does: the captain is told what arrived, what it cost and what is left, and the receipt carries the
+gross — the team is credited what it sent, not what survived the processor. Then say why the box is
+a box: backfilling last season must not mail thirty captains who were expecting nothing.
 
 **6. Tick a row off against the bank.** Under **What arrived**, mark a payment matched. That is the
 column a treasurer works down beside a statement, and the reason the second pass through a season
@@ -184,20 +187,30 @@ quietly skipped, because "we reminded six of eight" and "everybody was reminded"
 
 Then: *how long does chasing eight teams take you today?*
 
+**9. Say something to everybody at once.** On the roster screen, **Announce** — a subject and a
+sentence, sent to every team that is `accepted` or `competing` and to nobody else. Say the exclusion
+out loud, because it is the whole difference between this and a GroupMe: the waitlist has not been
+told it is coming, and the team that dropped does not get told where to park. Two more things while
+it sends. **Click it twice**: identical words to the same team are refused, so a double-click is not
+a second email — and changing one word makes it a new announcement, which is how a board corrects
+itself. And **it is signed by them, with a way out**: every announcement carries an unsubscribe link
+that stops announcements and *not* receipts or anything about money owed. A board that has ever been
+told to stop emailing somebody knows why that distinction has to be in the product rather than in
+somebody's memory.
+
 **Nothing is sent from the demo deployment unless it is configured to send** — `RESEND_API_KEY` and
-`COMMS_FROM` are both required, and without them the engine records instead of sending. The demo
-roster's captains are all `@example.com`, which RFC 2606 reserves and no mail can ever reach, so a
-rehearsal cannot email a real person even by accident.
+`COMMS_FROM` are both required, and without them the engine records instead of sending. That covers
+every button in this section: the reminders, the receipt, the announcement and the invitation. The
+demo roster's captains are all `@example.com`, which RFC 2606 reserves and no mail can ever reach, so
+a rehearsal cannot email a real person even by accident.
 
 **Say what is not built, because they will find out anyway.** No card processing and no Stripe:
 every row here is entered by hand on a rail the system records and never moves. That is deliberate —
 the reconciliation gap is closed by the ledger, and routing would buy automatic ingestion, not
-correctness. **Receipts are still not built** — a reminder is a board deciding to chase, and a
-receipt fires off a payment landing, which is the next thing rather than the same thing. Reminders
-are also **only ever sent by a board pressing the button**: nothing here decides on its own to email
-somebody, and saying so is worth more than it sounds to a treasurer who has been burned by software
-that mails their teams unprompted. If they want card rails, that is a thing to hear from a founding
-partner rather than a thing to guess at, which makes it an ask, not an apology.
+correctness. Everything here is also **only ever sent by a board pressing a button**: nothing decides
+on its own to email somebody, and saying so is worth more than it sounds to a treasurer who has been
+burned by software that mails their teams unprompted. If they want card rails, that is a thing to
+hear from a founding partner rather than a thing to guess at, which makes it an ask, not an apology.
 
 ## The captain's beat — when they ask "does the team see any of this?"
 
@@ -207,10 +220,13 @@ texted a screenshot.
 
 Run it from **People** on the board screen.
 
-**1. Invite a captain.** Name, email, the team. The screen hands back a link **once** — nothing in
-the product can recover it afterwards, because only its sha256 is stored, the same treatment a judge
-link gets. Say out loud that a human still has to send it: **there is no comms engine yet**, so the
-screen says "copy this" rather than implying an email went out.
+**1. Invite a captain.** Name, email, the team. The invitation sends itself — and **the screen hands
+back the link anyway**, which is the part worth saying out loud. Only its sha256 is stored, the same
+treatment a judge link gets, so nothing in the product can recover it once the tab is closed; and
+sending is opt-in on two environment variables. A screen that said "emailed" on a deployment without
+them would be telling a board to close the tab holding the only copy of a credential nobody
+received. So the link is shown, and the sentence beside it says whether an email is actually going —
+on this demo it says *sending is not configured*, and that is the honest version of the same screen.
 
 **2. Open it and set a password.** The invitation **names who it is for before it is accepted**, so
 the address is fixed and readonly — accepting somebody else's link cannot make you them.
@@ -225,7 +241,8 @@ refused. Worth saying: the *membership* is what died, not their login — the sa
 working at any other comp they belong to, because authority here is per comp and identity is per org.
 
 The one sentence to close on: **a board can now reach one specific human**, which is what everything
-still unbuilt — dues reminders, receipts, schedule pushes — has been waiting on.
+else has been waiting on — dues reminders and receipts are built on top of it, and the schedule
+pushes the Gita needs are the same engine with a different trigger.
 
 ## The five minutes
 
@@ -270,6 +287,16 @@ Note out loud what is *not* in that file: no scores, and no judge's name. Then m
 > You can prove the placement is right. That's different from handing them the score sheet — which is just an invitation to argue about a 27 versus a 28.
 
 The proof lives in the lock: the snapshot re-runs and returns the same placements, in front of them, a day later or a year later. The captain gets an answer instead of an argument. One file per team, too — you cannot accidentally send a team its rivals' notes, because there is no file that contains them.
+
+**Then press *Send feedback*, and say what you just skipped.** Every placed team gets its own
+placement, its own deduction and reason, and what each judge wrote — in one click, instead of eight
+downloads and eight attachments. That attaching-by-hand is where a team ends up sent somebody else's
+notes; it is not a hypothetical, it is what the manual version *is*. Two things worth naming while
+it runs. It **refuses before the lock**, because the placement comes from the frozen snapshot — what
+a team is told is what the placements were announced from. And a **correction is deliverable**: an
+override supersedes the run, so re-sending after a re-lock reaches everybody with the corrected
+placement, while pressing send twice against the same run reaches nobody twice. If it were keyed on
+the team alone, the one time a board most needs to send again is the one time it could not.
 
 **Aside, if a judge's link comes up.** Any judge can be revoked from the board screen mid-comp. The link stops opening; their scores stand and still count. Revoking is not a retraction.
 

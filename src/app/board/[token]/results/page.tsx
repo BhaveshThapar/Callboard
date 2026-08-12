@@ -4,6 +4,7 @@ import { eyebrowClass } from "@/components/styles";
 import { listTeamsForBoard, resolveBoardActor } from "@/lib/auth/scope";
 import { latestLockedRun, reproduce } from "@/lib/comp/tab";
 import { PrintButton } from "./PrintButton";
+import { SendFeedback } from "./SendFeedback";
 
 export const dynamic = "force-dynamic";
 
@@ -111,6 +112,10 @@ export default async function ResultsPage({ params }: { params: Promise<{ token:
         and what each judge wrote — with no scores, and no judge named. One file per team, so
         forwarding one cannot send a team its rivals&rsquo; notes.
       </p>
+
+      {/* The same projection, delivered rather than downloaded. Keyed on the team *and* this run,
+          so a correction can be sent and a second click cannot reach anybody twice. */}
+      <SendFeedback token={token} teams={placements.length} />
 
       <footer className="mt-10 flex items-center justify-between gap-4 text-micro text-subtle">
         <span>

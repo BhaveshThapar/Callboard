@@ -149,4 +149,47 @@ describe("planDuesReminders", () => {
     expect(plan.send).toEqual([]);
     expect(plan.skipped).toEqual([]);
   });
+
+  /**
+   * The case that made A10 decorative for exactly the boards it was built for.
+   *
+   * `teams.contact_person_id` is written by the registration form, and setup is founder-run by
+   * design (PRD §12) — so a founding partner's roster is *seeded*, has no contact on any team, and
+   * every team fell into `no-contact`. A captain who accepted an invitation is the same human by a
+   * different door, and P1 built that door; the caller resolves it and passes it in, because doing
+   * so needs a second table and this function must not touch one.
+   */
+  it("reaches a captain who accepted an invitation when nobody registered the team", () => {
+    const roster = [
+      team("M-2", "Seeded Team", null, [
+        { kind: "registration", amountCents: 220_000, paidCents: 0 },
+      ]),
+    ];
+    const owed = report([owes("M-2", "Seeded Team", 220_000)]);
+
+    const without = planDuesReminders(owed, roster, CONTEXT);
+    expect(without.send).toHaveLength(0);
+    expect(without.skipped[0]?.reason).toBe("no-contact");
+
+    const withCaptain = planDuesReminders(owed, roster, {
+      ...CONTEXT,
+      contactFor: new Map([["M-2", "person-captain"]]),
+    });
+    expect(withCaptain.skipped).toHaveLength(0);
+    expect(withCaptain.send[0]?.personId).toBe("person-captain");
+  });
+
+  /** A registered contact wins: the person who filled in the form said they were the contact. */
+  it("prefers the registered contact over a captain membership", () => {
+    const roster = [
+      team("M-2", "Registered Team", "person-registered", [
+        { kind: "registration", amountCents: 220_000, paidCents: 0 },
+      ]),
+    ];
+    const plan = planDuesReminders(report([owes("M-2", "Registered Team", 220_000)]), roster, {
+      ...CONTEXT,
+      contactFor: new Map([["M-2", "person-captain"]]),
+    });
+    expect(plan.send[0]?.personId).toBe("person-registered");
+  });
 });

@@ -15,8 +15,13 @@ import {
 } from "@/db/schema";
 import type { CompStatus, PaymentRail, TeamStatus } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
+import { planAnnouncement } from "@/lib/comms/announce";
 import { planDuesReminders } from "@/lib/comms/dues";
+import { planFeedbackDelivery } from "@/lib/comms/feedback";
 import { enqueue } from "@/lib/comms/outbox";
+import { planDepositReturned, planPaymentReceipt } from "@/lib/comms/receipts";
+import { captainsByTeam } from "@/lib/comms/recipients";
+import { sendingConfigured } from "@/lib/comms/transport";
 import { feeScheduleFor, today } from "@/lib/money/charges";
 import { whoOwes } from "@/lib/money/who-owes";
 import { invite, listInvitationsForBoard, orgOfComp, revokeAccess } from "@/lib/auth/accounts";
@@ -24,7 +29,7 @@ import type { InvitableRole } from "@/db/schema";
 import { INVITABLE_ROLES } from "@/db/schema";
 import type { DepositState } from "@/lib/money/deposit";
 import { DEPOSIT_STATES } from "@/lib/money/deposit";
-import { advanceDeposit } from "@/lib/money/deposits";
+import { advanceDeposit, listDepositsForBoard } from "@/lib/money/deposits";
 import { formatCents, parseDollars } from "@/lib/money/format";
 import {
   allocatePayment,
@@ -40,14 +45,17 @@ import {
 } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
+  listJudgeLabelsForBoard,
   listRosterForBoard,
   NOT_COMPETING,
   resolveBoardActor,
   resolveRosterTeamForBoard,
   resolveTeamForBoard,
 } from "@/lib/auth/scope";
+import { notesForBoard } from "@/lib/comp/feedback";
 import { setCompStatus } from "@/lib/comp/status";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
+import { noteKey } from "@/lib/export/feedback";
 import type { BoardActionState } from "./state";
 
 const CHAIN_INDEXES = new Set<string>(CHAIN_INDEX_NAMES);
@@ -608,14 +616,72 @@ export const recordPaymentAction = async (
   });
   if (!result.ok) return { status: "error", message: result.message };
 
+  /**
+   * A7's receipt, and it is queued **after** the ledger's transaction rather than inside it.
+   *
+   * `recordPayment` is one of the four sanctioned `withTransaction` callers because a payment row,
+   * its allocations and the counter that constrains them are one act. A receipt is not part of that
+   * act: it is a consequence of it. Putting the enqueue inside would mean a comms failure rolls back
+   * money that genuinely arrived, which is the reconciliation gap this product is sold against,
+   * caused by the feature that announces it.
+   *
+   * So the money is already safe by the time this runs, and a failure here costs a notification.
+   * The receipt is opt-out rather than automatic — a treasurer backfilling last season's payments on
+   * a Sunday must not mail thirty captains, and the checkbox is where they say so.
+   */
+  let receipt: "queued" | "already" | "no-contact" | "off" = "off";
+  if (String(formData.get("receipt") ?? "") !== "") {
+    const [roster, captains] = await Promise.all([
+      listRosterForBoard(actor),
+      captainsByTeam(actor.compId),
+    ]);
+    const team = roster.find((row) => row.id === teamId);
+    const plan = team
+      ? planPaymentReceipt(
+          team,
+          captains,
+          {
+            id: result.paymentId,
+            grossCents,
+            feeCents,
+            rail: rail as PaymentRail,
+          },
+          { compName: actor.compName },
+        )
+      : null;
+
+    if (!plan) {
+      receipt = "no-contact";
+    } else {
+      const queued = await enqueue({
+        compId: actor.compId,
+        personId: plan.personId,
+        template: "payment.receipt",
+        payload: plan.payload,
+        dedupeKey: plan.dedupeKey,
+        createdByPersonId: actor.personId,
+      });
+      receipt = queued.ok ? "queued" : queued.reason === "duplicate" ? "already" : "no-contact";
+    }
+  }
+
+  const RECEIPT_SAID: Record<typeof receipt, string> = {
+    queued: " A receipt is on its way to the captain.",
+    already: " A receipt for this payment already went out.",
+    // Named rather than swallowed: a board that ticked the box and got nothing sent has to be told,
+    // for the same reason A10 names the teams it could not chase.
+    "no-contact": " No receipt — this team has no captain on file.",
+    off: "",
+  };
+
   revalidatePath(`/board/${token}/money`);
   revalidatePath(`/board/${token}/roster`);
   return {
     status: "ok",
     message:
-      result.creditCents > 0
+      (result.creditCents > 0
         ? `Recorded. ${formatCents(result.creditCents)} of it is not attached to anything yet.`
-        : "Recorded.",
+        : "Recorded.") + RECEIPT_SAID[receipt],
   };
 };
 
@@ -766,13 +832,56 @@ export const advanceDepositAction = async (
   const result = await advanceDeposit(actor, teamId, to as DepositState, reason || null);
   if (!result.ok) return { status: "error", message: result.message };
 
+  /**
+   * A7's other receipt, and only for `refunded`.
+   *
+   * There is deliberately no `forfeited` notice. A forfeit moves no money and is a board keeping
+   * something a team believed was coming back; delivering that by form letter is the wrong
+   * instrument, and the reason the board had to type is one they should say themselves.
+   *
+   * Outside the deposit's transaction for the receipt's reason: the money and its terminal event
+   * land together or not at all, and a comms failure must not undo a refund that already happened.
+   */
+  let told = false;
+  if (result.state === "refunded") {
+    const [deposits, roster, captains] = await Promise.all([
+      listDepositsForBoard(actor),
+      listRosterForBoard(actor),
+      captainsByTeam(actor.compId),
+    ]);
+    const deposit = deposits.find((row) => row.teamId === teamId);
+    const team = roster.find((row) => row.id === teamId);
+
+    const plan =
+      deposit && team
+        ? planDepositReturned(team, captains, deposit, {
+            compName: actor.compName,
+            boardName: actor.personName,
+          })
+        : null;
+
+    if (plan) {
+      const queued = await enqueue({
+        compId: actor.compId,
+        personId: plan.personId,
+        template: "deposit.returned",
+        payload: plan.payload,
+        dedupeKey: plan.dedupeKey,
+        createdByPersonId: actor.personId,
+      });
+      told = queued.ok;
+    }
+  }
+
   revalidatePath(`/board/${token}/money`);
   revalidatePath(`/board/${token}/roster`);
   return {
     status: "ok",
     message:
       result.state === "refunded"
-        ? "Deposit returned. It is no longer owed and no longer counted as paid."
+        ? `Deposit returned. It is no longer owed and no longer counted as paid.${
+            told ? " The captain has been told." : ""
+          }`
         : `Deposit is now ${result.state.replace("_", " ")}.`,
   };
 };
@@ -875,12 +984,50 @@ export const inviteAction = async (
   );
   if (!result.ok) return { status: "error", message: result.message };
 
+  const url = `${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/invite/${result.value.token}`;
+
+  /**
+   * The invitation now goes out by itself, and **the link is still shown anyway**.
+   *
+   * That is not belt-and-braces, it is the only safe order. Only the sha256 of the token is stored,
+   * so nothing in the product can recover this link once the screen is gone — and sending is opt-in
+   * on two environment variables. A board on a deployment without them, told "emailed", would close
+   * the tab having destroyed the credential. So the link is shown, and the sentence beside it says
+   * whether an email is actually coming.
+   *
+   * **The consequence worth naming: the raw token lives in `messages.payload` until it is sent**
+   * ([ADR-0021](../../../../docs/decisions/0021-the-outbox-holds-a-secret-only-until-it-sends.md)).
+   * ADR-0003's rule is that only the hash is stored, and emailing a link cannot honour that — the
+   * outbox has to hold the thing it is going to send. So the window is closed at the other end
+   * instead: `sweep` strips the field when the message reaches `sent`, which turns *every unspent
+   * invitation in the table* into *whatever was queued in the last cron interval*. What bounds the
+   * remainder is that an invitation names the person it is for before it is accepted, so a stolen
+   * one grants exactly that person's role at that comp and cannot make the holder somebody else; it
+   * is single-use and expires in two weeks.
+   */
+  const queued = await enqueue({
+    compId: actor.compId,
+    personId: result.value.personId,
+    template: "invitation.created",
+    payload: {
+      personName: name,
+      compName: actor.compName,
+      role,
+      invitedBy: actor.personName,
+      url,
+    },
+    dedupeKey: `invite:${result.value.invitationId}`,
+    createdByPersonId: actor.personId,
+  });
+
   revalidatePath(`/board/${token}/people`);
   return {
     status: "ok",
-    // The link is shown once, exactly as a seeded token is: only its sha256 is stored, so nothing
-    // in the product can recover it afterwards. Until the comms engine exists, a human sends it.
-    message: `Invitation for ${email}: ${process.env.NEXT_PUBLIC_BASE_URL ?? ""}/invite/${result.value.token}`,
+    message: `Invitation for ${email}: ${url} — ${
+      queued.ok && sendingConfigured()
+        ? "also emailed to them."
+        : "sending is not configured, so send this link yourself."
+    }`,
   };
 };
 
@@ -956,15 +1103,29 @@ export const sendDuesRemindersAction = async (
   const actor = await resolveBoardActor(token);
   if (!actor) return { status: "error", message: "This board link is no longer valid." };
 
-  const [roster, schedule] = await Promise.all([
+  const [roster, schedule, captains] = await Promise.all([
     listRosterForBoard(actor),
     feeScheduleFor(actor.compId),
+    /**
+     * The captains who accepted an invitation, which is the only contact a **seeded** roster has.
+     *
+     * `teams.contact_person_id` is written by the registration form, and setup is founder-run by
+     * design — so without this every founding partner's A10 button reports "nobody could be
+     * reminded" and the feature is decorative for exactly the boards it was built for.
+     *
+     * Shared with the receipt path rather than queried twice: two copies of "who do we write to
+     * about this team" is how a board gets chased at one address and receipted at another.
+     */
+    captainsByTeam(actor.compId),
   ]);
 
   const asOf = today();
   const plan = planDuesReminders(whoOwes(roster, schedule, asOf), roster, {
     compName: actor.compName,
     boardName: actor.personName,
+    // Precedence lives in `contactPersonFor`, which this planner applies: a registered contact wins
+    // and a captain's membership is the fallback, never the override.
+    contactFor: captains,
     // The billing period the dedupe key is scoped to, stated here rather than inside the pure
     // planner: one reminder per team per calendar month is a policy, and it belongs at the call
     // site where a board's own answer can replace it.
@@ -1030,4 +1191,205 @@ export const sendDuesRemindersAction = async (
     status: failed > 0 ? "error" : "ok",
     message: `${parts.join(" · ")}. Sending happens in the background; watch the outbox.`,
   };
+};
+
+
+/**
+ * The board saying something to every team that is coming.
+ *
+ * The first **broadcast** send in the product, which is what makes `people.unsubscribed_at` load
+ * bearing rather than decorative: `sweep` bounces a broadcast to somebody who opted out and delivers
+ * a transactional one, so this is the path that respects it. A board is told how many that was —
+ * silently reaching fewer people than the screen implies is the failure this whole feature would
+ * otherwise introduce.
+ *
+ * No window is added. The audience is `listRosterForBoard` filtered by `ANNOUNCEABLE_STATUSES`, and
+ * no id arrives on the form at all — the subject is the actor's own comp, which is `setCompStatus`'
+ * and `regenerateCharges`' shape. There is nothing here to check because there is no claim.
+ */
+export const sendAnnouncementAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+  const subject = String(formData.get("subject") ?? "").trim();
+  const body = String(formData.get("body") ?? "").trim();
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  if (!subject) return { status: "error", message: "An announcement needs a subject line." };
+  if (!body) return { status: "error", message: "An announcement needs something to say." };
+
+  const [roster, captains] = await Promise.all([
+    listRosterForBoard(actor),
+    captainsByTeam(actor.compId),
+  ]);
+
+  const plan = planAnnouncement(roster, captains, {
+    compName: actor.compName,
+    boardName: actor.personName,
+    subject,
+    body,
+    // The one place the opt-out address is decided. It lands on the payload, so the visible line in
+    // the body and the `List-Unsubscribe` header the transport sets are the same string.
+    baseUrl: process.env.NEXT_PUBLIC_BASE_URL ?? "",
+  });
+
+  if (plan.send.length === 0) {
+    return {
+      status: "error",
+      message:
+        plan.skipped.length > 0
+          ? `Nobody could be reached: ${plan.skipped.length} team(s) have no captain on file.`
+          : "No team is accepted or competing yet, so there is nobody to announce to.",
+    };
+  }
+
+  let queued = 0;
+  let already = 0;
+  for (const target of plan.send) {
+    const result = await enqueue({
+      compId: actor.compId,
+      personId: target.personId,
+      template: "announcement.sent",
+      payload: target.payload,
+      dedupeKey: target.dedupeKey,
+      createdByPersonId: actor.personId,
+    });
+    if (result.ok) queued += 1;
+    else if (result.reason === "duplicate") already += 1;
+  }
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "announcement.send",
+    entity: "comp",
+    entityId: actor.compId,
+    // The text, because an announcement is a thing a board said and the record should hold what.
+    after: { subject, queued, already, skipped: plan.skipped.length },
+  });
+
+  revalidatePath(`/board/${token}/roster`);
+
+  const parts = [
+    queued > 0 ? `Sent to ${queued} team${queued === 1 ? "" : "s"}` : null,
+    already > 0 ? `${already} already had this exact message` : null,
+    plan.skipped.length > 0
+      ? `${plan.skipped.length} have no captain on file (${plan.skipped
+          .map((row) => row.teamName)
+          .join(", ")})`
+      : null,
+  ].filter((part) => part !== null);
+
+  return {
+    status: "ok",
+    message: `${parts.join(" · ")}. Anyone who unsubscribed will not receive it.`,
+  };
+};
+
+/**
+ * ADJ·2 — delivering the judges' notes, which the map has carried as the unbuilt half since B8.
+ *
+ * Refused before the lock, and that is not a convenience: the placement and the deduction come from
+ * the frozen `tab_runs` snapshot, so what a team receives is what the placements were announced
+ * from. Notes are read live because they are deliberately not in the snapshot and are refused after
+ * the lock, so both halves are fixed at the same moment.
+ *
+ * Keyed on the team **and the run**, so a correction is deliverable. An override supersedes the run,
+ * which mints new keys; pressing send twice against the same run reaches nobody twice.
+ */
+export const sendFeedbackAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const token = String(formData.get("token") ?? "");
+
+  const actor = await resolveBoardActor(token);
+  if (!actor) return { status: "error", message: "This board link is no longer valid." };
+
+  const locked = await latestLockedRun(actor.compId);
+  if (!locked) {
+    return { status: "error", message: "Results are not locked yet, so there is no feedback to send." };
+  }
+
+  const [roster, judges, notes, captains] = await Promise.all([
+    listRosterForBoard(actor),
+    // Revoked judges included: their scores still counted, so their feedback still ships.
+    listJudgeLabelsForBoard(actor),
+    notesForBoard(actor),
+    captainsByTeam(actor.compId),
+  ]);
+
+  const deductionReasons = new Map<string, string[]>();
+  for (const deduction of locked.inputs.deductions) {
+    const reasons = deductionReasons.get(deduction.teamId) ?? [];
+    reasons.push(deduction.reason);
+    deductionReasons.set(deduction.teamId, reasons);
+  }
+
+  const plan = planFeedbackDelivery(
+    {
+      runId: locked.id,
+      placements: locked.results.placements,
+      deductionReasons,
+      judges: new Map(judges.map((judge) => [judge.assignmentId, judge.label])),
+      scoredBy: new Set(locked.inputs.scores.map((score) => noteKey(score.judgeId, score.teamId))),
+      notes,
+    },
+    roster,
+    captains,
+    { compName: actor.compName, boardName: actor.personName },
+  );
+
+  if (plan.send.length === 0) {
+    return {
+      status: "error",
+      message:
+        plan.skipped.length > 0
+          ? `Nobody could be reached: ${plan.skipped.length} placed team(s) have no captain on file.`
+          : "Nothing placed in the locked results, so there is no feedback to send.",
+    };
+  }
+
+  let queued = 0;
+  let already = 0;
+  for (const target of plan.send) {
+    const result = await enqueue({
+      compId: actor.compId,
+      personId: target.personId,
+      template: "feedback.delivered",
+      payload: target.payload,
+      dedupeKey: target.dedupeKey,
+      createdByPersonId: actor.personId,
+    });
+    if (result.ok) queued += 1;
+    else if (result.reason === "duplicate") already += 1;
+  }
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "feedback.deliver",
+    entity: "tab_run",
+    entityId: locked.id,
+    after: { queued, already, skipped: plan.skipped.length },
+  });
+
+  revalidatePath(`/board/${token}/results`);
+
+  const parts = [
+    queued > 0 ? `Feedback sent to ${queued} team${queued === 1 ? "" : "s"}` : null,
+    already > 0 ? `${already} already had it for this result` : null,
+    plan.skipped.length > 0
+      ? `${plan.skipped.length} have no captain on file (${plan.skipped
+          .map((row) => row.teamName)
+          .join(", ")})`
+      : null,
+  ].filter((part) => part !== null);
+
+  return { status: "ok", message: `${parts.join(" · ")}. No scores are included.` };
 };

@@ -1,6 +1,6 @@
 # ADR-0003 — Judges authenticate by signed link, never by account
 
-**Status:** accepted · July 9, 2026 · the board-link half superseded by [ADR-0007](0007-board-links-are-per-person.md)
+**Status:** accepted · July 9, 2026 · the board-link half superseded by [ADR-0007](0007-board-links-are-per-person.md) · *only the hash is stored* narrowed by [ADR-0021](0021-the-outbox-holds-a-secret-only-until-it-sends.md)
 
 ## Context
 
@@ -15,6 +15,9 @@ The board needs protection too. The demo lives on a public URL, and the lock but
 The credential is the URL.
 
 - `judge_assignments.token_hash` stores the sha256 of a 32-byte random token. The raw token exists only in the link handed to the judge.
+
+  > **Narrowed by [ADR-0021](0021-the-outbox-holds-a-secret-only-until-it-sends.md), August 5, 2026.** This still holds of every table that *authorizes* — judge links, board links, and `invitations` itself. It does not hold of the outbox: an invitation that emails itself has to be held somewhere between being queued and being sent, so the raw link lives in `messages.payload` for one cron interval and is stripped when the message reaches `sent`. "We never store a raw token" is exactly the kind of sentence that gets repeated after it has stopped being true, so it is corrected here rather than only there.
+
 - `comps.board_token_hash` uses the identical primitive, one per comp, authorizing the tab view, deductions, and the lock.
 - Resolving a token is an indexed lookup on its hash. Revoking a judge is `update judge_assignments set revoked_at = now()`.
 - `src/lib/auth/token.ts` is the only place tokens are minted or hashed.

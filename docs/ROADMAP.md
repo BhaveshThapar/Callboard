@@ -55,10 +55,10 @@ Ship target: live for the **January–March 2027** season.
 - Team submission portal for post-acceptance materials (A4) — blocked on a third actor kind and a link-minting path ([ADR-0011](decisions/0011-nothing-mints-a-link.md)), which is a decision rather than an oversight
 - Stripe Connect Standard, ACH-first, nonprofit rate, optional surcharge (A5, A5a–c) — **where the line now holds**
 - ~~Fee schedule engine; exact per-team totals (A6)~~ — **shipped July 31, 2026.** Pure and ESLint-fenced; `asOf` is passed in
-- ~~Refunds and deposit state (A7)~~ — **shipped August 1, 2026** as an append-only `deposit_events` chain with a terminal index, driven from the board's deposit table. **Receipts are not built** — they need a delivery channel, which is the comms engine
+- ~~Refunds and deposit state (A7)~~ — **shipped August 1, 2026** as an append-only `deposit_events` chain with a terminal index, driven from the board's deposit table. ~~Receipts~~ followed on **August 4, 2026** once the comms engine had a caller: two templates rather than one, because a returned deposit is not a receipt with a minus sign in it. There is deliberately **no forfeit notice** — a forfeit moves no money and is a sentence a person should say
 - ~~Fee-aware gross/net ledger (A8)~~ — **shipped August 1, 2026**, including attaching a lump to obligations that did not exist when it arrived
 - ~~One-screen dashboard: applied / accepted / paid / outstanding (A9)~~ — **shipped August 1, 2026**
-- One-click reminders to late payers (A10)
+- ~~One-click reminders to late payers (A10)~~ — **written August 3–4, 2026** and merged. Not yet `Live`: nothing has been sent from the deployed database, which has no sending credential on it
 - Google Drive import as the on-ramp (A11)
 
 See [PAYMENTS.md](PAYMENTS.md) and [DATA_MODEL.md](DATA_MODEL.md) — both are already written.
@@ -67,15 +67,15 @@ See [PAYMENTS.md](PAYMENTS.md) and [DATA_MODEL.md](DATA_MODEL.md) — both are a
 
 ## Adjacent tier — nearly free, reads the same record
 
-- Judge feedback delivery, per-team score export
-- Public read-only info page
+- ~~Judge feedback delivery~~ — **written August 4, 2026**, one button per locked run; merged, not yet sent from production. ~~Per-team score export~~ — shipped with Module B
+- ~~Public read-only info page~~ — **shipped July 31, 2026**
 - Food timing (the hospitality slice already living in the Gita)
 
 ## Spine completion — after paying customers exist
 
 - **Gita + comp-day mode.** The highest-value hard problem (PRD §9). The existing spreadsheet is a compiler; the missing product is the runtime. The one new capability is G3: a single "running N minutes behind" input that re-derives the whole cascade — the cell that does not exist today.
 - Liaison and volunteer coordination; SWA-training checklist
-- Comms engine: announcements and pushes, firing off the same record
+- ~~Comms engine: announcements and pushes, firing off the same record~~ — **the engine landed August 3, 2026 and its callers on August 4–5**: dues reminders, receipts, the invitation, announcements, feedback delivery. Not yet `Live`; sending is opt-in on a key and a from-address that production does not have. The Gita's push-on-change (G5) is the same engine with a different trigger, and stays gated with the Gita
 
 ## Later / separate
 
