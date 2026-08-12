@@ -80,6 +80,11 @@ const move = async (page: Page, bidCode: string, to: string): Promise<void> => {
  */
 const payDeposit = async (page: Page, token: string, bidCode: string): Promise<void> => {
   await page.goto(`/board/${token}/money`);
+  // Wait for the form before reaching inside it, exactly as `money()` below does. Without this a
+  // page that failed to render leaves the option locator auto-waiting for the whole 180s test
+  // timeout, and the failure reads as "this team is missing" rather than "this page never loaded" —
+  // which is what it cost to diagnose twice.
+  await expect(page.getByTestId("record-payment")).toBeVisible();
   const option = page
     .locator('[data-testid="payment-team"] option')
     .filter({ hasText: `(${bidCode})` });

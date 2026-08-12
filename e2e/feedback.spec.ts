@@ -28,6 +28,9 @@ const CRITERIA = [
 const TEAM_COUNT = 8;
 const NOTE = 'Tight formations, but the third transition drags. Judge said "watch it".';
 
+const comms = (...args: string[]): string =>
+  execFileSync("bunx", ["tsx", "e2e/support/comms.ts", ...args], { encoding: "utf8" }).trim();
+
 const seed = (): SeededDemo => {
   const file = join(mkdtempSync(join(tmpdir(), "callboard-e2e-")), "demo.json");
   execFileSync("bunx", ["tsx", "src/db/seed-cli.ts", "--json", file], { stdio: "pipe" });
@@ -142,6 +145,32 @@ test("a judge's note reaches the feedback export, and the emcee gets a printable
   expect(auditCsv).toContain(`,${CRITERIA[0]!.maxPoints},`);
   expect(auditCsv.split("\r\n")).toHaveLength(TEAM_COUNT + 1);
   for (const j of demo.judges) expect(auditCsv).not.toContain(j.name);
+
+  /**
+   * ADJ·2 — the same projection, delivered rather than downloaded. The map carried this as B8's
+   * unbuilt half: the artifact existed and a board's only instrument for handing it over was one
+   * download per team, attached by hand, which is both the manual work the record replaces and how
+   * a team ends up sent a rival's notes.
+   *
+   * All eight placed, though only one was scored: a team with no scores still takes a place rather
+   * than vanishing, and every placed team is therefore owed the notes written about it — which for
+   * seven of them is the honest answer that nobody wrote anything.
+   */
+  await boardPage.goto(`/board/${demo.boardToken}/results`);
+  await boardPage.getByTestId("send-feedback-submit").click();
+
+  const delivery = boardPage.getByTestId("send-feedback-message");
+  await expect(delivery).toContainText(`Feedback sent to ${TEAM_COUNT} teams`);
+  await expect(delivery).toContainText("No scores are included");
+
+  // A second click reaches nobody twice: the key is the team *and* this run.
+  await boardPage.getByTestId("send-feedback-submit").click();
+  await expect(delivery).toContainText("already had it for this result");
+
+  const delivered = comms("outbox", "mayuri-2027")
+    .split("\n")
+    .filter((line) => line.startsWith("feedback.delivered"));
+  expect(delivered).toHaveLength(TEAM_COUNT);
 
   await board.close();
 });

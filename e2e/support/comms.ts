@@ -89,9 +89,55 @@ switch (command) {
     break;
   }
 
+  /**
+   * Drains the outbox and reports what happened **to this comp's messages**, not what `sweep`
+   * returned.
+   *
+   * `due()` is database-wide, and correctly so: in production one cron drains everything, and a
+   * comp-scoped queue would need a scheduler per comp. But that makes the returned tally a global
+   * fact, so a spec asserting on it is really asserting that no *other* comp on the database has
+   * anything pending — which is false the moment two specs run in one session, and was quietly true
+   * only because each spec had been run alone.
+   *
+   * So the tally is recomputed here by diffing this comp's rows across the sweep. `attempts` is what
+   * separates the two ways a message reaches `bounced`: a suppressed broadcast never gets claimed,
+   * and a hard transport failure does.
+   */
   case "sweep": {
-    const result = await sweep(50);
-    console.log(`${result.claimed} ${result.sent} ${result.failed} ${result.skipped}`);
+    const snapshot = async (): Promise<Map<string, { state: string; attempts: number }>> => {
+      const rows = await db
+        .select({ id: messages.id, state: messages.state, attempts: messages.attempts })
+        .from(messages)
+        .where(eq(messages.compId, comp.id));
+      return new Map(rows.map((row) => [row.id, { state: row.state, attempts: row.attempts }]));
+    };
+
+    const before = await snapshot();
+    await sweep(50);
+    const after = await snapshot();
+
+    let claimed = 0;
+    let sent = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    for (const [id, now] of after) {
+      const was = before.get(id);
+      if (!was) continue;
+
+      const tried = now.attempts > was.attempts;
+      if (tried) claimed += 1;
+      if (now.state === was.state) continue;
+
+      if (now.state === "sent") sent += 1;
+      else if (now.state === "failed") failed += 1;
+      else if (now.state === "bounced") {
+        if (tried) failed += 1;
+        else skipped += 1;
+      }
+    }
+
+    console.log(`${claimed} ${sent} ${failed} ${skipped}`);
     break;
   }
 
@@ -149,6 +195,58 @@ switch (command) {
     break;
   }
 
+  /**
+   * Unsubscribes one **named** person, where `unsubscribe` takes whoever comes first. A spec that
+   * proves the broadcast/transactional split has to say which human opted out, or it is asserting
+   * about a row it did not choose.
+   */
+  case "unsubscribe-email": {
+    const email = rest[0];
+    if (!email) throw new Error("usage: unsubscribe-email <compSlug> <email>");
+    const [row] = await db
+      .update(people)
+      .set({ unsubscribedAt: new Date() })
+      .where(and(eq(people.orgId, comp.orgId), eq(people.email, email)))
+      .returning({ id: people.id });
+    if (!row) throw new Error(`no person in this org with email ${email}`);
+    console.log(row.id);
+    break;
+  }
+
+  /**
+   * The stored payload of the latest message to one person, verbatim.
+   *
+   * The bytes are the point. Two specs need to read them rather than a rendering: ADR-0021's scrub,
+   * where the assertion is about what the row *stopped* holding, and the announcement's opt-out
+   * link, which a spec then has to actually open.
+   */
+  case "payload": {
+    const email = rest[0];
+    if (!email) throw new Error("usage: payload <compSlug> <email>");
+    const [row] = await db
+      .select({ payload: messages.payload })
+      .from(messages)
+      .innerJoin(people, eq(people.id, messages.personId))
+      .where(and(eq(messages.compId, comp.id), eq(people.email, email)))
+      .orderBy(desc(messages.createdAt))
+      .limit(1);
+    if (!row) throw new Error(`no message in ${compSlug} addressed to ${email}`);
+    console.log(JSON.stringify(row.payload));
+    break;
+  }
+
+  /** Template, recipient and where each message ended up — what a spec needs after a sweep. */
+  case "outbox": {
+    const rows = await db
+      .select({ template: messages.template, email: people.email, state: messages.state })
+      .from(messages)
+      .innerJoin(people, eq(people.id, messages.personId))
+      .where(eq(messages.compId, comp.id))
+      .orderBy(people.email);
+    console.log(rows.map((row) => `${row.template} ${row.email} ${row.state}`).join("\n"));
+    break;
+  }
+
   case "unsubscribe": {
     const personId = await somebody();
     await db.update(people).set({ unsubscribedAt: new Date() }).where(eq(people.id, personId));
@@ -168,6 +266,9 @@ switch (command) {
         subject: "Bus times",
         body: "The bus leaves at seven.",
         boardName: "Comms Chair",
+        // Carried because the product carries it: a fixture missing this would prove the suppression
+        // rule against a payload `sendAnnouncementAction` never produces.
+        unsubscribeUrl: `http://localhost:3000/unsubscribe/${personId}`,
       },
       dedupeKey: rest[0] ?? "announce:test",
     });
@@ -179,6 +280,32 @@ switch (command) {
    * Queues to somebody with **no address**, which a seeded board member without an email is. The
    * sweep must bounce it rather than throw or send nothing quietly.
    */
+  /**
+   * Queues a **transactional** message to one named person. Arranging, not a product path — the
+   * thing under test is the sweep's suppression rule, and reaching it through the dues button would
+   * need a fee schedule and a payment to say nothing more about the rule itself.
+   */
+  case "queue-to": {
+    const email = rest[0];
+    if (!email) throw new Error("usage: queue-to <compSlug> <email> [dedupeKey]");
+    const [row] = await db
+      .select({ id: people.id })
+      .from(people)
+      .where(and(eq(people.orgId, comp.orgId), eq(people.email, email)))
+      .limit(1);
+    if (!row) throw new Error(`no person in this org with email ${email}`);
+
+    const result = await enqueue({
+      compId: comp.id,
+      personId: row.id,
+      template: "dues.reminder",
+      payload,
+      dedupeKey: rest[1] ?? `dues:${email}`,
+    });
+    console.log(result.ok ? "queued" : result.reason);
+    break;
+  }
+
   case "queue-unreachable": {
     const [row] = await db
       .select({ id: people.id })

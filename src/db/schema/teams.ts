@@ -29,6 +29,20 @@ export const SCOREABLE_STATUSES = ["accepted", "competing"] as const;
 export const BILLABLE_STATUSES = ["accepted", "competing"] as const;
 
 /**
+ * The statuses a board's announcement reaches. A third list equal to the other two, and a third
+ * question: *who is actually coming to this comp.*
+ *
+ * It must not alias either. A comp that decided to bill at `applied` would not thereby want to send
+ * an applicant the parking instructions, and a comp that announced to its waitlist would not thereby
+ * want the tabulator ranking them. Each of the three has its own way of being wrong, and the day one
+ * of them moves is the day sharing a constant becomes a silent bug in the other two.
+ *
+ * `dropped` is excluded and that is the whole point of the list existing: telling a team that
+ * withdrew where to park is the kind of thing a board never lives down.
+ */
+export const ANNOUNCEABLE_STATUSES = ["accepted", "competing"] as const;
+
+/**
  * One definition, because two things have to agree on the string and neither can derive it: the
  * index itself, and `apply`, which retries when a concurrent application takes the bid code it was
  * about to use. Same discipline as `CHAIN_INDEXES` in `./scores`, and for the same reason — the

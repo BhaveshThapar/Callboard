@@ -2,7 +2,7 @@
 
 The record is comp-scoped and multi-tenant: many orgs, many comps per org, isolated. Every table carries `comp_id`, or `org_id` where it outlives a single comp.
 
-Two groups of tables follow. The first group exists in Postgres, through migration `0012`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
+Two groups of tables follow. The first group exists in Postgres, through migration `0013`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
 
 It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `show_order`, `schedule_segments` and `assignments` — the Gita (PRD §9) and coordination (§7.3), both gated well behind it.
 
@@ -199,6 +199,30 @@ Without this table you get the kill exhibit from PRD §14: a season-summary shee
 `deposit_events_terminal_unique` is partial over `('refunded','forfeited')` and refuses a **second ending**. A double-clicked refund button is the realistic way a deposit is returned twice, and the check and the insert are two acts on neon-http — so the index is what refuses it, not a transaction. `refund_failed` is deliberately **not** terminal: a bounced ACH return is retryable, and calling it an ending would strand the money in a state the product cannot leave.
 
 **Everything is `integer` cents.** Never a float, never a `numeric` read into a JS `number` for arithmetic. See [ADR-0002](decisions/0002-money-as-cents-and-allocations.md).
+
+---
+
+## Comms
+
+Migrated in `0013` ([ADR-0020](decisions/0020-a-message-sends-once.md)). The first thing this product built that **acts on the outside world**: every write before it was a row a board could correct — a voided charge, a released allocation, a superseded run — and a sent email cannot be voided. There is no `revoked_at` on somebody's inbox.
+
+So the hard question here is not *is this number right*, it is *did this happen exactly once* — and the second is worse, because a duplicate is invisible from inside the system. Two identical rows and one row look the same on every screen; the difference shows up on a captain's phone at 11pm.
+
+**`messages`** — `id`, `comp_id`, `person_id`, `channel`, `kind`, `template`, `payload`, `dedupe_key`, `state`, `send_after`, `attempts`, `provider_ref`, `created_by_person_id`, `created_at`
+
+The outbox, one row per intended message. **`messages_comp_dedupe_unique` on `(comp_id, dedupe_key)` is the whole guarantee** — a caller does not ask whether it already sent, it inserts and reads the refusal, because the ask and the insert would be two acts on neon-http and only one of them is atomic. The key is the caller's sentence about what this message *is* (`dues:2027-02`), never a digest of the body: a digest would make a reworded reminder a different message and send it again, which is the bug.
+
+`payload` is `json`, not `jsonb`, for `tab_runs.inputs`' reason — the bytes that went in are what a person was actually shown. One field is the exception and it is declared as one: the raw invitation link is stripped when the message reaches `sent` ([ADR-0021](decisions/0021-the-outbox-holds-a-secret-only-until-it-sends.md)), because emailing a credential means holding it and holding it forever is a different decision from holding it for five minutes.
+
+`kind` ∈ `transactional | broadcast`, and **suppression is decided by kind, never by recipient**: `people.unsubscribed_at` bounces a broadcast and does not touch a bill, because a debt is owed whether or not somebody wants to hear from the board. The opt-out link rides on the broadcast payload so the visible line in the body and the `List-Unsubscribe` header are the same string.
+
+`state` is denormalized and **is the claim** — ADR-0014's bargain repeated for a different reason. The counter was denormalized because a cross-row sum cannot be a CHECK; this is, because a chain cannot be claimed atomically. So the claim is one guarded `UPDATE ... WHERE state IN ('queued','failed')`, `releaseAllocation`'s shape, and a worker that gets no row back sends nothing.
+
+**`message_events`** — `id`, `message_id`, `seq generatedAlwaysAsIdentity`, `state`, `detail`, `created_at`
+
+The chain, `deposit_events` applied to a smaller question: one row per transition, state is `max(seq)`'s row. `queued → sending → sent | failed | bounced`. `message_events_terminal_unique` is partial over the endings, so a second one is unrepresentable. **`failed` is not terminal** and `bounced` is, for `refund_failed`'s reason — a timed-out connection is retryable, a rejected address is not, and only the transport knows which it saw.
+
+The residual is ADR-0014's again and gets the same instrument: the database cannot enforce that `state` agrees with `max(seq)`, so `db:doctor` reports the disagreement by id. A message stuck in `sending` is reported too and **never auto-retried** — that is exactly the crash-after-send footprint, and retrying it emails somebody twice.
 
 ---
 

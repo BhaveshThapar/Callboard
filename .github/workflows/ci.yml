@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A hand crank, because on Aug 6 there was none. Actions stopped scheduling for this repo for
+  # several hours; the run for a pushed commit was never created, and once Actions recovered
+  # nothing retried it -- so a PR sat reading CLEAN with no `check` or `acceptance` on it at all,
+  # which is worse than reading red. Re-running a workflow needs a trigger that a person can pull.
+  workflow_dispatch:
 
 jobs:
   check:
@@ -51,6 +56,12 @@ jobs:
       cancel-in-progress: false
     env:
       DATABASE_URL: ${{ secrets.CI_DATABASE_URL }}
+      # Where the `webServer` in `playwright.config.ts` puts the app. Not a secret, and not
+      # optional: an announcement's opt-out link is built from this at enqueue, so without it
+      # `unsubscribeUrl` is null by design and the one spec that walks a captain out of a
+      # broadcast fails on an empty string. Locally this comes from `.env.local`, which is why
+      # the suite passed on a laptop and failed here.
+      NEXT_PUBLIC_BASE_URL: http://localhost:3000
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

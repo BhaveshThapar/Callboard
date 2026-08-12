@@ -12,7 +12,10 @@
 import type { RosterTeamView } from "@/lib/auth/scope";
 import { formatCents } from "@/lib/money/format";
 import type { WhoOwes } from "@/lib/money/who-owes";
+import { contactPersonFor } from "./contact";
 import type { MessagePayloads } from "./render";
+
+const EMPTY: ReadonlyMap<string, string> = new Map();
 
 export type DuesRecipient = {
   teamId: string;
@@ -47,15 +50,28 @@ export const duesDedupeKey = (teamId: string, period: string): string => `dues:$
 /**
  * Who owes something and can be reached.
  *
- * A team with a `contactPersonId` and no address on file is **not** skipped here. The engine records
- * that as a `bounced` message carrying the reason, which is a better record than this function
- * quietly leaving it out: a board that invited somebody by name and never got an address should find
- * that out from the outbox rather than from a reminder that never appears.
+ * A team with a contact and no address on file is **not** skipped here. The engine records that as a
+ * `bounced` message carrying the reason, which is a better record than this function quietly leaving
+ * it out: a board that invited somebody by name and never got an address should find that out from
+ * the outbox rather than from a reminder that never appears.
+ *
+ * **Who a team's contact *is* is resolved by the caller and passed in**, rather than read off
+ * `contactPersonId` here. That field is written by the registration form, and setup is founder-run
+ * by design (PRD §12) — so every founding partner's roster is *seeded*, has no contact on any team,
+ * and could not be chased at all. A captain who accepted an invitation is the same human by a
+ * different door, and P1 built that door; resolving it needs a second table, which is exactly the
+ * kind of thing this function must not do.
  */
 export const planDuesReminders = (
   report: WhoOwes,
   roster: readonly RosterTeamView[],
-  context: { compName: string; boardName: string; period: string },
+  context: {
+    compName: string;
+    boardName: string;
+    period: string;
+    /** `teamId → personId`, used **only** where no contact registered. See the note above. */
+    contactFor?: ReadonlyMap<string, string>;
+  },
 ): DuesPlan => {
   const byId = new Map(roster.map((team) => [team.id, team]));
   const send: DuesRecipient[] = [];
@@ -69,7 +85,8 @@ export const planDuesReminders = (
     const team = byId.get(row.teamId);
     if (!team) continue;
 
-    if (!team.contactPersonId) {
+    const personId = contactPersonFor(team, context.contactFor ?? EMPTY);
+    if (!personId) {
       skipped.push({ teamId: row.teamId, teamName: row.name, reason: "no-contact" });
       continue;
     }
@@ -77,7 +94,7 @@ export const planDuesReminders = (
     send.push({
       teamId: row.teamId,
       teamName: row.name,
-      personId: team.contactPersonId,
+      personId,
       balanceCents: row.balanceCents,
       dedupeKey: duesDedupeKey(row.teamId, context.period),
       payload: {

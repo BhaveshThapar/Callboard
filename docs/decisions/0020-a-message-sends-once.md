@@ -23,7 +23,7 @@ The failure has a specific shape worth naming, because it is the one that will a
 
 The key is the caller's sentence about what this message *is*, not a hash of its contents: `dues:2027-02` rather than a digest of the body. A digest would make a reworded reminder a different message and send it again, which is exactly the bug.
 
-**`message_events` is the chain**: `seq generatedAlwaysAsIdentity`, one row per transition, state is `max(seq)`'s row. `queued → sending → sent | failed | bounced`. `sent` and `bounced` are terminal; **`failed` is not**, for `refund_failed`'s reason — a timed-out SMTP connection is retryable, and calling it an ending would strand a dues reminder nobody can ever send. `messages_terminal_unique` is partial over the endings.
+**`message_events` is the chain**: `seq generatedAlwaysAsIdentity`, one row per transition, state is `max(seq)`'s row. `queued → sending → sent | failed | bounced`. `sent` and `bounced` are terminal; **`failed` is not**, for `refund_failed`'s reason — a timed-out SMTP connection is retryable, and calling it an ending would strand a dues reminder nobody can ever send. `message_events_terminal_unique` is partial over the endings — it constrains the chain, not the outbox row, which is why the name says `message_events`.
 
 **`messages.state` is denormalized, and it is the claim.** This is ADR-0014's bargain made again with a different justification. The counter was denormalized because a cross-row sum cannot be a CHECK; this is denormalized because **a chain cannot be claimed atomically.** Appending a `sending` event does not stop a second worker appending one microseconds later, and a partial index over `sending` would block the retry that `failed` exists to allow. So the claim is one guarded statement:
 

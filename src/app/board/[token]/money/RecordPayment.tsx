@@ -153,6 +153,23 @@ export function RecordPayment({ token, teams }: { token: string; teams: PayableT
           />
         </label>
 
+        {/* Opt-out rather than automatic, and checked by default because a receipt nobody remembers
+            to ask for is a receipt that never goes. The case for the box existing at all is a
+            treasurer backfilling last season on a Sunday: thirty rows must not become thirty emails
+            to captains who were never expecting one. */}
+        <label className="mt-3 flex items-center gap-2">
+          <input
+            type="checkbox"
+            name="receipt"
+            defaultChecked
+            data-testid="payment-receipt"
+            className="size-4 accent-primary"
+          />
+          <span className="text-caption text-muted">
+            Email a receipt to the team&apos;s captain
+          </span>
+        </label>
+
         {team && team.charges.length > 0 ? (
           <fieldset className="mt-4 border-t border-border-soft pt-3">
             <legend className={cx(eyebrowClass, "pr-2")}>What it settles</legend>
