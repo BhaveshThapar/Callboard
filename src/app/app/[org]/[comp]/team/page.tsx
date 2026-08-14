@@ -4,7 +4,9 @@ import { compsForSession, resolveTeamActor } from "@/lib/auth/accounts";
 import { compIdBySlugs } from "@/lib/auth/access";
 import { readSessionCookie } from "@/lib/auth/cookies";
 import { ownTeamForCaptain } from "@/lib/auth/scope";
+import { latestLockedRun } from "@/lib/comp/tab";
 import { describeBalance, formatCents } from "@/lib/money/format";
+import { MaterialsForm } from "./MaterialsForm";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +49,10 @@ export default async function MyTeamPage({
 
   const team = await ownTeamForCaptain(actor);
   if (!team) notFound();
+
+  // Only to disable the dancer field and say why. `submitMaterials` refuses the request itself --
+  // this is the screen agreeing with the server, not the screen deciding.
+  const locked = !!(await latestLockedRun(actor.compId));
 
   return (
     <div className="max-w-2xl">
@@ -113,6 +119,19 @@ export default async function MyTeamPage({
           Pay however your board asked you to. What arrives is recorded here.
         </p>
       </div>
+
+      <MaterialsForm
+        org={org}
+        comp={comp}
+        locked={locked}
+        filed={{
+          musicUrl: team.musicUrl,
+          emergencyContactName: team.emergencyContactName,
+          emergencyContactPhone: team.emergencyContactPhone,
+          rosterSizeRequested: team.rosterSizeRequested,
+          materialsSubmittedAt: team.materialsSubmittedAt,
+        }}
+      />
 
       <p className="mt-6 text-caption text-subtle">
         You can see your own team and nothing else about the comp.

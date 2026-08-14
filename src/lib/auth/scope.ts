@@ -131,6 +131,16 @@ export type RosterTeamView = BoardTeamView & {
   customAnswers: Record<string, CustomAnswer> | null;
   rooms: number | null;
   /**
+   * A4's materials half, as the board reads it. `rosterSizeRequested` is a captain's **claim** about
+   * a number the board bills on -- shown beside the roster input so a board answers it by stating
+   * the roster, which is the only act that can change what a team owes.
+   */
+  musicUrl: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  materialsSubmittedAt: Date | null;
+  rosterSizeRequested: number | null;
+  /**
    * Live charges only — a voided one is history, not an obligation. A3 in one line: the roster and
    * what each team owes are one record, because the split between an acceptance doc and a Venmo
    * thread is the thing that made "who has paid" unanswerable.
@@ -308,6 +318,11 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
         contactEmail: people.email,
         contactPersonId: teams.contactPersonId,
         customAnswers: teams.customAnswers,
+        musicUrl: teams.musicUrl,
+        emergencyContactName: teams.emergencyContactName,
+        emergencyContactPhone: teams.emergencyContactPhone,
+        materialsSubmittedAt: teams.materialsSubmittedAt,
+        rosterSizeRequested: teams.rosterSizeRequested,
       })
       .from(teams)
       .leftJoin(people, eq(people.id, teams.contactPersonId))
@@ -404,6 +419,16 @@ export type TeamOwnView = {
   rosterSize: number | null;
   rooms: number | null;
   performanceOrder: number | null;
+  /**
+   * What this team has filed, so the form comes back filled in rather than blank -- a captain
+   * re-opening it must see what the board already holds, not be invited to retype it from memory.
+   * Still their own team and no other: these are columns on the row `actor.teamId` already names.
+   */
+  musicUrl: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  materialsSubmittedAt: Date | null;
+  rosterSizeRequested: number | null;
   charges: ChargeLineView[];
   balance: TeamBalance;
 };
@@ -420,6 +445,11 @@ export const ownTeamForCaptain = async (actor: TeamActor): Promise<TeamOwnView |
         rosterSize: teams.rosterSize,
         rooms: teams.rooms,
         performanceOrder: teams.performanceOrder,
+        musicUrl: teams.musicUrl,
+        emergencyContactName: teams.emergencyContactName,
+        emergencyContactPhone: teams.emergencyContactPhone,
+        materialsSubmittedAt: teams.materialsSubmittedAt,
+        rosterSizeRequested: teams.rosterSizeRequested,
       })
       .from(teams)
       // Both halves: the actor's team *and* the actor's comp. A membership cannot outlive the comp
