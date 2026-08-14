@@ -37,11 +37,13 @@ import {
   releaseAllocation,
   setPaymentReconciled,
 } from "@/lib/money/ledger";
+import { parseMaterials } from "@/lib/roster/materials";
 import {
   regenerateCharges,
   setTeamBilling,
   setTeamStatus,
   setWaitlistRank,
+  submitMaterials,
 } from "@/lib/roster/roster";
 import {
   listBoardForBoard,
@@ -51,7 +53,9 @@ import {
   resolveRosterTeamForBoard,
   resolveTeamForBoard,
 } from "@/lib/auth/scope";
-import { resolveBoardAccess } from "@/lib/auth/access";
+import { compIdBySlugs, resolveBoardAccess } from "@/lib/auth/access";
+import { resolveTeamActor } from "@/lib/auth/accounts";
+import { readSessionCookie } from "@/lib/auth/cookies";
 import { notesForBoard } from "@/lib/comp/feedback";
 import { setCompStatus } from "@/lib/comp/status";
 import { latestLockedRun, lockResults, runCount } from "@/lib/comp/tab";
@@ -541,7 +545,18 @@ export const setTeamBillingAction = async (
   if (!actor) return { status: "error", message: NO_ACCESS };
   if (!teamId) return { status: "error", message: "Pick a team." };
 
-  const rosterSize = parseCount(String(formData.get("rosterSize") ?? ""));
+  /**
+   * *Apply* and *save* are the same submit, and the button says which.
+   *
+   * A submit button named `rosterSize` would be appended to a form that already has a `rosterSize`
+   * input, and `FormData.get` returns the **first** entry -- the box, not the captain's number. So
+   * the intent gets its own name and wins when present. The alternative was a second form, which
+   * cannot be nested, or client state to poke the input, which is a worse thing to depend on.
+   */
+  const applyRequested = String(formData.get("applyRequested") ?? "");
+  const rosterSize = parseCount(
+    applyRequested !== "" ? applyRequested : String(formData.get("rosterSize") ?? ""),
+  );
   if (!rosterSize.ok) {
     return { status: "error", message: "Dancers must be a whole number, or blank if not known yet." };
   }
@@ -1444,4 +1459,57 @@ export const sendFeedbackAction = async (
   ].filter((part) => part !== null);
 
   return { status: "ok", message: `${parts.join(" · ")}. No scores are included.` };
+};
+
+
+/**
+ * A4's materials half, and the **first write in this product whose actor is a team**.
+ *
+ * Every other action on this screen begins `resolveBoardAccess(compId)`, where `compId` is a field
+ * on the form that authorizes and a forged one resolves to nothing. This one cannot: a captain has
+ * no board access, so authority comes from the session, and the comp comes from the **path** rather
+ * than from a form field. That is not a weaker check -- it is the same check one step earlier.
+ * `resolveTeamActor` returns an actor carrying its own `teamId` off a `memberships` row, so there is
+ * no id on this form to forge. The worst a tampered `basePath` does is refresh a page.
+ *
+ * `org`/`comp` are read from the form because a Server Action has no route params of its own; they
+ * are resolved through `compIdBySlugs`, which is a lookup rather than a window, and the very next
+ * act is proving this person holds a captain membership at whatever it resolved to.
+ */
+export const submitMaterialsAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const org = String(formData.get("org") ?? "");
+  const comp = String(formData.get("comp") ?? "");
+
+  const session = await readSessionCookie();
+  if (!session) return { status: "error", message: "Sign in again to file your materials." };
+
+  const compId = await compIdBySlugs(org, comp);
+  if (!compId) return { status: "error", message: NO_ACCESS };
+
+  const actor = await resolveTeamActor(session, compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const parsed = parseMaterials({
+    musicUrl: String(formData.get("musicUrl") ?? ""),
+    emergencyContactName: String(formData.get("emergencyContactName") ?? ""),
+    emergencyContactPhone: String(formData.get("emergencyContactPhone") ?? ""),
+    rosterSizeRequested: String(formData.get("rosterSizeRequested") ?? ""),
+  });
+  if (!parsed.ok) return { status: "error", message: parsed.message };
+
+  const result = await submitMaterials(actor, parsed.value);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`/app/${org}/${comp}/team`);
+  // The board reads these on its roster screen, so that cache is stale the moment this lands.
+  revalidatePath(`/app/${org}/${comp}/roster`);
+  return {
+    status: "ok",
+    message: parsed.value.rosterSizeRequested === null
+      ? "Filed. Your board can see it."
+      : "Filed. Your board has to confirm the dancer count before it changes what you owe.",
+  };
 };

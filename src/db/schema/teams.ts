@@ -94,6 +94,37 @@ export const teams = pgTable(
      * against live in `comps.registration`, which is the only thing that can say what was asked.
      */
     customAnswers: json("custom_answers").$type<Record<string, CustomAnswer>>(),
+    /**
+     * A4's materials half: what a team files *after* it is accepted.
+     *
+     * A URL rather than a file, following `audition_url`'s own precedent — this repo has five
+     * runtime dependencies and no place to put a file, and a board asking for final music gets a
+     * Drive or Dropbox link today because that is what boards actually exchange. Every write goes
+     * through one `putMaterial` seam, so a blob store later is an implementation of that seam and
+     * not a migration.
+     */
+    musicUrl: text("music_url"),
+    emergencyContactName: text("emergency_contact_name"),
+    emergencyContactPhone: text("emergency_contact_phone"),
+    /**
+     * When the team last filed, not whether — `waiver_accepted_at`'s reason. A board chasing
+     * missing music needs to know who has never filed, and null is the only honest way to say it.
+     */
+    materialsSubmittedAt: timestamp("materials_submitted_at", { withTimezone: true }),
+    /**
+     * What the captain says their roster is now. **A claim, not a fact, and the distinction is the
+     * whole design.**
+     *
+     * `roster_size` is what `planCharges` bills on, so a captain writing it directly would be a
+     * captain editing their own invoice — down as easily as up, with nobody told. So the captain
+     * writes here and the board's existing `setTeamBilling` is where a claim becomes a fact, in the
+     * transaction that already re-bills. That adds no billing path and no fourth window; it is this
+     * repo's own *a `teamId` on a form is a claim* rule applied one level up, to the number rather
+     * than to the id.
+     *
+     * Cleared when the board acts, so a pending request means exactly *somebody is waiting on you*.
+     */
+    rosterSizeRequested: integer("roster_size_requested"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

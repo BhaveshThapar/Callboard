@@ -4,11 +4,12 @@ import { db, withTransaction } from "@/db";
 import type { TeamStatus } from "@/db/schema";
 import { BILLABLE_STATUSES, teams } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
-import type { BoardActor } from "@/lib/auth/scope";
-import { listRosterForBoard, resolveRosterTeamForBoard } from "@/lib/auth/scope";
+import type { BoardActor, TeamActor } from "@/lib/auth/scope";
+import { listRosterForBoard, ownTeamForCaptain, resolveRosterTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
 import { feeScheduleFor, syncCharges, today, voidChargesFor } from "@/lib/money/charges";
 import { refusalFor, UNKNOWN_REFUSAL } from "@/lib/money/refusals";
+import type { MaterialsInput } from "./materials";
 import {
   canTransition,
   dropFreesASlot,
@@ -271,7 +272,15 @@ export const setTeamBilling = async (
   return billingWrite(async (tx) => {
     await tx
       .update(teams)
-      .set({ rosterSize: values.rosterSize, rooms: values.rooms })
+      .set({
+        rosterSize: values.rosterSize,
+        rooms: values.rooms,
+        // Whatever the captain was asking for, the board has now stated the roster -- so the claim
+        // is answered whether it was granted, changed or ignored. Clearing it here rather than in a
+        // second write is what keeps A4 off the list of `withTransaction` callers: *state the
+        // roster, bill it, and close the request* is one act, and it is this one.
+        rosterSizeRequested: null,
+      })
       .where(and(eq(teams.id, teamId), eq(teams.compId, actor.compId)));
 
     await recordAudit(
@@ -282,7 +291,11 @@ export const setTeamBilling = async (
         action: "team.billing",
         entity: "team",
         entityId: teamId,
-        before: { rosterSize: team.rosterSize, rooms: team.rooms },
+        before: {
+          rosterSize: team.rosterSize,
+          rooms: team.rooms,
+          rosterSizeRequested: team.rosterSizeRequested,
+        },
         after: values,
       },
       tx,
@@ -300,6 +313,73 @@ export const setTeamBilling = async (
 
     return { ok: true };
   });
+};
+
+/**
+ * A4's materials half: what a team files after it is accepted.
+ *
+ * **It resolves through `ownTeamForCaptain`, which is not a fifth window and not even a claim to
+ * check.** A captain's `teamId` rides on the actor, off a `memberships` row, so there is no id on
+ * this form that could name somebody else's team -- the same reason the four comp-scoped board
+ * writes resolve nothing. The read is still made, because a membership pointing at a team that was
+ * deleted must fail here rather than write a row against a uuid.
+ *
+ * **Not a fifth `withTransaction` caller** (ADR-0012), and the argument has to be made rather than
+ * assumed: this is one `UPDATE` of five columns on one row. Nothing else has to land with it. The
+ * obligations these facts imply are generated when the *board* states the roster, which is
+ * `setTeamBilling`'s transaction and already exists.
+ *
+ * **The lock splits this write in half, deliberately.** `teams` lives inside `tab_runs.inputs`, so
+ * the roster freezes -- and a *requested* roster size is a request to change roster, which after a
+ * lock can never be granted and must not sit on the board's screen implying otherwise. But music and
+ * an emergency contact are in no `TabulationInput`, and comp day is exactly when somebody needs a
+ * phone number. So the claim is refused after the lock and the materials are not.
+ */
+export const submitMaterials = async (
+  actor: TeamActor,
+  input: MaterialsInput,
+): Promise<RosterMove> => {
+  const team = await ownTeamForCaptain(actor);
+  if (!team) return { ok: false, message: "That team is not in this comp." };
+
+  if (input.rosterSizeRequested !== null && (await latestLockedRun(actor.compId))) {
+    return {
+      ok: false,
+      message: "Results are locked, so the roster can no longer change. Everything else was saved.",
+    };
+  }
+
+  await db
+    .update(teams)
+    .set({
+      musicUrl: input.musicUrl,
+      emergencyContactName: input.emergencyContactName,
+      emergencyContactPhone: input.emergencyContactPhone,
+      rosterSizeRequested: input.rosterSizeRequested,
+      materialsSubmittedAt: new Date(),
+    })
+    .where(and(eq(teams.id, actor.teamId), eq(teams.compId, actor.compId)));
+
+  // The first `team` actor to write anything. `ACTOR_KINDS` has carried the kind since P1 and
+  // `audit_log_actor_kind_check` derives from it, so this needs no migration -- the column was
+  // widened for exactly this and had no writer until now.
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "team",
+    actorPersonId: actor.personId,
+    action: "team.materials",
+    entity: "team",
+    entityId: actor.teamId,
+    before: {
+      musicUrl: team.musicUrl,
+      emergencyContactName: team.emergencyContactName,
+      emergencyContactPhone: team.emergencyContactPhone,
+      rosterSizeRequested: team.rosterSizeRequested,
+    },
+    after: input,
+  });
+
+  return { ok: true };
 };
 
 /**
