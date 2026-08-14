@@ -552,12 +552,45 @@ test("signing out drops the board link this browser was holding, too", async ({ 
   expect(remaining).not.toContain("callboard_session");
   expect(remaining).not.toContain("callboard_board_link");
 
-  // ...and the comp refuses, which is the assertion that would have caught this.
-  const response = await page.goto(`/app/${ORG}/${COMP}`);
-  expect(response?.status()).toBe(404);
+  // ...and the comp refuses, which is the assertion that would have caught this. It refuses by
+  // sending them to sign in rather than by 404ing: a browser holding no credential is not a
+  // stranger to be stonewalled, it is somebody whose session ended, and `next` brings them back
+  // to the comp they asked for.
+  await page.goto(`/app/${ORG}/${COMP}`);
+  await expect(page).toHaveURL(`/sign-in?next=${encodeURIComponent(`/app/${ORG}/${COMP}`)}`);
+  await expect(page.getByTestId("comp-name")).toHaveCount(0);
 
   // The link is not revoked, though — reopening it works, because signing out of an account is not
   // a board revoking a credential (ADR-0011).
   await page.goto(`/board/${comp.boardToken}`);
   await expect(page.getByTestId("comp-name")).toBeVisible();
+});
+
+/**
+ * The way back in, and the reason it gives nothing away.
+ *
+ * The shell `notFound()`s anybody with no standing at a comp, which is right for a stranger and
+ * wrong for a board member whose session expired: it told somebody holding a legitimate bookmark
+ * that their own comp does not exist, and offered them nowhere to go. `team/page.tsx` had carried a
+ * `redirect` to `/sign-in` for precisely this since P4 shipped and **nothing ever reached it** — a
+ * layout that `notFound()`s runs before the page under it, so the redirect was unreachable from the
+ * day it was written. The seventh time this repo has shipped code the product could not get to, and
+ * the first inside the phase whose subject is whether a person can get to a screen.
+ *
+ * The second assertion is the one that keeps the fix honest. Sending a signed-out visitor to
+ * sign-in is only safe because it happens **before** the comp is looked up, so a real comp and an
+ * invented one answer identically. Were the redirect to move below `compIdBySlugs`, this page would
+ * quietly become an oracle for which orgs run comps here — and every test above would still pass.
+ */
+test("a signed-out visitor is sent to sign in, and cannot tell a real comp from an invented one", async ({
+  page,
+}) => {
+  seed();
+
+  await page.goto(`/app/${ORG}/${COMP}`);
+  await expect(page).toHaveURL(`/sign-in?next=${encodeURIComponent(`/app/${ORG}/${COMP}`)}`);
+
+  const invented = `/app/${ORG}/no-comp-by-this-name`;
+  await page.goto(invented);
+  await expect(page).toHaveURL(`/sign-in?next=${encodeURIComponent(invented)}`);
 });
