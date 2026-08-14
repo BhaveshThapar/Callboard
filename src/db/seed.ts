@@ -1,4 +1,5 @@
 import { and, count, eq, isNull } from "drizzle-orm";
+import { invite } from "@/lib/auth/accounts";
 import { createToken } from "@/lib/auth/token";
 import { generateCharges } from "@/lib/fees/schedule";
 import type { Tiebreaker } from "@/lib/tabulation/types";
@@ -142,6 +143,18 @@ export type SeededComp = {
   boardToken: string;
   board: { name: string; token: string }[];
   judges: { name: string; token: string }[];
+  /**
+   * An unspent invitation for the first board member, so the **account** path is demonstrable.
+   *
+   * A seed mints links and, until now, no accounts at all — which meant every seeded board member
+   * arrived by link and the signed-in half of the product could not be shown without a founder
+   * inviting themselves by hand, mid-call. This is the real `invite()` path rather than a minted
+   * password, so what is demonstrated is what a founding partner will actually do.
+   *
+   * Null when the first board member has no email in the config: an invitation is addressed to
+   * somebody, and there is nothing to address.
+   */
+  boardInvite: { name: string; email: string; token: string } | null;
 };
 
 export type SeededDemo = SeededComp;
@@ -394,6 +407,23 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
 
   const board = boardTokens.map(({ person, token }) => ({ name: person.name, token: token.token }));
 
+  /**
+   * The account path, seeded through the same `invite()` a board member would press.
+   *
+   * Deliberately not a minted password: `invite()` is the sanctioned minting path (ADR-0016), it
+   * names who the envelope is for before it is accepted, and the invitation is comp-scoped, so a
+   * reseed takes it with the comp exactly as it takes every link (ADR-0013). A seed that created a
+   * *user* would be inventing a credential nothing else in the product can revoke.
+   */
+  const first = boardPeople[0];
+  const boardInvite =
+    first?.email != null
+      ? await invite(
+          { compId: comp.id, personId: first.id, orgId: org.id },
+          { email: first.email, name: first.name, role: "board" },
+        )
+      : null;
+
   return {
     compId: comp.id,
     compName: comp.name,
@@ -401,6 +431,10 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
     boardToken: board[0]!.token,
     board,
     judges: judgeTokens.map(({ person, token }) => ({ name: person.name, token: token.token })),
+    boardInvite:
+      boardInvite?.ok && first?.email != null
+        ? { name: first.name, email: first.email, token: boardInvite.value.token }
+        : null,
   };
 };
 

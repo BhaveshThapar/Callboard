@@ -57,7 +57,7 @@ NEXT_PUBLIC_BASE_URL='https://<your-app>.vercel.app' \
   bun run db:seed
 ```
 
-A leading environment variable wins over `.env.local`, so nothing needs editing. This wipes and reseeds the demo comp — Mayuri 2027, eight competing teams **and one applicant**, three judges, a four-criterion fusion rubric normalized by z-score with a head-to-head tiebreak — and prints four links:
+A leading environment variable wins over `.env.local`, so nothing needs editing. This wipes and reseeds the demo comp — Mayuri 2027, eight competing teams **and one applicant**, three judges, a four-criterion fusion rubric normalized by z-score with a head-to-head tiebreak — and prints five links:
 
 ```
 Board (open on a laptop):
@@ -67,9 +67,25 @@ Judges (one per phone):
   Priya Raghavan   https://.../judge/<token>
   Arjun Mehta      https://.../judge/<token>
   Sonia Desai      https://.../judge/<token>
+
+Board account (accept once, then sign in):
+  Ananya Krishnan  https://.../invite/<token>
+                   signs in as ananya@example.com
 ```
 
 The raw tokens are shown exactly once. Only their sha256 is stored. Text the judge links; open the board link on the laptop you are screen-sharing.
+
+**The board link no longer stays in the address bar.** Opening it exchanges the token for an
+`HttpOnly` cookie and lands you at `/app/maryland-mayuri/mayuri-2027` — the product, with a header, a
+role badge and a nav across Overview · Roster · Money · Results · People
+([ADR-0022](decisions/0022-a-link-is-exchanged-for-a-cookie.md)). Worth one sentence on the call if
+somebody is watching the URL bar: the credential stopped being screen-shared along with everything
+else, which is ADR-0003's own named hardening finally taken.
+
+**The fifth link is the same product reached the other way**, and it is worth showing to a board that
+asks *"do we all have to share one link?"* — accept it once, set a password, and Ananya signs in at
+`/sign-in` to exactly the screens the link opens. Both work; neither invalidates the other. A judge
+still has no account and never will.
 
 **The comp seeds with registration `open` and a live public form**, which is what the money beat's
 closing step and ADJ·3's page both need. Two payments are seeded as background — UMD Moksha settled
@@ -235,6 +251,11 @@ the address is fixed and readonly — accepting somebody else's link cannot make
 no roster, no scores, and no bid code but their own. Say why that last one matters: a competitor
 holding the name-to-code mapping is the end of blind judging for that comp, arriving from inside the
 product instead of from the street.
+
+**Point at the nav while you are there.** It has one item. This is the same shell the board is
+looking at, and the difference is not a hidden menu or a disabled button — the captain's actor cannot
+resolve another team, so there is nothing to offer. A board that has ever worried about a shared
+spreadsheet's "just don't look at that tab" understands that distinction immediately.
 
 **4. Take them back off.** Hit **Remove** on the People screen. The next request they make is
 refused. Worth saying: the *membership* is what died, not their login — the same person keeps

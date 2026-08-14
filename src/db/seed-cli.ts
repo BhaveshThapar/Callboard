@@ -100,6 +100,17 @@ if (jsonPath) {
       "Judges (one per phone):",
       ...seeded.judges.map((j) => `  ${j.name.padEnd(pad)}  ${baseUrl}/judge/${j.token}`),
       "",
+      // The account path, beside the link path, because a seed used to mint links and no accounts
+      // at all — so the signed-in half of the product could not be shown without inviting somebody
+      // by hand, mid-call. Accepting this is the same journey a founding partner's board will make.
+      ...(seeded.boardInvite
+        ? [
+            "Board account (accept once, then sign in):",
+            `  ${seeded.boardInvite.name.padEnd(pad)}  ${baseUrl}/invite/${seeded.boardInvite.token}`,
+            `  ${"".padEnd(pad)}  signs in as ${seeded.boardInvite.email}`,
+            "",
+          ]
+        : []),
       "These raw tokens are shown once. Only their hashes are stored.",
       "",
     ].join("\n"),

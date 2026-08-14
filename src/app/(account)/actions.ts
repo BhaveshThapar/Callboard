@@ -4,7 +4,12 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { acceptInvitation, signIn, signOut } from "@/lib/auth/accounts";
 import { sessionExpiry } from "@/lib/auth/credentials";
-import { clearSessionCookie, readSessionCookie, setSessionCookie } from "@/lib/auth/cookies";
+import {
+  clearBoardLinkCookie,
+  clearSessionCookie,
+  readSessionCookie,
+  setSessionCookie,
+} from "@/lib/auth/cookies";
 import type { AccountActionState } from "./state";
 
 /** Never parsed, only stored, so a person can recognize a session on the sign-out screen. */
@@ -56,5 +61,22 @@ export const signOutAction = async (): Promise<void> => {
   // anyone who copied the value; a revoked row with a stale cookie resolves to nothing and is safe.
   if (token) await signOut(token);
   await clearSessionCookie();
+
+  /**
+   * **And the board-link cookie, which is the other way this browser could still be somebody.**
+   *
+   * Signing out cleared the session and left the link cookie standing for exactly one commit, which
+   * meant *Sign out* on a browser that had also opened a board link ended with the person still
+   * inside the comp — the header simply flipped from offering *Sign out* to reading *via board
+   * link*. On the shared laptop at a comp, which is the setting this product is used in, that is the
+   * failure: the button says out, and out is what it has to mean for every credential this browser
+   * is holding.
+   *
+   * The **link is untouched** — still in their email, still revocable from the board screen
+   * (ADR-0011). What ends is this browser's copy of it, which is the only thing *Sign out* was ever
+   * entitled to end.
+   */
+  await clearBoardLinkCookie();
+
   redirect("/sign-in");
 };

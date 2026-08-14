@@ -53,13 +53,33 @@ Board links are **per person, not per comp**. PRD B6 promises a *logged, attribu
 
 This satisfies the hard requirement in PRD §8.2 B2: score from any browser on a phone, no app install. It also means a link can be texted, and a leaked link can be killed from the board screen.
 
-Real board accounts — email, password, sessions — arrive with Module A, when there is something worth protecting beyond a single comp's scores.
+**Real board accounts arrived with P1, and board access moved onto them in [ADR-0022](decisions/0022-a-link-is-exchanged-for-a-cookie.md).** The rule is *accounts for people who stay, links for people who visit*: board, captain and liaison sign in; a judge does not, forever, because ADR-0003's no-install argument is an argument about somebody who uses the product exactly once.
+
+So a `BoardActor` now has **two origins, and exactly one function knows it** — `resolveBoardAccess(compId)` in `src/lib/auth/access.ts`. It tries the account session first, then a board-link cookie. Everything downstream takes the actor and cannot tell which, which is the property worth having: three windows, twenty writes and every `audit_log` row are unchanged.
+
+The link path must prove `actor.compId === compId`, and that single line is the security of the whole arrangement: `membershipFor` is scoped by construction, and a token is not. `e2e/scope.spec.ts` drives it.
+
+`src/lib/auth/access.ts` is separate from `scope.ts` for a mundane and load-bearing reason: `scope.ts` is imported by `src/db/doctor.ts`, which runs as a CLI with no request behind it, and pulling `next/headers` in there would break the preflight at import time.
+
+## Routes
+
+```
+/                          home · sign in · comps taking applications
+/app                       dashboard — the comps this session may open
+/app/[org]/[comp]/…        the product, behind a shell that knows your role
+/board/[token]/…           the door: resolve, set a cookie, redirect into /app
+/judge/[token]             unchanged, forever (ADR-0003)
+/c/[org]/[comp]            public, Actor-less
+/register/[org]/[comp]     public, Actor-less
+```
+
+The credential used to be the first segment of every board URL. It is a cookie now, so a URL names a place and the address bar, the history and a screenshot of the demo stop carrying a bearer token. `/board/[token]/[[...rest]]` is one optional catch-all, which is what keeps every emailed link and every line of `DEMO.md` correct.
 
 ## Writes
 
 Server actions, not API routes, with one exception. Actions co-locate validation with the mutation and degrade gracefully — the judge scoring form is a plain `<form>` and submits without JavaScript.
 
-The exception is `GET /api/board/[token]`, which the live board polls every two seconds. Polling, not websockets: eight teams and three judges do not justify a socket, and a dropped poll self-heals on the next tick.
+The exception is `GET /api/board/[comp]`, which the live board polls every two seconds. Keyed on the comp rather than a credential since [ADR-0022](decisions/0022-a-link-is-exchanged-for-a-cookie.md) moved the credential into a cookie — the id says what is being asked about, and `resolveBoardAccess` says whether this browser may hear the answer. Polling, not websockets: eight teams and three judges do not justify a socket, and a dropped poll self-heals on the next tick.
 
 ## Append, never mutate
 

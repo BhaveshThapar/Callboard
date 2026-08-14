@@ -213,11 +213,11 @@ test("the money screen is reachable by clicking, not by knowing the URL", async 
   // The defect this file exists for was half invisibility: A9 shipped and nothing linked to it, so
   // the only way in was to type the path. A screen a board cannot find is a screen it does not have.
   await page.goto(`/board/${comp.boardToken}`);
-  await page.getByTestId("money-link").click();
+  await page.getByTestId("nav-money").click();
   await expect(page.getByTestId("record-payment")).toBeVisible();
 
   await page.goto(`/board/${comp.boardToken}/roster`);
-  await page.getByTestId("money-link").click();
+  await page.getByTestId("nav-money").click();
   await expect(page.getByTestId("record-payment")).toBeVisible();
 });
 

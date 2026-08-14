@@ -19,3 +19,6 @@ next-env.d.ts
 .DS_Store
 *.pem
 .vercel
+
+# Local-only scratch scripts (e.g. logins.local.ts, a testing aid that mints demo accounts)
+*.local.ts
