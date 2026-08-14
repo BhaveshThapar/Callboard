@@ -206,3 +206,41 @@ test("a deduction against a team dropped after the page rendered is refused, not
 
   await board.close();
 });
+
+/**
+ * ADR-0022's one security-critical line, driven end to end.
+ *
+ * `resolveBoardAccess` accepts a board actor from two places, and only one of them is scoped by
+ * construction. `membershipFor` is asked about a specific `(person, comp, role)` and cannot answer
+ * about another comp; a **token** is not — `resolveBoardActor` resolves whatever assignment the
+ * token names, at whatever comp it belongs to. So the link path has to prove the comp matches, and
+ * without that check a board member at one comp could hold their own entirely valid cookie and read
+ * another org's roster by editing the URL.
+ *
+ * That is a worse failure than the forged `teamId` above: it is a whole comp rather than one row,
+ * and it needs no forgery at all — just a legitimate credential and a guess at a slug.
+ */
+test("a board link for one comp opens nothing at another", async ({ browser }) => {
+  const demo = seedDemo();
+  seedOtherComp();
+
+  const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const page = await context.newPage();
+
+  // Through the door, so the cookie is set exactly as a real board member's would be.
+  await page.goto(`/board/${demo.boardToken}`);
+  await expect(page).toHaveURL(/\/app\/maryland-mayuri\/mayuri-2027$/);
+  await expect(page.getByTestId("comp-name")).toBeVisible();
+
+  // The same browser, the same valid cookie, a different comp. Every screen refuses.
+  for (const path of ["", "/roster", "/money", "/results", "/people"]) {
+    const response = await page.goto(`/app/example-dance-org/example-comp-2027${path}`);
+    expect(response?.status(), `expected 404 at ${path || "/"}`).toBe(404);
+  }
+
+  // And the polling endpoint, which is the one that does not look like a page.
+  const probeResponse = await page.request.get("/api/board/not-this-comp");
+  expect(probeResponse.status()).toBe(404);
+
+  await context.close();
+});
