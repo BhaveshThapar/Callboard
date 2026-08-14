@@ -1,9 +1,10 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { RoleBadge } from "@/components/RoleBadge";
 import { Wordmark } from "@/components/Wordmark";
 import type { AccountRole } from "@/db/schema";
 import { compIdBySlugs, describeCompAccess } from "@/lib/auth/access";
+import { readBoardLinkCookie, readSessionCookie } from "@/lib/auth/cookies";
 import { SignOut } from "../../../(account)/SignOut";
 import type { NavItem } from "./CompNav";
 import { CompNav } from "./CompNav";
@@ -52,6 +53,28 @@ export default async function CompLayout({
   params: Promise<{ org: string; comp: string }>;
 }) {
   const { org, comp } = await params;
+  const base = `/app/${org}/${comp}`;
+
+  /**
+   * A browser holding no credential at all is sent to sign in, and this runs **before** any read.
+   *
+   * The `notFound()` below is the right answer for a stranger and the wrong one for a board member
+   * whose session expired: it told somebody with a legitimate bookmark that their own comp does not
+   * exist, and offered no way onward. `team/page.tsx` had carried a `redirect` to `/sign-in` for
+   * exactly this since P4 shipped, and nothing ever reached it -- a layout that `notFound()`s runs
+   * first, so the page below never got the chance. Code with nothing reaching it, in the phase whose
+   * subject is whether a person can get to a screen at all.
+   *
+   * Ordering is the whole security argument. Deciding this before `compIdBySlugs` means the response
+   * to somebody signed out is the same for a real comp and an invented one, so it discloses nothing
+   * that the 404 did not -- whereas redirecting only for comps that exist would turn this page into
+   * an oracle for which orgs run comps here. It reads cookies rather than validating them, because
+   * the question is only *is there a credential to try*; every window below still resolves its own
+   * actor, and a forged cookie gets the `notFound()` it always did.
+   */
+  if (!(await readSessionCookie()) && !(await readBoardLinkCookie())) {
+    redirect(`/sign-in?next=${encodeURIComponent(base)}`);
+  }
 
   const compId = await compIdBySlugs(org, comp);
   if (!compId) notFound();
@@ -59,7 +82,6 @@ export default async function CompLayout({
   const access = await describeCompAccess(compId);
   if (!access) notFound();
 
-  const base = `/app/${org}/${comp}`;
   const items = NAV_FOR[access.role](base);
 
   return (
