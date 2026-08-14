@@ -87,6 +87,17 @@ function BillingCell({
     );
   }
 
+  /**
+   * The captain's claim, answered by the control that already bills.
+   *
+   * *Apply* posts `setTeamBillingAction` with the requested number -- the same action, the same
+   * transaction, the same re-billing. There is no second write path for "accept a request", because
+   * accepting one **is** stating the roster, and `setTeamBilling` clears the claim whenever it runs.
+   * Ignoring it and typing a different number answers it just as completely, which is why the board
+   * is never forced to choose between the two.
+   */
+  const requested = team.rosterSizeRequested;
+
   return (
     <form action={action} className="flex items-center gap-1">
       <ScopeFields scope={scope} />
@@ -121,6 +132,26 @@ function BillingCell({
       >
         save
       </button>
+
+      {requested !== null && (
+        <span
+          className="ml-1 flex items-center gap-1"
+          data-testid={`billing-requested-${team.bidCode}`}
+          data-requested={requested}
+        >
+          <span className="text-micro text-secondary">captain asks {requested}</span>
+          <button
+            type="submit"
+            name="applyRequested"
+            value={requested}
+            disabled={pending}
+            data-testid={`billing-apply-${team.bidCode}`}
+            className={stepClass}
+          >
+            apply
+          </button>
+        </span>
+      )}
     </form>
   );
 }
@@ -132,6 +163,42 @@ function BillingCell({
  * one worth saying out loud rather than rendering as a blank cell. A seeded team never applied and
  * has neither, so "—" means "there was no application", not "the application was empty".
  */
+/**
+ * A4's materials half, from the board's side: what the team filed *after* being accepted, as
+ * distinct from what it applied with. A team that has filed nothing reads "—" rather than a row of
+ * empty labels, because "never filed" is the fact a board is chasing.
+ *
+ * The music link is rendered as a link and is therefore the one place a captain's own string reaches
+ * a board member's click -- which is why `putMaterial` parses the URL and refuses any scheme but
+ * http(s) rather than pattern-matching it.
+ */
+function MaterialsCell({ team }: { team: RosterTeamView }) {
+  if (!team.musicUrl && !team.emergencyContactName && !team.emergencyContactPhone) {
+    return <span className="text-caption text-subtle">—</span>;
+  }
+
+  return (
+    <div className="flex flex-col gap-0.5" data-testid={`roster-materials-${team.bidCode}`}>
+      {team.musicUrl && (
+        <a
+          href={team.musicUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          data-testid={`roster-music-${team.bidCode}`}
+          className="text-caption text-primary underline-offset-2 hover:underline"
+        >
+          Music ↗
+        </a>
+      )}
+      {(team.emergencyContactName || team.emergencyContactPhone) && (
+        <span className="text-micro text-subtle" data-testid={`roster-ice-${team.bidCode}`}>
+          {[team.emergencyContactName, team.emergencyContactPhone].filter(Boolean).join(" · ")}
+        </span>
+      )}
+    </div>
+  );
+}
+
 function ApplicationCell({ team, fields }: { team: RosterTeamView; fields: CustomField[] }) {
   if (!team.auditionUrl && !team.waiverAcceptedAt) {
     return <span className="text-caption text-subtle">—</span>;
@@ -241,6 +308,9 @@ export function RosterTable({
               Dancers / rooms
             </th>
             <th className={cx(eyebrowClass, "pb-2")}>Application</th>
+            <th className={cx(eyebrowClass, "pb-2")} title="Filed after acceptance">
+              Materials
+            </th>
             <th className={cx(eyebrowClass, "pb-2")}>Balance</th>
             <th className={cx(eyebrowClass, "pb-2")}>Status</th>
             {!locked && <th className={cx(eyebrowClass, "pb-2")}>Move to</th>}
@@ -281,6 +351,9 @@ export function RosterTable({
               </td>
               <td className="py-2.5 pr-3">
                 <ApplicationCell team={team} fields={fields} />
+              </td>
+              <td className="py-2.5 pr-3">
+                <MaterialsCell team={team} />
               </td>
               <td className="py-2.5 pr-3">
                 <BalanceCell team={team} />
