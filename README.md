@@ -61,6 +61,7 @@ To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 | [INTAKE.md](docs/INTAKE.md) | What to ask a founding partner for, and what it buys them |
 | [FEATURE_MAP.md](docs/FEATURE_MAP.md) | Every feature, its status, and the gate that sequences it |
 | [DEMO.md](docs/DEMO.md) | Running the sales demo |
+| [RUNBOOK.md](docs/RUNBOOK.md) | Deploying, the credential order that must not be got wrong, and the walk that moves a row to `Live` |
 | [decisions/](docs/decisions/) | ADRs — why the load-bearing choices were made |
 
 ## Stack
