@@ -103,20 +103,58 @@ const RESEED = "reseed with 'bun run db:seed'";
  * is a different failure with no evidence of ever happening here, and a preflight that cries wolf
  * is a preflight that gets skipped before a call.
  *
- * Reseeding is not offered, for the reason the other two do not offer it: a seed does not apply a
+ * **The sentence has one definition; the policy on `unknown` belongs to each caller.** `db:doctor`
+ * skips it — a database with no `drizzle` schema is one this cannot tell about, and guessing would
+ * make the preflight cry wolf. `db:migration-check` fails on it, because CI asking production how
+ * far along it is and getting "no drizzle schema" means it reached something that is not the
+ * production database. Same string, two remedies, which is `CHAIN_INDEXES`' arrangement exactly.
+ */
+export type MigrationComparison =
+  | { state: "level"; applied: number; expected: number }
+  | { state: "ahead"; applied: number; expected: number }
+  | { state: "behind"; applied: number; expected: number; behind: number; sentence: string }
+  | { state: "unknown"; expected: number; sentence: string };
+
+export const compareMigrations = (
+  applied: number | null,
+  expected: number,
+): MigrationComparison => {
+  if (applied === null) {
+    return {
+      state: "unknown",
+      expected,
+      sentence:
+        "this database has no 'drizzle' schema, so it has never had a migration applied and " +
+        "cannot say how far along it is.",
+    };
+  }
+
+  // `ahead` is a real state and deliberately not a problem: production legitimately runs ahead of a
+  // checkout during a deploy, and of an older branch always. It is reported, never failed on.
+  if (applied > expected) return { state: "ahead", applied, expected };
+  if (applied === expected) return { state: "level", applied, expected };
+
+  const behind = expected - applied;
+  return {
+    state: "behind",
+    applied,
+    expected,
+    behind,
+    sentence:
+      `this database is ${behind} migration${behind === 1 ? "" : "s"} behind the repo ` +
+      `(${applied} applied, ${expected} in drizzle/). ` +
+      "The code deployed in front of it expects columns and tables it does not have — apply them " +
+      "with 'bun run db:migrate'.",
+  };
+};
+
+/**
+ * Reseeding is not offered, for the reason the other checks do not offer it: a seed does not apply a
  * migration, and `db:seed` runs this very check afterwards and would refuse to print links anyway.
  */
 const schemaProblems = (observed: Observed): string[] => {
-  if (observed.migrationsApplied === null) return [];
-  if (observed.migrationsApplied >= observed.migrationsExpected) return [];
-
-  const behind = observed.migrationsExpected - observed.migrationsApplied;
-  return [
-    `this database is ${behind} migration${behind === 1 ? "" : "s"} behind the repo ` +
-      `(${observed.migrationsApplied} applied, ${observed.migrationsExpected} in drizzle/). ` +
-      "The code deployed in front of it expects columns and tables it does not have — apply them " +
-      "with 'bun run db:migrate'.",
-  ];
+  const comparison = compareMigrations(observed.migrationsApplied, observed.migrationsExpected);
+  return comparison.state === "behind" ? [comparison.sentence] : [];
 };
 
 /**

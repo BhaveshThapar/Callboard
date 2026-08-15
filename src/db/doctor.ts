@@ -1,4 +1,3 @@
-import journal from "../../drizzle/meta/_journal.json";
 import { and, count, eq, gt, isNull, sql } from "drizzle-orm";
 import type { BoardActor, JudgeActor } from "@/lib/auth/scope";
 import { listJudgeLabelsForBoard } from "@/lib/auth/scope";
@@ -8,6 +7,7 @@ import type { CompConfig } from "./config";
 import { summarizeHealth } from "./health";
 import type { DemoHealth, Observed } from "./health";
 import { db } from "./index";
+import { observeSchemaVersion } from "./schema-version";
 import {
   boardAssignments,
   CHAIN_INDEX_NAMES,
@@ -33,8 +33,6 @@ type MoneyObservation = Pick<
   | "forkedDeposits"
   | "unexplainedRefunds"
 >;
-
-type SchemaObservation = Pick<Observed, "migrationsApplied" | "migrationsExpected">;
 
 type AccountObservation = Pick<
   Observed,
@@ -74,33 +72,6 @@ const MONEY_TABLES = [
   "payment_allocations",
   "deposit_events",
 ] as const;
-
-/**
- * How far behind the repo this database is.
- *
- * `drizzle.__drizzle_migrations` lives in the `drizzle` schema, not `public` — every other catalog
- * query here filters on `schemaname = 'public'` and would miss it. A database that has never run
- * drizzle-kit has no such table, and `to_regclass` returns null rather than throwing, which is what
- * keeps a preflight reporting where a bare `select` would crash.
- *
- * The expected count is `drizzle/meta/_journal.json`, imported rather than written down, for the
- * reason `CHAIN_INDEXES` and `MONEY_CONSTRAINTS` have one definition each: a number typed here would
- * be a second one, and it would be wrong the first time somebody generated a migration.
- */
-const observeSchema = async (): Promise<SchemaObservation> => {
-  const migrationsExpected = journal.entries.length;
-
-  const result = await db.execute<{ applied: number | null }>(sql`
-    select case
-             when to_regclass('drizzle.__drizzle_migrations') is null then null
-             else (select count(*)::int from drizzle.__drizzle_migrations)
-           end as applied
-  `);
-
-  // `?? null` rather than `|| null`: a database with the table and zero rows has applied 0, which
-  // is the most behind it is possible to be and must not read as "cannot tell".
-  return { migrationsApplied: result.rows[0]?.applied ?? null, migrationsExpected };
-};
 
 /**
  * Whether over-allocation is still representable on this database, and whether a counter has
@@ -426,7 +397,7 @@ const observeChain = async (): Promise<ChainObservation> => {
  */
 export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
   const [schema, chain, money, accounts, comms, [comp]] = await Promise.all([
-    observeSchema(),
+    observeSchemaVersion(),
     observeChain(),
     observeMoney(),
     observeAccounts(),
