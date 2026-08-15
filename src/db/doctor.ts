@@ -4,8 +4,15 @@ import { listJudgeLabelsForBoard } from "@/lib/auth/scope";
 import { boardSnapshot } from "@/lib/comp/board";
 import { judgeSnapshot } from "@/lib/comp/judge";
 import type { CompConfig } from "./config";
+import { readConfigEnv } from "./config-env";
 import { summarizeHealth } from "./health";
-import type { DemoHealth, Observed } from "./health";
+import type {
+  ConfigObserved,
+  ConfigSource,
+  DemoHealth,
+  HealthPayload,
+  Observed,
+} from "./health";
 import { db } from "./index";
 import { observeSchemaVersion } from "./schema-version";
 import {
@@ -43,6 +50,24 @@ type CommsObservation = Pick<
   Observed,
   "commsGuaranteeEnforced" | "driftingMessages" | "stuckMessages"
 >;
+
+/**
+ * What this process's environment carries — a different question from what its database holds, and
+ * the only observation here whose subject is not the database.
+ */
+const observeConfig = (source: ConfigSource): ConfigObserved => ({ ...readConfigEnv(), source });
+
+/**
+ * The same observation, from a host that was asked instead of a shell that was read.
+ *
+ * The `source` is supplied by the caller rather than taken from the payload: the responder is the
+ * one thing that cannot be trusted to say which machine answered, and a wrong subject here is the
+ * entire defect `--host` exists to fix.
+ */
+export const observeConfigFromPayload = (
+  payload: HealthPayload,
+  host: string,
+): ConfigObserved => ({ ...payload.config, source: { host } });
 
 /** The tables migration `0013` creates. Absent means C2 has not been applied here. */
 const COMMS_TABLES = ["messages", "message_events"] as const;
@@ -395,7 +420,16 @@ const observeChain = async (): Promise<ChainObservation> => {
  * It only reads, so it is safe against `main` -- which is the database it most needs to be run
  * against, and was not.
  */
-export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
+export const checkDemoHealth = async (
+  config: CompConfig,
+  /**
+   * Defaulted rather than always read here, because `--host` asks the *deployment* what it carries.
+   * Without that the config verdict would be about the shell the CLI happens to be running in,
+   * printed under a line naming production's compute — a verdict whose subject is the wrong machine,
+   * which is the failure this whole check exists to stop.
+   */
+  configObserved: ConfigObserved = observeConfig("this shell"),
+): Promise<DemoHealth> => {
   const [schema, chain, money, accounts, comms, [comp]] = await Promise.all([
     observeSchemaVersion(),
     observeChain(),
@@ -413,6 +447,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
   if (!comp) {
     return summarizeHealth(
       {
+        config: configObserved,
         ...schema,
         ...chain,
         ...money,
@@ -501,6 +536,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
 
   return summarizeHealth(
     {
+      config: configObserved,
       ...schema,
       ...chain,
       ...money,

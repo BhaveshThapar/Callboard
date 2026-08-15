@@ -1,8 +1,38 @@
 import { describe, expect, it } from "vitest";
-import type { Observed } from "../health";
-import { summarizeHealth } from "../health";
+import type { ConfigObserved, Observed } from "../health";
+import { compareMigrations, parseHealthPayload, summarizeConfig, summarizeHealth } from "../health";
+
+/**
+ * A host with everything set. Not the common case in this repo — production deliberately has none of
+ * it — but it is the one that must produce silence, so the other fixtures read as departures.
+ */
+const configured: ConfigObserved = {
+  sending: "on",
+  sendingMissing: [],
+  cron: true,
+  baseUrl: true,
+  drive: "on",
+  driveMissing: [],
+  sealing: "on",
+  sealingKeyBytes: null,
+  source: "this shell",
+};
+
+/** Production and every laptop, today. */
+const unconfigured: ConfigObserved = {
+  sending: "off",
+  sendingMissing: ["RESEND_API_KEY", "COMMS_FROM"],
+  cron: false,
+  baseUrl: false,
+  drive: "off",
+  driveMissing: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "NEXT_PUBLIC_BASE_URL"],
+  sealing: "off",
+  sealingKeyBytes: null,
+  source: "this shell",
+};
 
 const healthy: Observed = {
+  config: configured,
   migrationsApplied: 12,
   migrationsExpected: 12,
   compFound: true,
@@ -29,6 +59,7 @@ const healthy: Observed = {
 };
 
 const unseeded: Observed = {
+  config: configured,
   migrationsApplied: 12,
   migrationsExpected: 12,
   compFound: false,
@@ -59,7 +90,13 @@ const expected = { judges: 3, teams: 8 };
 describe("summarizeHealth", () => {
   it("passes a fully seeded demo", () => {
     const health = summarizeHealth(healthy, expected);
-    expect(health).toEqual({ ok: true, board: "Ananya Krishnan", judges: 3, teams: 8 });
+    expect(health).toEqual({
+      ok: true,
+      board: "Ananya Krishnan",
+      judges: 3,
+      teams: 8,
+      config: { caveats: [], hazards: [], source: "this shell" },
+    });
   });
 
   it("fails when no live board link resolves (the dropped-column footgun)", () => {
@@ -434,5 +471,262 @@ describe("summarizeHealth — the coordination guarantee", () => {
   it("says nothing when the indexes are there", () => {
     const health = summarizeHealth(healthy, expected);
     expect(health.ok).toBe(true);
+  });
+});
+
+/**
+ * The comparison the CI guard shares with the preflight, and the reason it is a shared *sentence*
+ * rather than a shared policy: `unknown` is skipped here and fatal there.
+ */
+describe("compareMigrations", () => {
+  it("is level when the counts match", () => {
+    expect(compareMigrations(15, 15)).toEqual({ state: "level", applied: 15, expected: 15 });
+  });
+
+  it("is ahead when production has more than the checkout, which is not a fault", () => {
+    expect(compareMigrations(16, 15)).toEqual({ state: "ahead", applied: 16, expected: 15 });
+  });
+
+  it("is behind, and says by how many and what to run", () => {
+    const comparison = compareMigrations(10, 15);
+    expect(comparison.state).toBe("behind");
+    if (comparison.state !== "behind") throw new Error("unreachable");
+    expect(comparison.behind).toBe(5);
+    expect(comparison.sentence).toMatch(/5 migrations behind/);
+    expect(comparison.sentence).toMatch(/db:migrate/);
+  });
+
+  it("says 'migration' rather than 'migrations' for one", () => {
+    const comparison = compareMigrations(14, 15);
+    if (comparison.state !== "behind") throw new Error("unreachable");
+    expect(comparison.sentence).toMatch(/1 migration behind/);
+  });
+
+  it("is unknown when the drizzle schema is absent, and does not call that behind", () => {
+    const comparison = compareMigrations(null, 15);
+    expect(comparison.state).toBe("unknown");
+    if (comparison.state !== "unknown") throw new Error("unreachable");
+    expect(comparison.sentence).not.toMatch(/behind/);
+  });
+
+  /**
+   * Zero applied is the most behind a database can be, and must never read as "cannot tell" — that
+   * distinction is why `observeSchemaVersion` uses `?? null` rather than `|| null`.
+   */
+  it("treats zero applied as behind, not as unknown", () => {
+    expect(compareMigrations(0, 15).state).toBe("behind");
+  });
+});
+
+describe("summarizeConfig", () => {
+  /**
+   * **The load-bearing one.** Production has no comms configuration on purpose, three files say so
+   * on purpose, and A10/ADJ·2/C2 read `Designed` because of it. A preflight that went red for that
+   * state is one the founder learns to ignore before a prospect call, which costs more than the
+   * check is worth. This is also what keeps CI green: `ci.yml`'s acceptance job sets no Resend vars.
+   */
+  it("calls a wholly unconfigured host a caveat, never a hazard", () => {
+    const verdict = summarizeConfig(unconfigured);
+    expect(verdict.hazards).toEqual([]);
+    expect(verdict.caveats.length).toBeGreaterThan(0);
+  });
+
+  it("says what an absence costs rather than naming a variable and stopping", () => {
+    const verdict = summarizeConfig(unconfigured);
+    expect(verdict.caveats.join(" ")).toMatch(/leaves the building/);
+    expect(verdict.caveats.join(" ")).toMatch(/never swept/);
+  });
+
+  /** Neither is the remedy for a mail key, and offering one sends somebody down an hour of nothing. */
+  it("does not offer a reseed or a migration as the fix for configuration", () => {
+    const verdict = summarizeConfig(unconfigured);
+    expect(verdict.caveats.join(" ")).not.toMatch(/db:seed/);
+    expect(verdict.caveats.join(" ")).not.toMatch(/db:migrate/);
+  });
+
+  it("states the order to switch comms on in, before anything is switched on", () => {
+    const verdict = summarizeConfig(unconfigured);
+    const order = verdict.caveats.find((c) => c.includes("CRON_SECRET last"));
+    expect(order).toBeDefined();
+    // Carries its own reason. An ordering rule with no consequence attached is one somebody
+    // reorders when it is inconvenient, which is exactly the afternoon this is written to prevent.
+    expect(order).toMatch(/RESEND_API_KEY and COMMS_FROM first/);
+    expect(order).toMatch(/refuses to queue any of them again/);
+  });
+
+  it("stops repeating the order once cron is already set, because the hazard supersedes it", () => {
+    const verdict = summarizeConfig({ ...unconfigured, cron: true });
+    expect(verdict.caveats.filter((c) => c.includes("CRON_SECRET last"))).toEqual([]);
+  });
+
+  it("says nothing at all about a fully configured host", () => {
+    expect(summarizeConfig(configured)).toEqual({
+      caveats: [],
+      hazards: [],
+      source: "this shell",
+    });
+  });
+
+  /**
+   * The destructive combination. Everything else here describes something not working; this
+   * describes something working exactly as built, in an order that cannot be undone — the sweep
+   * marks the queue sent, `scrubPayload` destroys the invitation links, and the dedupe index then
+   * refuses to queue any of it again.
+   */
+  it("names the one combination that destroys mail, and what it destroys", () => {
+    const verdict = summarizeConfig({ ...unconfigured, cron: true });
+    const hazard = verdict.hazards.join(" ");
+    expect(verdict.hazards.length).toBeGreaterThan(0);
+    expect(hazard).toMatch(/marked sent|mark it sent/);
+    expect(hazard).toMatch(/nobody/);
+    expect(hazard).toMatch(/RESEND_API_KEY/);
+    expect(hazard).toMatch(/COMMS_FROM/);
+  });
+
+  it("tells somebody to unset CRON_SECRET rather than to press on", () => {
+    const verdict = summarizeConfig({ ...unconfigured, cron: true });
+    expect(verdict.hazards.join(" ")).toMatch(/Unset CRON_SECRET/);
+  });
+
+  it("treats a half-configured pair as a hazard and names the missing half", () => {
+    const verdict = summarizeConfig({
+      ...unconfigured,
+      sending: "partial",
+      sendingMissing: ["COMMS_FROM"],
+    });
+    expect(verdict.hazards.join(" ")).toMatch(/COMMS_FROM is unset/);
+    expect(verdict.hazards.join(" ")).toMatch(/half-configured/);
+  });
+
+  /**
+   * The opt-out's visible line and its `List-Unsubscribe` header come off **one** field so they
+   * cannot disagree, which means a host that cannot form the URL has neither. "Header-only" is the
+   * wrong mental model to leave a reader with, so the sentence refuses it explicitly.
+   */
+  it("says a sending host with no base URL has no opt-out at all, not a header-only one", () => {
+    const verdict = summarizeConfig({ ...configured, baseUrl: false });
+    const hazard = verdict.hazards.join(" ");
+    expect(hazard).toMatch(/no way out of it at all/);
+    expect(hazard).toMatch(/not only the List-Unsubscribe header/);
+  });
+
+  it("does not raise the opt-out hazard on a host that cannot send anyway", () => {
+    const verdict = summarizeConfig({ ...unconfigured, baseUrl: false });
+    expect(verdict.hazards.join(" ")).not.toMatch(/opt-out/);
+    expect(verdict.caveats.join(" ")).toMatch(/no opt-out/);
+  });
+
+  /**
+   * An unusable key is not an unset key. The operator already spent the afternoon; telling them to
+   * "set DRIVE_TOKEN_KEY" is the sentence that wastes another one.
+   */
+  it("distinguishes a wrong-length key from an absent one, and says the length", () => {
+    const verdict = summarizeConfig({
+      ...unconfigured,
+      sealing: "unusable",
+      sealingKeyBytes: 16,
+    });
+    const hazard = verdict.hazards.join(" ");
+    expect(hazard).toMatch(/16 bytes, not 32/);
+    expect(hazard).toMatch(/randomBytes\(32\)/);
+    expect(verdict.caveats.join(" ")).not.toMatch(/DRIVE_TOKEN_KEY is unset/);
+  });
+
+  /**
+   * `googleConfig()` requires `NEXT_PUBLIC_BASE_URL` as well as the two Google variables, so the
+   * realistic confusing case is a board that set both Google secrets and cannot work out why the
+   * import screen still says "not configured".
+   */
+  /**
+   * `NEXT_PUBLIC_BASE_URL` is a shared variable every deployment sets for its own reasons, so its
+   * presence is not somebody having started to configure Drive. Reading it as one made `db:doctor`
+   * exit 1 on every developer laptop — found by running the thing rather than by testing it, which
+   * is why it is pinned here.
+   */
+  it("calls Drive off, not partial, on a host that only set the shared base URL", () => {
+    const verdict = summarizeConfig({ ...unconfigured, baseUrl: true });
+    expect(verdict.hazards).toEqual([]);
+    expect(verdict.caveats.join(" ")).toMatch(/Drive import is off/);
+  });
+
+  it("blames the base URL when that is the Drive variable actually missing", () => {
+    const verdict = summarizeConfig({
+      ...configured,
+      drive: "partial",
+      driveMissing: ["NEXT_PUBLIC_BASE_URL"],
+      baseUrl: false,
+    });
+    expect(verdict.hazards.join(" ")).toMatch(/NEXT_PUBLIC_BASE_URL is unset/);
+  });
+
+  it("carries the source through, so a verdict can name whose environment it read", () => {
+    const verdict = summarizeConfig({ ...unconfigured, source: { host: "https://example.test" } });
+    expect(verdict.source).toEqual({ host: "https://example.test" });
+  });
+});
+
+describe("the config verdict is not the database verdict", () => {
+  /** Guards the split `db:seed` depends on: it gates on `ok`, so a mail key must never touch it. */
+  it("never changes the problem list, whatever the configuration is", () => {
+    const base = summarizeHealth(healthy, expected);
+    const hazardous = summarizeHealth(
+      { ...healthy, config: { ...unconfigured, cron: true } },
+      expected,
+    );
+
+    expect(base.ok).toBe(true);
+    expect(hazardous.ok).toBe(true);
+    if (!hazardous.ok) throw new Error("unreachable");
+    expect(hazardous.config.hazards.length).toBeGreaterThan(0);
+  });
+
+  it("reports caveats on a failing verdict too, so a config fact is not lost behind a problem", () => {
+    const health = summarizeHealth({ ...unseeded, config: unconfigured }, expected);
+    expect(health.ok).toBe(false);
+    if (health.ok) throw new Error("unreachable");
+    expect(health.problems.at(-1)).toMatch(/comp not seeded/);
+    expect(health.config.caveats.length).toBeGreaterThan(0);
+  });
+});
+
+/**
+ * Parsed rather than cast, because this arrives over a network from a host named by hand on a
+ * command line. A typo'd URL answering somebody else's JSON must not produce a confident verdict.
+ */
+describe("parseHealthPayload", () => {
+  const payload = {
+    migrations: { applied: 15, expected: 15 },
+    config: {
+      sending: "off",
+      sendingMissing: ["RESEND_API_KEY", "COMMS_FROM"],
+      cron: false,
+      baseUrl: true,
+      drive: "off",
+      driveMissing: ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"],
+      sealing: "off",
+      sealingKeyBytes: null,
+    },
+  };
+
+  it("accepts what the route actually sends", () => {
+    expect(parseHealthPayload(payload)?.migrations.applied).toBe(15);
+  });
+
+  it("accepts a null applied count, which is a database with no drizzle schema", () => {
+    const parsed = parseHealthPayload({ ...payload, migrations: { applied: null, expected: 15 } });
+    expect(parsed?.migrations.applied).toBeNull();
+  });
+
+  it.each([
+    ["not an object", "hello"],
+    ["null", null],
+    ["no migrations", { config: payload.config }],
+    ["no config", { migrations: payload.migrations }],
+    ["a string count", { ...payload, migrations: { applied: "15", expected: 15 } }],
+    ["an unknown sending state", { ...payload, config: { ...payload.config, sending: "maybe" } }],
+    ["a non-boolean cron", { ...payload, config: { ...payload.config, cron: "yes" } }],
+    ["a non-array missing list", { ...payload, config: { ...payload.config, driveMissing: "x" } }],
+  ])("refuses %s", (_label, value) => {
+    expect(parseHealthPayload(value)).toBeNull();
   });
 });

@@ -3,7 +3,7 @@ import { config } from "dotenv";
 import type { CompConfig } from "./config";
 import { isProtectedDatabase, protectedComputeId } from "./protected";
 
-config({ path: ".env.local", quiet: true });
+config({ path: process.env.CALLBOARD_ENV_FILE ?? ".env.local", quiet: true });
 
 // Imported after dotenv, because `./index` reads DATABASE_URL when it loads.
 const { seedDemo, seedFromConfig, liveLinksAtRisk, DEMO_CONFIG } = await import("./seed");
@@ -82,6 +82,27 @@ if (!health.ok) {
   process.exit(1);
 }
 
+/**
+ * Reported, and deliberately not gated on.
+ *
+ * Seeding enqueues nothing, so a mail key has no bearing on whether a comp seeded correctly —
+ * failing here would mean a missing `RESEND_API_KEY` refuses to seed a demo, which is a false
+ * coupling and the reason the config verdict rides beside `ok` rather than inside `problems`.
+ * `db:doctor` is where a hazard exits 1.
+ */
+const { caveats, hazards } = health.config;
+if (hazards.length > 0 || caveats.length > 0) {
+  console.error(
+    [
+      "",
+      "⚠ This host's configuration (db:doctor is where these are checked properly):",
+      ...hazards.map((h) => `  ✗ ${h}`),
+      ...caveats.map((c) => `  ⚠ ${c}`),
+      "",
+    ].join("\n"),
+  );
+}
+
 if (jsonPath) {
   writeFileSync(jsonPath, JSON.stringify(seeded, null, 2));
 } else {
@@ -116,7 +137,8 @@ if (jsonPath) {
     ].join("\n"),
   );
 
-  // The health check is DB-only and cannot see this: localhost links resolve on your machine and
+  // The health check now sees configuration, but it asks whether NEXT_PUBLIC_BASE_URL is *set*, not
+  // whether it points somewhere a phone can reach. Localhost links resolve on your machine and
   // dead-404 on a prospect's phone. Warn loudly, but don't fail — local dev seeding is meant to use it.
   if (/\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:|\/|$)/.test(baseUrl)) {
     console.error(
