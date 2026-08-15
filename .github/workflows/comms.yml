@@ -32,9 +32,15 @@ jobs:
           BASE_URL: ${{ secrets.PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
+          # Fails rather than exits 0, and that changed on Aug 15, 2026 after this workflow ran
+          # every five minutes for twelve days, reported success every time, and never made a
+          # request: both secrets were unset the whole while. A scheduler that reports success
+          # while doing nothing is the same defect this repo keeps recording one layer out --
+          # a green signal whose subject is missing. If the sweep is not wanted, disable the
+          # workflow; do not let it pass by doing nothing.
           if [ -z "$BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "::notice::PRODUCTION_URL or CRON_SECRET is unset — the outbox is not being swept."
-            exit 0
+            echo "::error::PRODUCTION_URL or CRON_SECRET is unset — the outbox is not being swept."
+            exit 1
           fi
           code=$(curl -sS -o /tmp/sweep.json -w "%{http_code}" \
             -H "authorization: Bearer $CRON_SECRET" \

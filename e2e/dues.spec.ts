@@ -93,6 +93,15 @@ test("a board chases everyone who owes, and is told who it could not reach", asy
   // was reminded" are different facts, and only one of them is true.
   await expect(message).toContainText("No Captain");
 
+  /**
+   * And the board is told that this deployment will not carry them. The suite runs with no
+   * `RESEND_API_KEY`, which is the same state production is in -- so without this sentence the
+   * screen reports "2 reminders queued · watch the outbox" against a transport that marks them
+   * `sent` and mails nobody. Asserted here rather than only in the unit test because the defect
+   * was never in the predicate; it was in the five screens that did not ask it.
+   */
+  await expect(message).toContainText("Sending is not configured here");
+
   // And the outbox agrees, addressed to the right captains for the right numbers.
   expect(comms("count", COMP)).toBe("2");
   expect(comms("recipients", COMP)).toBe(
