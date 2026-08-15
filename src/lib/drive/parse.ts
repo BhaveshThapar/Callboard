@@ -48,20 +48,36 @@ export type ParsedRoster = {
 };
 
 /**
+ * A parsed row and **the physical line it started on**.
+ *
+ * The line number is carried rather than inferred, because blank rows are dropped and a board's
+ * spreadsheet is full of them. Numbering the survivors would make `TeamCandidate.row` — which
+ * promises "the row of the spreadsheet, so a board can go look" — drift by one per spacer above it,
+ * and take `duplicate-name.of` and the `sourceRow` written to `audit_log` with it. A row number that
+ * points at the wrong row is worse than no row number, because a board acts on it.
+ */
+type NumberedRow = { line: number; cells: string[] };
+
+/**
  * RFC 4180 enough for a spreadsheet export: quoted fields, embedded commas and newlines, and `""`
  * as an escaped quote. Hand-written because a CSV dependency for one importer is a sixth runtime
  * dependency, and because Google's own export is well-formed -- the messy input here is *human
  * column headers*, not exotic quoting.
+ *
+ * A record that spans physical lines (a quoted field with a newline in it) is reported at the line
+ * it **started** on, which is the one a board would scroll to.
  */
-export const parseCsv = (input: string): string[][] => {
-  const rows: string[][] = [];
-  let row: string[] = [];
+const parseCsvLines = (input: string): NumberedRow[] => {
+  const rows: NumberedRow[] = [];
+  let cells: string[] = [];
   let field = "";
   let quoted = false;
+  let line = 1;
+  let recordLine = 1;
 
   // Strip a UTF-8 BOM, which Sheets exports and which would otherwise become part of the first
   // header and stop it matching any alias.
-  const text = input.replace(/^﻿/, "");
+  const text = input.replace(/^\uFEFF/, "");
 
   for (let i = 0; i < text.length; i += 1) {
     const char = text[i];
@@ -75,6 +91,7 @@ export const parseCsv = (input: string): string[][] => {
           quoted = false;
         }
       } else {
+        if (char === "\n") line += 1;
         field += char;
       }
       continue;
@@ -83,29 +100,34 @@ export const parseCsv = (input: string): string[][] => {
     if (char === '"') {
       quoted = true;
     } else if (char === ",") {
-      row.push(field);
+      cells.push(field);
       field = "";
     } else if (char === "\n" || char === "\r") {
       // Treat CRLF as one break rather than two empty rows.
       if (char === "\r" && text[i + 1] === "\n") i += 1;
-      row.push(field);
-      rows.push(row);
-      row = [];
+      cells.push(field);
+      rows.push({ line: recordLine, cells });
+      cells = [];
       field = "";
+      line += 1;
+      recordLine = line;
     } else {
       field += char;
     }
   }
 
-  if (field !== "" || row.length > 0) {
-    row.push(field);
-    rows.push(row);
+  if (field !== "" || cells.length > 0) {
+    cells.push(field);
+    rows.push({ line: recordLine, cells });
   }
 
   // A trailing newline produces one empty row; a genuinely blank line in the middle is dropped too,
-  // because a board's spreadsheet has spacer rows and none of them is a team.
-  return rows.filter((r) => r.some((cell) => cell.trim() !== ""));
+  // because a board's spreadsheet has spacer rows and none of them is a team. Their line numbers are
+  // not reused -- that is the whole reason the line travels with the row.
+  return rows.filter((r) => r.cells.some((cell) => cell.trim() !== ""));
 };
+
+export const parseCsv = (input: string): string[][] => parseCsvLines(input).map((r) => r.cells);
 
 const normalizeHeader = (raw: string): string => raw.trim().toLowerCase().replace(/[_\s]+/g, " ");
 
@@ -151,10 +173,10 @@ const parseCount = (
 const looksLikeEmail = (raw: string): boolean => /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(raw);
 
 export const parseRoster = (csv: string): ParsedRoster => {
-  const rows = parseCsv(csv);
+  const rows = parseCsvLines(csv);
   if (rows.length === 0) return { mapping: {}, unmappedHeaders: [], candidates: [] };
 
-  const headers = rows[0] ?? [];
+  const headers = rows[0]?.cells ?? [];
   const { mapping, unmapped } = mapHeaders(headers);
 
   const named: Partial<Record<ImportColumn, string>> = {};
@@ -170,7 +192,7 @@ export const parseRoster = (csv: string): ParsedRoster => {
 
   const seen = new Map<string, number>();
 
-  const candidates = rows.slice(1).map((row, offset): TeamCandidate => {
+  const candidates = rows.slice(1).map(({ line, cells: row }): TeamCandidate => {
     const problems: CandidateProblem[] = [];
 
     const name = (at(row, "name") ?? "").trim();
@@ -193,7 +215,7 @@ export const parseRoster = (csv: string): ParsedRoster => {
     // spreadsheet -- a team listed once per division, or pasted twice. Both are shown; neither is
     // resolved here, because which one is right is a board's question.
     const key = name.toLowerCase();
-    const rowNumber = offset + 2;
+    const rowNumber = line;
     if (name !== "") {
       const first = seen.get(key);
       if (first !== undefined) problems.push({ kind: "duplicate-name", of: first });

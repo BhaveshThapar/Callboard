@@ -139,18 +139,30 @@ export const importTeams = async (
 
     let contactId: string | null = null;
     if (candidate.contactEmail) {
+      const stated = candidate.contactName?.trim() || null;
+
       const [contact] = await db
         .insert(people)
         .values({
           orgId,
-          name: candidate.contactName?.trim() || candidate.contactEmail,
+          // A row has to have a name and the sheet did not give one, so the address stands in for a
+          // person nobody has named yet. That is only ever written on **insert**.
+          name: stated ?? candidate.contactEmail,
           email: candidate.contactEmail,
         })
         // `people` is org-scoped and survives a comp delete, so this must find rather than insert a
         // second row -- `people_org_email_unique` is what would otherwise refuse it (ADR-0013).
+        //
+        // **The name is only overwritten when the sheet actually stated one.** A sheet with an email
+        // column and no captain column would otherwise rename every person it matched to their own
+        // address -- and `people` is the row an account, a board membership and every message
+        // recipient hang off, with no history to undo it. Registration cannot do this because it
+        // refuses a blank contact name; the fallback is this importer's, so the guard is too. When
+        // there is no name to write, the conflict clause updates the email to itself, which is a
+        // no-op that still lets `.returning()` hand back the id.
         .onConflictDoUpdate({
           target: [people.orgId, people.email],
-          set: { name: candidate.contactName?.trim() || candidate.contactEmail },
+          set: stated ? { name: stated } : { email: candidate.contactEmail },
         })
         .returning({ id: people.id });
       contactId = contact?.id ?? null;

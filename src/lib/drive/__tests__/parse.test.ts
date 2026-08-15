@@ -129,3 +129,46 @@ describe("parseRoster", () => {
     expect(parseRoster("Team,Dancers").candidates).toEqual([]);
   });
 });
+
+/**
+ * Found by an adversarial review of this branch, and it survived every attempt to refute it.
+ *
+ * `parseCsv` drops blank rows, which a board's spreadsheet is full of. Numbering the survivors made
+ * `TeamCandidate.row` — which promises "the row of the spreadsheet, so a board can go look" — drift
+ * by one per spacer above it, and took `duplicate-name.of` and the `sourceRow` written to
+ * `audit_log` with it. A row number that points at the wrong row is worse than none, because a board
+ * acts on it.
+ */
+describe("row numbers point at the spreadsheet, not at the surviving rows", () => {
+  it("skips the line numbers of spacer rows rather than renumbering past them", () => {
+    const parsed = parseRoster("Team,Dancers\nNazaare,18\n\n\nZeal,22");
+    expect(parsed.candidates.map((c) => ({ name: c.name, row: c.row }))).toEqual([
+      { name: "Nazaare", row: 2 },
+      { name: "Zeal", row: 5 },
+    ]);
+  });
+
+  it("numbers correctly when the header itself is pushed down by blank lines", () => {
+    const parsed = parseRoster("\n\nTeam,Dancers\nNazaare,18");
+    expect(parsed.candidates[0]?.row).toBe(4);
+  });
+
+  it("points a duplicate at the real line of the row it duplicates", () => {
+    const parsed = parseRoster("Team\nNazaare\n\nZeal\n\nnazaare");
+    expect(parsed.candidates.map((c) => c.row)).toEqual([2, 4, 6]);
+    expect(parsed.candidates[2]?.problems).toEqual([{ kind: "duplicate-name", of: 2 }]);
+  });
+
+  it("reports a record spanning physical lines at the line it started on", () => {
+    const parsed = parseRoster('Team,School\nNazaare,"NC State\nRaleigh"\nZeal,UMD');
+    expect(parsed.candidates.map((c) => ({ name: c.name, row: c.row }))).toEqual([
+      { name: "Nazaare", row: 2 },
+      { name: "Zeal", row: 4 },
+    ]);
+  });
+
+  it("handles CRLF spacers the same way", () => {
+    const parsed = parseRoster("Team\r\nNazaare\r\n\r\nZeal");
+    expect(parsed.candidates.map((c) => c.row)).toEqual([2, 4]);
+  });
+});
