@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import type { BoardFormScope } from "../state";
+import Link from "next/link";
 import { eyebrowClass } from "@/components/styles";
 import { listRegistrationFieldsForBoard, listRosterForBoard } from "@/lib/auth/scope";
 import { resolveBoardAccessBySlugs } from "@/lib/auth/access";
@@ -32,7 +33,19 @@ export default async function RosterPage({ params }: { params: Promise<{ org: st
   return (
     <>
       <div className="max-w-4xl">
-        <h2 className={eyebrowClass}>Registration</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h2 className={eyebrowClass}>Registration</h2>
+          {/* A11's only way in, and it is a link rather than a sixth tab: importing is an onboarding
+              act a board does once, not a screen it runs the comp from. A subsystem with nothing
+              pointing at it is the defect this repo has recorded most often. */}
+          <Link
+            href={`${scope.basePath}/import`}
+            data-testid="roster-import-link"
+            className="text-caption text-primary underline-offset-2 hover:underline"
+          >
+            Import a roster from Drive →
+          </Link>
+        </div>
 
         {window && (
           <RegistrationWindow scope={scope} status={window.status} publicPath={window.path} />

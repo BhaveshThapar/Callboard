@@ -37,6 +37,8 @@ import {
   releaseAllocation,
   setPaymentReconciled,
 } from "@/lib/money/ledger";
+import { revokeConnection } from "@/lib/drive/connections";
+import { importTeams, previewImport } from "@/lib/drive/import";
 import { parseMaterials } from "@/lib/roster/materials";
 import {
   regenerateCharges,
@@ -1511,5 +1513,94 @@ export const submitMaterialsAction = async (
     message: parsed.value.rosterSizeRequested === null
       ? "Filed. Your board can see it."
       : "Filed. Your board has to confirm the dancer count before it changes what you owe.",
+  };
+};
+
+
+/**
+ * A11's confirm step.
+ *
+ * It takes a **file reference, never a roster**: the sheet is re-read and re-parsed here, so what
+ * lands is what Drive says rather than what a form claimed it said. A posted list of teams would be
+ * a second source of truth for the import and a way to insert rows the preview never showed.
+ *
+ * `compId` authorizes, as on every board form. No `teamId` is resolved because none arrives — this
+ * creates teams rather than naming one, which puts it with the four comp-scoped writes rather than
+ * with the seven that check a claim.
+ */
+export const importDriveRosterAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const file = {
+    id: String(formData.get("fileId") ?? ""),
+    name: String(formData.get("fileName") ?? ""),
+    mimeType: String(formData.get("fileMime") ?? ""),
+  };
+  if (!file.id) return { status: "error", message: "Pick a file to import." };
+
+  const preview = await previewImport(actor, file);
+  if (!preview.ok) return { status: "error", message: preview.message };
+
+  const clean = preview.value.candidates.filter((candidate) => candidate.problems.length === 0);
+  if (clean.length === 0) {
+    return { status: "error", message: "Nothing in that sheet can be imported as it stands." };
+  }
+
+  const result = await importTeams(actor, clean);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/roster`);
+  revalidatePath(`${basePath}/money`);
+
+  const { imported, skipped } = result.value;
+  return {
+    status: "ok",
+    message:
+      skipped === 0
+        ? `Imported ${imported}. They are applied, so nothing is billed until you accept them.`
+        : `Imported ${imported}, skipped ${skipped}. The skipped rows are still in the sheet.`,
+  };
+};
+
+
+/**
+ * Disconnects the org's Google account.
+ *
+ * ADR-0011's rule reaching the one credential this product holds *outward* rather than issues: a
+ * board must be able to end the product's access to its Drive, and the function to do it shipped
+ * with no button for exactly as long as it took an audit to notice -- the seventh instance of this
+ * repo's most-recorded defect, caught before it merged rather than after.
+ *
+ * It revokes our row; it does not reach into Google. Somebody who wants the grant gone from their
+ * account entirely removes it there, and the screen says so, because implying otherwise would be a
+ * promise this product cannot keep.
+ */
+export const disconnectDriveAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const orgId = await orgOfComp(compId);
+  if (!orgId) return { status: "error", message: "That comp is not in an org." };
+
+  const result = await revokeConnection(actor, orgId);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/import`);
+  return {
+    status: "ok",
+    message: "Disconnected. Remove Callboard from your Google account to end the grant there too.",
   };
 };
