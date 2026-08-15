@@ -37,7 +37,7 @@ export type UnsealResult = { ok: true; value: string } | { ok: false; reason: st
  * preview deployment that silently kept plaintext refresh tokens would be the worst possible
  * default, so the absence is a refusal and never a fallback.
  */
-export const sealingKey = (): Buffer | null => {
+const sealingKey = (): Buffer | null => {
   const raw = process.env.DRIVE_TOKEN_KEY;
   if (!raw) return null;
 

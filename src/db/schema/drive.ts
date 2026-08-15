@@ -3,15 +3,16 @@ import { index, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/
 import { orgs, people } from "./orgs";
 
 /**
- * One definition, for `CHAIN_INDEXES`' reason: the schema, the connect path and `db:doctor` have to
- * agree on the string and none of them can derive it.
+ * The index name in one place, so the schema and anything that later reads a refusal agree on the
+ * string. Deliberately **not** added to `db:doctor`, unlike `CHAIN_INDEXES` and `MONEY_CONSTRAINTS`:
+ * those guard a wrong *number* -- a forked locked result, an over-allocated payment -- and this
+ * guards a nuisance. Two live connections would mean a board reconnected and the old row lingered,
+ * which costs nobody money and is visible on the screen that lists it.
  */
 export const DRIVE_INDEXES = {
   /** An org has at most one live Google connection. A reconnect supersedes rather than stacks. */
   liveConnection: "drive_connections_live_unique",
 } as const;
-
-export const DRIVE_INDEX_NAMES = Object.values(DRIVE_INDEXES);
 
 /**
  * A11's on-ramp: a Google account an org has connected so a board can import a roster it already
