@@ -20,13 +20,23 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * seconds arriving at the same answer while reading like a flake. Merging is not deploying, and this
  * is the one place that distinction shows up as an HTTP status.
  */
-export const fetchHealth = async (host: string, attempts = 3): Promise<HealthFetch> => {
+export const fetchHealth = async (
+  host: string,
+  attempts = 3,
+  /**
+   * Injectable so the no-retry rule can be proved by *counting calls* rather than by timing a
+   * subprocess. A wall-clock assertion is only ever a proxy for "it did not retry", and it is a
+   * proxy that fails on a loaded machine — which is the one condition under which nobody trusts a
+   * red test anyway.
+   */
+  send: typeof fetch = fetch,
+): Promise<HealthFetch> => {
   const url = `${host.replace(/\/+$/, "")}/api/health`;
 
   let last = "";
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
-      const response = await fetch(url, {
+      const response = await send(url, {
         headers: { accept: "application/json" },
         signal: AbortSignal.timeout(20_000),
       });
