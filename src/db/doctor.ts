@@ -277,12 +277,15 @@ const observeAccounts = async (): Promise<AccountObservation> => {
 
   const names = new Set(present.rows.map((row) => row.name));
   const accountGuaranteeEnforced = ACCOUNT_CONSTRAINT_NAMES.every((name) => names.has(name));
-  const existingTables = new Set(tables.rows.map((row) => row.tablename));
+  const existing = new Set(tables.rows.map((row) => row.tablename));
+
+  // A database from before `0017` has no `assignments` at all, which is not the same failure as one
+  // that has the table without its indexes. The first is "you have not migrated", already reported
+  // by the migration count; the second is a guarantee that is missing while the code assumes it.
   const coordGuaranteeEnforced =
-    !COORD_TABLES.every((table) => existingTables.has(table)) ||
+    !COORD_TABLES.every((table) => existing.has(table)) ||
     ASSIGNMENT_CONSTRAINT_NAMES.every((name) => names.has(name));
 
-  const existing = new Set(tables.rows.map((row) => row.tablename));
   if (!ACCOUNT_TABLES.every((table) => existing.has(table))) {
     return { accountGuaranteeEnforced, coordGuaranteeEnforced, duplicateInvitations: [] };
   }

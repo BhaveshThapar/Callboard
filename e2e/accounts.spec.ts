@@ -380,29 +380,37 @@ test("a board removes a captain, and the captain's own page stops resolving", as
 });
 
 /**
- * A role with no screen behind it cannot be handed out — and the refusal is the rule, not the
- * markup. `validateAnswers`' reason: the `<select>` no longer offers `liaison`, and a hand-crafted
- * POST that names it anyway is refused by the same list the form was built from.
+ * The refusal is the rule rather than the markup, and C1 is what changed which way it points.
+ *
+ * This asserted that `liaison` was **not** offered and that a hand-crafted POST naming it was
+ * refused — correct for as long as `resolveLiaisonActor` had no caller, because a role with no
+ * screen behind it must not be handed out. C1 gave it a screen, so the assertion inverts rather
+ * than being deleted: what the test always meant is *the server decides, not the form*, and that is
+ * now checked in the other direction with a role the list has never contained.
+ *
+ * `validateAnswers`' reason throughout: the `<select>` is a courtesy to an honest board.
  */
-test("a liaison cannot be invited, because there is nothing for one to open", async ({ page }) => {
+test("a role the server does not know is refused however the form is edited", async ({ page }) => {
   const comp = seed();
 
   await page.goto(`/board/${comp.boardToken}/people`);
-  await expect(page.locator('[data-testid="invite-role"] option[value="liaison"]')).toHaveCount(0);
+
+  // Every role a membership can hold is offered, which is what C1 restored.
+  await expect(page.locator('[data-testid="invite-role"] option[value="liaison"]')).toHaveCount(1);
   await expect(page.locator('[data-testid="invite-role"] option[value="board"]')).toHaveCount(1);
 
   await page.getByTestId("invite-name").fill("Lia Sonn");
   await page.getByTestId("invite-email").fill("lia@example.com");
 
-  // Put the option back and submit it, the way `custom-fields.spec.ts` strips `required` before
-  // submitting: the form is a courtesy to an honest board, and the server is the rule.
+  // A role that is not in INVITABLE_ROLES and never has been, injected the way
+  // `custom-fields.spec.ts` strips `required` before submitting.
   await page.evaluate(() => {
     const select = document.querySelector<HTMLSelectElement>('[data-testid="invite-role"]');
     if (!select) throw new Error("no role select on the page");
     const option = document.createElement("option");
-    option.value = "liaison";
+    option.value = "judge";
     select.append(option);
-    select.value = "liaison";
+    select.value = "judge";
   });
   await page.getByTestId("invite-submit").click();
 
