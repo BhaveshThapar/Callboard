@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "@playwright/test";
 
@@ -54,7 +54,15 @@ const runAgainstDb = (body: string): string => {
   // finds neither `dotenv` nor `@/db`; and `.ts` there would compile as CJS, because tsx reads
   // `"type": "module"` from the nearest package.json and there is none. `node_modules/.cache` is
   // already ignored by git, so the scratch file cannot become a tracked artifact.
-  const dir = mkdtempSync(join(process.cwd(), "node_modules", ".cache", "callboard-rls-"));
+  //
+  // `mkdirSync` first, and that line is not defensive padding. Without it this passed here and
+  // failed in CI with `ENOENT ... mkdtemp`, because `node_modules/.cache` existed on the author's
+  // laptop only from an earlier hand-run `mkdir -p` and `bun install` never creates it. A spike
+  // written to close "a claim with no code" that itself depended on untracked local state is the
+  // same defect at one more altitude, and it is recorded here rather than quietly patched.
+  const cache = join(process.cwd(), "node_modules", ".cache");
+  mkdirSync(cache, { recursive: true });
+  const dir = mkdtempSync(join(cache, "callboard-rls-"));
   const file = join(dir, "probe.mts");
   writeFileSync(file, `${PRELUDE}\n${body}`);
   return execFileSync("bunx", ["tsx", file], {
