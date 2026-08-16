@@ -56,7 +56,7 @@ clicks a comms button on the deployed host. `db:doctor` refuses to exit 0 on thi
 | `RESEND_API_KEY` | Resend dashboard | Vercel | C2, A10, ADJ·2, A7 receipts |
 | `COMMS_FROM` | Resend — **a verified domain you own** | Vercel | same |
 | `CRON_SECRET` | `openssl rand -base64 32` | Vercel **and** GitHub secrets — must match | the sweep |
-| `PRODUCTION_URL` | — | GitHub **variables** *and* GitHub **secrets** — see below | the migration guard, and the sweep |
+| `PRODUCTION_URL` | — | GitHub **variables** — see below | the migration guard, and the sweep |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | Google Cloud Console | Vercel | A11 |
 | `DRIVE_TOKEN_KEY` | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` | Vercel | A11 |
 
@@ -65,17 +65,24 @@ when it cannot form one, and the visible opt-out line and the `List-Unsubscribe`
 **one** field so they cannot disagree. A host that can send and cannot form the URL broadcasts with
 **no opt-out at all** — not header-only, none.
 
-**`PRODUCTION_URL` has to be set twice today, and that is a wart with a date on it.**
-`migrations.yml` reads it as a repository *variable*, because a public URL is not a credential and a
-variable's absence is diagnosable in the settings UI rather than guessed at. `comms.yml` still reads
-it as a *secret*, and moving it belongs with that workflow's own fix rather than here — so set the
-same value in both until they are reconciled. Nothing breaks if you set only one; the workflow that
-reads the other fails loudly, which is the intended behaviour of both.
+**`PRODUCTION_URL` is a repository *variable*, in one place, and never a secret.** Both workflows read
+`vars.PRODUCTION_URL`. Two arguments and a third that decides it: a public URL is not a credential; a
+variable's absence is diagnosable in the settings UI rather than guessed at; and **GitHub masks secret
+values in logs**, so a sweep failing against `secrets.PRODUCTION_URL` prints `***` and cannot name the
+host it asked. That is *a verdict without its subject* — the thing that made the preflight useless for
+nineteen days — reintroduced in the scheduler.
+
+**The order matters when you set it:** create `vars.PRODUCTION_URL` first, confirm both workflows are
+green, and only then delete any `secrets.PRODUCTION_URL` left over. Reversing those gives a red sweep
+every five minutes.
 
 Google Cloud also needs, outside any environment variable: the Drive API enabled, `drive.readonly`
 on the consent screen, and `${NEXT_PUBLIC_BASE_URL}/api/drive/callback` registered as a redirect URI.
 
 After setting anything, re-run `db:doctor --host` and read the config block.
+
+**The Comms workflow is disabled while this part is undone**, and re-enabling it is the last act of
+Part 3 rather than the first — see Part 4.
 
 ---
 
@@ -107,4 +114,5 @@ commit**, never in the same commit as a feature. That half was never about the v
 | A board clicked send and nobody received anything | Sending is not configured. `db:doctor --host` says so; the screens now carry the caveat too. |
 | Messages stuck in `sending` | **Do not retry.** That is the crash-after-send footprint, and retrying emails somebody twice. `db:doctor` reports them by id; check whether they arrived. |
 | The comms workflow is green and nothing sends | It was green for doing nothing until Aug 2026. It fails on unset secrets now. Check `PRODUCTION_URL` and `CRON_SECRET`. |
+| The **Comms** workflow is not running at all | Deliberate, and this is where that is recorded. It is **disabled in the Actions UI** until Part 2's `CRON_SECRET` exists, because it now exits 1 on unset secrets and a 5-minute cron would otherwise post ~288 red runs a day and bury the next real failure. Setting `CRON_SECRET` is the same act as re-enabling it. A disabled workflow is visible in the UI; the exit-0 green one was not, which is the whole reason it changed. |
 | `migrations.yml` red right after a merge | Expected. Apply the migration, then re-run it from the Actions tab. |

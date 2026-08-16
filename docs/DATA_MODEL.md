@@ -148,7 +148,7 @@ A partial unique index on `supersedes_id` (where it is not null) means **two run
 
 **`audit_log`** — `id`, `comp_id`, `actor_kind`, `actor_person_id`, `action`, `entity`, `entity_id`, `before`, `after`, `at`
 
-Append-only, indexed on `(comp_id, at)`. `actor_kind` ∈ `board | judge | system`. Every score submission, deduction, lock, and override lands here.
+Append-only, indexed on `(comp_id, at)`. `actor_kind` ∈ `board | judge | team | liaison | system` — P1 added the last two with accounts in `0012`, and this line said three until August 15, 2026. `ACTOR_KINDS` in `src/db/schema/audit.ts` is the one definition and `audit_log_actor_kind_check` derives from it, so a sixth kind is a migration rather than a type edit. Every score submission, deduction, lock, and override lands here.
 
 ---
 

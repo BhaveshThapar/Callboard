@@ -48,9 +48,9 @@ jobs:
         with:
           bun-version: latest
 
-      # `comms.yml`'s failure mode, refused. That workflow exits 0 with a notice when its secrets are
-      # unset, which is why it ran every five minutes from Aug 3, touched nothing, and reported
-      # success the whole time. A green check here would be a lie.
+      # `comms.yml`'s failure mode, refused. That workflow exited 0 with a notice when its secrets
+      # were unset until August 15, 2026, which is why it ran every five minutes from Aug 3, touched
+      # nothing, and reported success the whole time. A green check here would be a lie.
       - if: ${{ env.PRODUCTION_URL == '' }}
         run: |
           echo "::error::PRODUCTION_URL is not set, so nothing was checked against production."

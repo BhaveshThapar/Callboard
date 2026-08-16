@@ -62,7 +62,7 @@ To run the demo cold in front of someone, follow [`docs/DEMO.md`](docs/DEMO.md).
 | [FEATURE_MAP.md](docs/FEATURE_MAP.md) | Every feature, its status, and the gate that sequences it |
 | [DEMO.md](docs/DEMO.md) | Running the sales demo |
 | [RUNBOOK.md](docs/RUNBOOK.md) | Deploying, the credential order that must not be got wrong, and the walk that moves a row to `Live` |
-| [decisions/](docs/decisions/) | ADRs — why the load-bearing choices were made |
+| [decisions/](docs/decisions/) | ADRs — why the load-bearing choices were made. Numbers 0017–0019 were never written; the gap is left rather than renumbered, because renumbering breaks every citation in the repo. |
 
 ## Stack
 
