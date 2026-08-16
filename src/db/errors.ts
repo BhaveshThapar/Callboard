@@ -19,3 +19,33 @@ export const violatedConstraint = (error: unknown): string | null => {
   }
   return null;
 };
+
+/**
+ * The errors that prove a statement never reached Postgres. Nothing else belongs here.
+ *
+ * `ENOTFOUND` and `EAI_AGAIN` are DNS: no address was resolved, so no byte was sent. `ECONNREFUSED`
+ * is a closed port: the packet was answered with a refusal rather than by a server. In all three the
+ * database did not see the statement, so sending it again is a first act rather than a second one.
+ *
+ * **`ECONNRESET` is deliberately absent, and that is the whole design.** A reset means a connection
+ * *was* established and then died, so an `insert` may have committed with the response lost on the
+ * way back. Retrying that is the crash-after-send footprint ADR-0020 refuses for a message, with a
+ * payment on the other end of it — and this product is sold against exactly the failure of a number
+ * counted twice. A reset must surface as an error somebody reads.
+ */
+const NEVER_ARRIVED = new Set(["ENOTFOUND", "EAI_AGAIN", "ECONNREFUSED"]);
+
+/**
+ * Whether a thrown request provably never reached the database.
+ *
+ * Same shape as `violatedConstraint` and for the same reason: Node's `fetch` throws a bare
+ * `TypeError: fetch failed` and hangs the real cause underneath it, so the `code` is the only part
+ * safe to branch on and this is the one place that digs it out. Branching on the message text would
+ * mean "fetch failed" — a sentence that is equally true of the reset this must not retry.
+ */
+export const neverArrived = (error: unknown): boolean => {
+  for (let e: unknown = error; e instanceof Error; e = e.cause) {
+    if ("code" in e && typeof e.code === "string" && NEVER_ARRIVED.has(e.code)) return true;
+  }
+  return false;
+};
