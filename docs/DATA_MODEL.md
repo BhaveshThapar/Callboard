@@ -28,9 +28,7 @@ It is what gates the public form, and it is **written by the board**, forward on
 
 **`people`** — `id`, `org_id`, `name`, `email`, `phone`, `created_at`. Unique on `(org_id, email)`.
 
-**`comp_roles`** — `id`, `comp_id`, `person_id`, `role`
-
-`role` ∈ `board | liaison | judge | captain | attendee`. Unique on `(comp_id, person_id, role)`, so a person can be a board member *and* a liaison at the same comp — which is the normal case, not an edge case.
+**`comp_roles`** — **dropped in `0016`, with C1.** It described participation (`board | liaison | judge | captain | attendee`), was written only by the seed, and never had a reader. Its own schema comment set the condition — *"if it is still readerless when the coordination work is actually scheduled, it should be dropped then"* — and coordination is C1. It was kept on the stated grounds that it was "the shape C1 needs (person ↔ duty ↔ comp)" and that the seed wrote it "so that the record of who was involved survives the links being revoked". **Both were false.** It had no `duty` column and no time columns, so it could express neither *what* nor *when*; and `board_assignments` and `judge_assignments` are revoked rather than deleted, so that record survived without it. `assignments` below is what C1 actually needed.
 
 **`board_assignments`** — `id`, `comp_id`, `person_id`, `token_hash` (unique), `revoked_at`, `created_at`
 
@@ -48,7 +46,7 @@ Login is **org-scoped**, not global, and hangs off `people` so that a board memb
 
 **`memberships`** — `id`, `comp_id`, `person_id`, `role`, `team_id`, `revoked_at`, `created_at`. Unique on `(comp_id, person_id, role)`.
 
-`role` ∈ `board | captain | liaison`, from `ACCOUNT_ROLES`. Deliberately **not** `comp_roles.role`: that column says what a person *is* at a comp (including `attendee`, who will never have an account), and this says what a session is allowed to resolve to. Two questions, two lists. A CHECK enforces that `team_id` is set exactly when `role = 'captain'` — a captain with no team could see nothing, and a liaison with a team would imply a claim nothing reads.
+`role` ∈ `board | captain | liaison`, from `ACCOUNT_ROLES` — what a session is allowed to resolve to. It used to define itself against `comp_roles.role`, which said what a person *was* at a comp; that table is gone, so this is now the only list of who is at a comp in what capacity. A CHECK enforces that `team_id` is set exactly when `role = 'captain'` — a captain with no team could see nothing, and a liaison with a team would imply a claim nothing reads.
 
 `revoked_at` is the only way somebody comes back off a comp, and it is read by every membership filter, so a revoked membership stops resolving on the next request. The session is left alone on purpose: killing it would sign that person out of comps this board has no say over.
 

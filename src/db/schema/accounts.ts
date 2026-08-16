@@ -25,10 +25,12 @@ import { teams } from "./teams";
  */
 
 /**
- * What an account may do at a comp. Deliberately **not** `CompRole`: that enum describes what a
- * person *is* at a comp (including `attendee`, who has no account and never will), while this says
- * what a session is allowed to resolve to. Two questions, two lists — `BILLABLE_STATUSES` and
- * `SCOREABLE_STATUSES`' reason, which equal each other today and answer different things.
+ * What an account may do at a comp — what a session is allowed to resolve to, and nothing wider.
+ *
+ * It used to define itself against `CompRole`, an enum on the `comp_roles` table that described what
+ * a person *was* at a comp (including `attendee`, who has no account and never will). That table was
+ * dropped with C1, so the contrast is gone and the definition has to stand on its own: this list is
+ * the set of authorities, and there is no longer a second list describing participation.
  */
 export const ACCOUNT_ROLES = ["board", "captain", "liaison"] as const;
 export type AccountRole = (typeof ACCOUNT_ROLES)[number];
@@ -113,8 +115,8 @@ export const users = pgTable(
  *
  * Separate from `users` because authority is per comp and a login is per org: a captain at one comp
  * is nobody at the next one, and the board that ran last season should not silently still be the
- * board. Separate from `comp_roles` because that table describes participation — it carries
- * `attendee`, and it authorizes nothing — while this grants.
+ * board. It is now the **only** table saying who is at a comp in what capacity: `comp_roles` used to
+ * sit beside it describing participation, and was dropped with C1 having never had a reader.
  *
  * `team_id` is set exactly when `role = 'captain'`, and the CHECK says so rather than a comment: a
  * captain with no team could see nothing, and a liaison with a team would imply a claim nothing

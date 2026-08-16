@@ -10,7 +10,6 @@ import { sql } from "drizzle-orm";
 export const COMP_STATUSES = ["draft", "open", "live", "complete"] as const;
 
 export type CompStatus = (typeof COMP_STATUSES)[number];
-export type CompRole = "board" | "liaison" | "judge" | "captain" | "attendee";
 
 export const CUSTOM_FIELD_TYPES = ["text", "longtext", "number", "select", "checkbox"] as const;
 export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
@@ -111,38 +110,6 @@ export const people = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("people_org_email_unique").on(t.orgId, t.email)],
-);
-
-/**
- * A person can hold several roles at one comp: a board member who also liaises.
- *
- * **The one table in the schema with a writer and no reader**, and it is worth being explicit about
- * why rather than leaving it to be rediscovered. It authorizes nothing — `board_assignments` and
- * `judge_assignments` do that, per person, with a hashed token — so nothing on the scoring or money
- * path has any reason to consult it, and a read added merely to make it look used would be the kind
- * of thing ADR-0010 removed a column for.
- *
- * It is kept rather than dropped because it is the shape C1 needs (person ↔ duty ↔ comp), and the
- * seed writes it so that the record of who was involved in a comp survives the links being revoked.
- * If it is still readerless when the coordination work is actually scheduled, it should be dropped
- * then — a table that describes a plan is only worth its migration while the plan is live.
- */
-export const compRoles = pgTable(
-  "comp_roles",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    compId: uuid("comp_id")
-      .notNull()
-      .references(() => comps.id, { onDelete: "cascade" }),
-    personId: uuid("person_id")
-      .notNull()
-      .references(() => people.id, { onDelete: "cascade" }),
-    role: text("role").$type<CompRole>().notNull(),
-  },
-  (t) => [
-    unique("comp_roles_unique").on(t.compId, t.personId, t.role),
-    check("comp_roles_role_check", sql`${t.role} in ('board','liaison','judge','captain','attendee')`),
-  ],
 );
 
 /**
