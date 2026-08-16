@@ -15,7 +15,20 @@ export default defineConfig({
   globalSetup: "./e2e/guard.ts",
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  /**
+   * Zero everywhere, and it was 2 in CI until August 15, 2026.
+   *
+   * That retry was load-bearing in the worst way: the suite had never been observed green in one
+   * pass locally, and CI never had to be, because two retries absorbed a transient `ENOTFOUND`
+   * against Neon and reported green. A retry here does not distinguish a network blip from a real
+   * regression — it makes them look identical, and the next thing landing is P3, which rewrites
+   * every scoped read and whose failure mode is a denial that silently stops denying.
+   *
+   * The blip itself is fixed where it belongs, in `src/db/connect.ts`. If this goes red on
+   * infrastructure anyway, the answer is to widen that — with the argument `neverArrived` demands —
+   * and never to put the retry back here, where it hides the thing it retries.
+   */
+  retries: 0,
   workers: 1,
   reporter: process.env.CI ? "list" : "html",
   /**
