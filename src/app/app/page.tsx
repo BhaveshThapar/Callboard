@@ -13,22 +13,22 @@ export const dynamic = "force-dynamic";
 /**
  * Where a role actually goes, and the reason this is a function rather than one link.
  *
- * A membership is not a page. `board` and `captain` each have somewhere to land; `liaison` is a real
- * role with a real actor and **no screen** until C1 builds one, so it gets a sentence instead of a
- * link. Handing all three the same href is precisely the defect P1 shipped and was audited for: the
- * landing page linked every role at `/my/[comp]`, which resolves a *captain* membership by name, so
- * a board member who accepted an invitation and clicked their own comp was told it did not exist.
+ * A membership is not a page, and the three roles land in three different places. Handing all three
+ * the same href is precisely the defect P1 shipped and was audited for: the landing page linked
+ * every role at `/my/[comp]`, which resolves a *captain* membership by name, so a board member who
+ * accepted an invitation and clicked their own comp was told it did not exist.
+ *
+ * **It returned `string | null` until C1**, because `liaison` had no screen and a card with a
+ * sentence was more honest than a link to a `notFound()`. C1 built the screen, so the null branch
+ * and the sentence beside it are gone rather than left as an unreachable case — a "no screen yet"
+ * message for a role that has one is the shape this repo keeps recording, and the narrowed return
+ * type is what stops it coming back by accident.
  */
-const destinationFor = (comp: SignedInComp): string | null => {
+const destinationFor = (comp: SignedInComp): string => {
   const base = `/app/${comp.orgSlug}/${comp.compSlug}`;
   if (comp.role === "board") return base;
   if (comp.role === "captain") return `${base}/team`;
-  return null;
-};
-
-const NO_SCREEN_YET: Record<string, string> = {
-  liaison:
-    "Liaison duties and the schedule they hang off are not built yet, so there is nothing here to open. Your membership is real; the screen is not.",
+  return `${base}/comp-day`;
 };
 
 /**
@@ -76,33 +76,15 @@ export default async function Dashboard() {
                     test failing three assertions later about a page it never left. What a caller
                     means by "my comp here" is the thing that opens it.
                   */}
-                  {href ? (
-                    <Link
-                      href={href}
-                      className="text-card font-semibold text-heading underline underline-offset-2 hover:text-primary"
-                      data-testid={`my-comp-${comp.compSlug}`}
-                    >
-                      {comp.compName}
-                    </Link>
-                  ) : (
-                    <span
-                      className="text-card font-semibold text-heading"
-                      data-testid={`my-comp-${comp.compSlug}`}
-                    >
-                      {comp.compName}
-                    </span>
-                  )}
+                  <Link
+                    href={href}
+                    className="text-card font-semibold text-heading underline underline-offset-2 hover:text-primary"
+                    data-testid={`my-comp-${comp.compSlug}`}
+                  >
+                    {comp.compName}
+                  </Link>
                   <RoleBadge role={comp.role} />
                 </div>
-
-                {!href && (
-                  <p
-                    className="mt-2 text-caption text-subtle"
-                    data-testid={`my-comp-${comp.compSlug}-note`}
-                  >
-                    {NO_SCREEN_YET[comp.role]}
-                  </p>
-                )}
               </li>
             );
           })}

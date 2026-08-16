@@ -59,6 +59,7 @@ export type Observed = {
    * a duplicate login for one email, or two sessions sharing a token are all unrepresentable.
    */
   accountGuaranteeEnforced: boolean;
+  coordGuaranteeEnforced: boolean;
   /**
    * People holding more than one unspent invitation to the same comp and role — the state
    * `invitations_live_unique` makes impossible, and therefore the state that says the index is gone.
@@ -233,6 +234,13 @@ const moneyProblems = (observed: Observed): string[] => {
  */
 const accountProblems = (observed: Observed): string[] => {
   const problems: string[] = [];
+
+  if (!observed.coordGuaranteeEnforced) {
+    problems.push(
+      "a person can be assigned the same duty twice: the assignments indexes are missing. " +
+        "Apply the migrations with 'bun run db:migrate'.",
+    );
+  }
 
   if (!observed.accountGuaranteeEnforced) {
     problems.push(

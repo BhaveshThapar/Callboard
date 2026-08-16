@@ -1,6 +1,7 @@
 import { and, eq, isNull, inArray, sql, sum } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  assignments,
   boardAssignments,
   charges,
   comps,
@@ -11,7 +12,7 @@ import {
   SCOREABLE_STATUSES,
   teams,
 } from "@/db/schema";
-import type { CustomAnswer, CustomField, TeamStatus } from "@/db/schema";
+import type { CustomAnswer, CustomField, DutyCategory, TeamStatus } from "@/db/schema";
 import type { ChargeLineView, TeamBalance } from "@/lib/money/balance";
 import { teamBalance } from "@/lib/money/balance";
 import type { JudgeLabelView } from "./labels";
@@ -547,3 +548,85 @@ export const listJudgeLabelsForBoard = async (actor: BoardActor): Promise<JudgeL
 
   return rows.map((row) => ({ assignmentId: row.assignmentId, label: judgeLabel(row.labelSeq) }));
 };
+
+/**
+ * What one duty looks like to the person doing it.
+ *
+ * **What it does not carry is the point.** No other person's duty, no roster, no money, no score,
+ * and no `bid_code` — a liaison holding the name-to-code mapping would end blind judging for that
+ * comp from inside the product, which is what `TeamOwnView` refuses for a captain and what ADR-0008
+ * spends a decision on. `teamName` is present only for a duty whose own `category` is `team`, and it
+ * is that duty's team: a liaison walking NCSU Nazaare has to be told which team they are walking.
+ * Widening this is a compile error rather than a review somebody has to pass.
+ */
+export type DutyView = {
+  id: string;
+  dutyId: string;
+  category: DutyCategory;
+  teamName: string | null;
+  startsAt: Date | null;
+  endsAt: Date | null;
+  note: string | null;
+  swaTrainedAt: Date | null;
+  acknowledgedAt: Date | null;
+  completedAt: Date | null;
+};
+
+/**
+ * **The fifth window, and it is argued rather than assumed.**
+ *
+ * The rule was never *never add one* — it is *do not add one casually*, and the bar is a genuinely
+ * new question. The first three answer *which teams count for this judge*, *…for this board while
+ * scoring*, and *…for this board while running registration*. The fourth answers *what does my team
+ * owe*. **None of them can answer *what am I supposed to be doing, and when*** — its subject is not
+ * a team at all, and no widening of a team read produces it.
+ *
+ * An earlier draft of this argued that it was *not* a window, because scope comes off the actor and
+ * no id arrives from a form. That does not survive its own precedent: `ownTeamForCaptain` takes no
+ * id either and is counted as the fourth. **Taking no id is what makes a window safe, not what keeps
+ * it uncounted** — and once a liaison can acknowledge a duty, an `assignmentId` genuinely does
+ * arrive on a form.
+ *
+ * What makes it safe is the same pair as the fourth's. Scope is `actor.personId`, which came off a
+ * `memberships` row rather than a form, so there is no read here that could return somebody else's
+ * duty. And the write path's `assignmentId` resolves one level down *this* read — `releaseAllocation`
+ * through `listPaymentsForBoard`'s shape — where the array holds only live, unrevoked rows, so an
+ * already-revoked duty is refused by the same `find` that refuses another person's.
+ */
+export const listDutiesForLiaison = async (actor: LiaisonActor): Promise<DutyView[]> => {
+  const rows = await db
+    .select({
+      id: assignments.id,
+      dutyId: assignments.dutyId,
+      category: assignments.category,
+      teamName: teams.name,
+      startsAt: assignments.startsAt,
+      endsAt: assignments.endsAt,
+      note: assignments.note,
+      swaTrainedAt: assignments.swaTrainedAt,
+      acknowledgedAt: assignments.acknowledgedAt,
+      completedAt: assignments.completedAt,
+    })
+    .from(assignments)
+    .leftJoin(teams, eq(teams.id, assignments.teamId))
+    // Both halves, exactly as `ownTeamForCaptain` reads both: this person *and* this comp. A
+    // membership cannot outlive the comp it names, but reading as if it could is what keeps this a
+    // scoped read rather than a lookup.
+    .where(
+      and(
+        eq(assignments.compId, actor.compId),
+        eq(assignments.personId, actor.personId),
+        isNull(assignments.revokedAt),
+      ),
+    )
+    .orderBy(assignments.startsAt, assignments.dutyId);
+
+  return rows;
+};
+
+/** A liaison's `assignmentId` is a claim, resolved against the read that produced the form. */
+export const resolveDutyForLiaison = async (
+  actor: LiaisonActor,
+  assignmentId: string,
+): Promise<DutyView | null> =>
+  (await listDutiesForLiaison(actor)).find((d) => d.id === assignmentId) ?? null;

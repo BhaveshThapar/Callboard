@@ -1,0 +1,114 @@
+import { notFound, redirect } from "next/navigation";
+import { cardClass } from "@/components/styles";
+import { compIdBySlugs, resolveBoardAccess } from "@/lib/auth/access";
+import { compsForSession, resolveLiaisonActor } from "@/lib/auth/accounts";
+import { readSessionCookie } from "@/lib/auth/cookies";
+import { listDutiesForLiaison } from "@/lib/auth/scope";
+import { dutiesForComp, listAssignmentsForBoard } from "@/lib/coord/assignments";
+import { listInvitationsForBoard } from "@/lib/auth/accounts";
+import { listRosterForBoard } from "@/lib/auth/scope";
+import { DutyPanel } from "./DutyPanel";
+import { MyDuties } from "./MyDuties";
+
+export const dynamic = "force-dynamic";
+
+/**
+ * Comp day — who is doing what, and when.
+ *
+ * **One screen, two roles, and that is why the board nav holds at six tabs.** A board assigns duties
+ * here; a liaison reads their own and says they have them. Splitting them into `/duties` and
+ * `/schedule` would have taken the board to seven tabs on a Pixel 7, and P4's own argument is that
+ * ad-hoc navigation is how A9's dashboard shipped reachable only by typing its URL. When the Gita
+ * lands, its timeline belongs on this page too: a person's duties and their timings are one
+ * question, which is what G4 says out loud.
+ *
+ * The branch is on **which actor resolves**, never on a role read off the URL. A board goes through
+ * `resolveBoardAccess`, which takes a session or a board link and cannot tell you which; a liaison
+ * goes through the account path `team/page.tsx` established — cookie, comp id, resolver. There is
+ * deliberately no `resolveLiaisonAccess` in `lib/auth`: one more function there taking no `Actor` is
+ * the shape somebody flags on review, and the page can ask for itself.
+ */
+export default async function CompDayPage({
+  params,
+}: {
+  params: Promise<{ org: string; comp: string }>;
+}) {
+  const { org, comp } = await params;
+  const base = `/app/${org}/${comp}`;
+  const here = `${base}/comp-day`;
+
+  const compId = await compIdBySlugs(org, comp);
+  if (!compId) notFound();
+
+  const board = await resolveBoardAccess(compId);
+  if (board) {
+    const [duties, assigned, people, roster] = await Promise.all([
+      dutiesForComp(compId),
+      listAssignmentsForBoard(board),
+      listInvitationsForBoard(board),
+      listRosterForBoard(board),
+    ]);
+
+    return (
+      <div className="max-w-5xl">
+        <header className="mb-6">
+          <h2 className="text-card font-semibold text-heading">Comp day</h2>
+          <p className="text-caption text-subtle mt-1">
+            Who is doing what, and when. A person has to be on this comp before they can be given a
+            duty — invite them on the People screen first.
+          </p>
+        </header>
+
+        <DutyPanel
+          compId={compId}
+          basePath={base}
+          duties={duties ?? []}
+          assignments={assigned}
+          people={people
+            .filter((p) => p.acceptedAt && !p.revokedAt)
+            .map((p) => ({ personId: p.personId, name: p.name }))}
+          teams={roster.map((t) => ({ id: t.id, name: t.name }))}
+        />
+      </div>
+    );
+  }
+
+  const session = await readSessionCookie();
+  if (!session) redirect(`/sign-in?next=${encodeURIComponent(here)}`);
+
+  const liaison = await resolveLiaisonActor(session, compId);
+  if (!liaison) {
+    // Some other membership at this comp: the dashboard is where it says what that role can open.
+    // Telling a signed-in person their own comp does not exist is the lie `team/page.tsx` told for
+    // a day, and it is not repeated here.
+    const held = await compsForSession(session);
+    if (held.some((row) => row.compId === compId)) redirect("/app");
+    notFound();
+  }
+
+  const [mine, duties] = await Promise.all([
+    listDutiesForLiaison(liaison),
+    dutiesForComp(compId),
+  ]);
+
+  return (
+    <div className="max-w-2xl">
+      <header className="mb-6">
+        <h2 className="text-card font-semibold text-heading">Your duties</h2>
+        <p className="text-caption text-subtle mt-1">
+          What the board has asked you to do at {liaison.compName}.
+        </p>
+      </header>
+
+      {mine.length === 0 ? (
+        <div className={cardClass} data-testid="no-duties">
+          <p className="text-body text-subtle">
+            Nothing yet. The board has not assigned you a duty for this comp.
+          </p>
+        </div>
+      ) : (
+        <MyDuties compId={compId} basePath={base} duties={duties ?? []} mine={mine} />
+      )}
+    </div>
+  );
+}
