@@ -1,5 +1,5 @@
-import { COMP_STATUSES, CUSTOM_FIELD_TYPES } from "@/db/schema/orgs";
-import type { CompStatus, CustomField, RegistrationConfig } from "@/db/schema/orgs";
+import { COMP_STATUSES, CUSTOM_FIELD_TYPES, DUTY_CATEGORIES } from "@/db/schema/orgs";
+import type { CompStatus, CustomField, DutyConfig, RegistrationConfig } from "@/db/schema/orgs";
 import { TEAM_STATUSES } from "@/db/schema/teams";
 import type { TeamStatus } from "@/db/schema/teams";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
@@ -67,6 +67,11 @@ export type CompConfig = {
    * that ADR removed a column to fix.
    */
   registration?: RegistrationConfig;
+  /**
+   * The duties a board can assign (C1, PRD §7.3). Absent means this comp coordinates nobody, which
+   * is the honest state of every comp until a board writes the list down.
+   */
+  duties?: DutyConfig[];
   /**
    * What the comp charges, in cents — the five numbers [INTAKE.md](../../docs/INTAKE.md) asks a
    * treasurer for, authored as data the same way the rubric is.
@@ -146,11 +151,16 @@ const tiebreaker = (value: unknown, path: string): ConfigTiebreaker => {
 };
 
 /**
- * A field id is a storage key, not a label: it names a column in `teams.custom_answers` forever.
- * Constraining it to lowercase snake_case keeps it readable in the raw json a board may one day be
- * handed, and keeps it distinguishable at a glance from the camelCase names the built-in half of
- * the form uses — which it never has to be checked against, because the two live in separate
- * namespaces (`CUSTOM_FIELD_PREFIX`) rather than in one namespace policed by a list.
+ * A storage key, not a label. It names a column in `teams.custom_answers` forever, and — since C1 —
+ * the `duty_id` an `assignments` row stores forever. Constraining it to lowercase snake_case keeps
+ * it readable in the raw json a board may one day be handed, and keeps it distinguishable at a
+ * glance from the camelCase names the built-in half of the form uses — which it never has to be
+ * checked against, because the two live in separate namespaces (`CUSTOM_FIELD_PREFIX`) rather than
+ * in one namespace policed by a list.
+ *
+ * **Shared by custom fields and duties rather than copied.** They are the same kind of thing under
+ * the same rule — a key a row points at, which a board must not rename once rows exist — so a second
+ * regex would be a second definition of that rule and would drift on the first edit.
  */
 const FIELD_ID = /^[a-z][a-z0-9_]*$/;
 
@@ -341,6 +351,42 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     };
   })();
 
+  /**
+   * The duties a board can assign (C1). Authored as data for the fee schedule's reason: PRD §7.3
+   * specifies this feature in one line and names no duties, so the list is a board's to state.
+   *
+   * An empty list and an absent one are collapsed to the same thing, `registration`'s reason: a
+   * board that wrote `"duties": []` has said exactly what a board that wrote nothing said.
+   */
+  const duties = ((): CompConfig["duties"] => {
+    if (root.duties === undefined || root.duties === null) return undefined;
+
+    const seen = new Set<string>();
+    const parsed = array(root.duties, "duties").map((d, i) => {
+      const path = `duties[${i}]`;
+      const raw = record(d, path);
+
+      const id = str(raw.id, `${path}.id`);
+      // The same regex custom fields use, deliberately shared rather than copied: a duty id is a
+      // storage key for exactly a custom field id's reason, and two regexes would drift.
+      if (!FIELD_ID.test(id)) {
+        fail(`${path}.id`, "a lowercase key like `door_greeter` — it is the key assignments store");
+      }
+      if (seen.has(id)) fail(`${path}.id`, `an id no other duty uses (not "${id}" twice)`);
+      seen.add(id);
+
+      return {
+        id,
+        label: str(raw.label, `${path}.label`),
+        category: oneOf(raw.category, DUTY_CATEGORIES, `${path}.category`),
+        swaRequired: raw.swaRequired === true,
+        help: optStr(raw.help, `${path}.help`),
+      };
+    });
+
+    return parsed.length === 0 ? undefined : parsed;
+  })();
+
   const feeSchedule = ((): FeeScheduleConfig | undefined => {
     if (root.feeSchedule === undefined || root.feeSchedule === null) return undefined;
     const f = record(root.feeSchedule, "feeSchedule");
@@ -397,6 +443,7 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     judges: judges.map(({ name, email }) => ({ name, email })),
     board,
     registration,
+    duties,
     feeSchedule,
   };
 };

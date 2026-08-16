@@ -66,6 +66,47 @@ export const orgs = pgTable("orgs", {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+/**
+ * What kind of thing a duty is, and therefore what derives from it. Four, and **each one names its
+ * reader** — a category nothing reads is `judge_assignments.division` again, a column that looked
+ * like an authorization key and authorized nothing (ADR-0010).
+ *
+ * - `team` — the duty is about one team, so it can hang off the show order. G4's per-person timeline.
+ * - `judge` — what the judge-cutoff segment derives against (G2).
+ * - `hospitality` — ADJ·4's filter.
+ * - `general` — derives no timing, and says so. This is the honest category, not the leftover one.
+ *
+ * `venue`, `tech` and `other` were considered and refused on exactly that test: nothing would read
+ * them, and `other` in particular means *we did not know*, which a CHECK cannot make true.
+ *
+ * The categories are the CHECK; the duty *names* are a board's own words in `comps.duties`. Same
+ * split as `CUSTOM_FIELD_TYPES` (stable set) over `registration.fields` (the board's questions).
+ */
+export const DUTY_CATEGORIES = ["team", "judge", "hospitality", "general"] as const;
+
+export type DutyCategory = (typeof DUTY_CATEGORIES)[number];
+
+/**
+ * One duty a board can assign, authored as data exactly like the fee schedule and the rubric.
+ *
+ * PRD §7.3 specifies C1 in one line — *"assignments + SWA-training checklist"* — and names no duties
+ * at all. So the list is a board's to state rather than this repo's to guess, and a list that does
+ * not fit these fields is a signal about the design rather than a bug in the parser: `CLAUDE.md`'s
+ * own sentence about the fee schedule, transposed.
+ *
+ * `id` is the key an assignment stores, so it must never change once a duty has been assigned —
+ * `CustomField.id`'s rule, and it reuses that rule's regex rather than a second one. `label` is what
+ * a person reads and is safe to reword at any time.
+ */
+export type DutyConfig = {
+  id: string;
+  label: string;
+  category: DutyCategory;
+  /** Whether this duty requires the SWA training a board tracks. PRD §7.3's "checklist". */
+  swaRequired: boolean;
+  help?: string;
+};
+
 export const comps = pgTable(
   "comps",
   {
@@ -79,6 +120,8 @@ export const comps = pgTable(
     venue: text("venue"),
     status: text("status").$type<CompStatus>().notNull().default("draft"),
     registration: json("registration").$type<RegistrationConfig>(),
+    /** C1. Null and `[]` are the same fact and the parser collapses them, `registration`'s reason. */
+    duties: json("duties").$type<DutyConfig[]>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
