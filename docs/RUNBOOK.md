@@ -56,7 +56,7 @@ clicks a comms button on the deployed host. `db:doctor` refuses to exit 0 on thi
 | `RESEND_API_KEY` | Resend dashboard | Vercel | C2, A10, ADJ·2, A7 receipts |
 | `COMMS_FROM` | Resend — **a verified domain you own** | Vercel | same |
 | `CRON_SECRET` | `openssl rand -base64 32` | Vercel **and** GitHub secrets — must match | the sweep |
-| `PRODUCTION_URL` | — | GitHub **variables** | the sweep, the migration guard |
+| `PRODUCTION_URL` | — | GitHub **variables** *and* GitHub **secrets** — see below | the migration guard, and the sweep |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | Google Cloud Console | Vercel | A11 |
 | `DRIVE_TOKEN_KEY` | `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` | Vercel | A11 |
 
@@ -64,6 +64,13 @@ clicks a comms button on the deployed host. `db:doctor` refuses to exit 0 on thi
 when it cannot form one, and the visible opt-out line and the `List-Unsubscribe` header come off that
 **one** field so they cannot disagree. A host that can send and cannot form the URL broadcasts with
 **no opt-out at all** — not header-only, none.
+
+**`PRODUCTION_URL` has to be set twice today, and that is a wart with a date on it.**
+`migrations.yml` reads it as a repository *variable*, because a public URL is not a credential and a
+variable's absence is diagnosable in the settings UI rather than guessed at. `comms.yml` still reads
+it as a *secret*, and moving it belongs with that workflow's own fix rather than here — so set the
+same value in both until they are reconciled. Nothing breaks if you set only one; the workflow that
+reads the other fails loudly, which is the intended behaviour of both.
 
 Google Cloud also needs, outside any environment variable: the Drive API enabled, `drive.readonly`
 on the consent screen, and `${NEXT_PUBLIC_BASE_URL}/api/drive/callback` registered as a redirect URI.
