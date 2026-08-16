@@ -64,9 +64,24 @@ export default async function CompDayPage({
           basePath={base}
           duties={duties ?? []}
           assignments={assigned}
+          /*
+           * Invited, not necessarily signed in. A board plans comp day in the weeks before it, so
+           * requiring somebody to have accepted first would mean the duty list could not be built
+           * until the last volunteer logged in — backwards, and stricter than `assignDutyAction`,
+           * which only asks that the person be on this comp. `revoked` is the one that filters:
+           * somebody a board has removed should not be handed new work.
+           *
+           * `pending` is carried through so the screen can say which is which. A board assigning a
+           * duty to somebody who has not accepted yet needs to know that, because the person will
+           * not see it until they do.
+           */
           people={people
-            .filter((p) => p.acceptedAt && !p.revokedAt)
-            .map((p) => ({ personId: p.personId, name: p.name }))}
+            .filter((p) => !p.revokedAt)
+            .map((p) => ({
+              personId: p.personId,
+              name: p.name,
+              pending: !p.acceptedAt,
+            }))}
           teams={roster.map((t) => ({ id: t.id, name: t.name }))}
         />
       </div>

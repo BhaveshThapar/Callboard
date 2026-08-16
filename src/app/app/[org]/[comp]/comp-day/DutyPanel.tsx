@@ -44,7 +44,7 @@ export function DutyPanel({
   basePath: string;
   duties: DutyConfig[];
   assignments: BoardAssignmentView[];
-  people: { personId: string; name: string }[];
+  people: { personId: string; name: string; pending: boolean }[];
   teams: { id: string; name: string }[];
 }) {
   const scope = { compId, basePath };
@@ -82,6 +82,7 @@ export function DutyPanel({
               {people.map((p) => (
                 <option key={p.personId} value={p.personId}>
                   {p.name}
+                  {p.pending ? " — has not signed in yet" : ""}
                 </option>
               ))}
             </select>

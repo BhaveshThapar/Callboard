@@ -2,9 +2,9 @@
 
 The record is comp-scoped and multi-tenant: many orgs, many comps per org, isolated. Every table carries `comp_id`, or `org_id` where it outlives a single comp.
 
-Two groups of tables follow. The first group exists in Postgres, through migration `0013`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
+Two groups of tables follow. The first group exists in Postgres, through migration `0017`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
 
-It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `show_order`, `schedule_segments` and `assignments` — the Gita (PRD §9) and coordination (§7.3), both gated well behind it.
+It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `show_order` and `schedule_segments` — the Gita (PRD §9). `assignments` left it with C1 in `0017` and is described under *Coordination* below.
 
 ---
 
@@ -16,13 +16,15 @@ It used to say those land "with Module A". They do not, and the sentence outlive
 
 Persists across years. This is the institutional memory that PRD §2.3 says evaporates every May when the board turns over.
 
-**`comps`** — `id`, `org_id`, `name`, `slug`, `comp_date`, `venue`, `status`, `registration`, `created_at`
+**`comps`** — `id`, `org_id`, `name`, `slug`, `comp_date`, `venue`, `status`, `registration`, `duties`, `created_at`
 
 `status` ∈ `draft | open | live | complete`, enforced by a check constraint and by `COMP_STATUSES` in `src/db/schema/orgs.ts`, which is the one definition the type, the constraint, the config parser and the board's own control all derive from.
 
 It is what gates the public form, and it is **written by the board**, forward only, through `src/lib/comp/lifecycle.ts` — a total transition map in `transitions.ts`' shape. Until August 2, 2026 the only writer was `src/db/seed.ts`, so a board that opened registration could not close it: the sole remaining instrument was a reseed, which replaces the comp and reissues every token ([ADR-0013](decisions/0013-a-seed-replaces-a-comp-not-an-org.md)) — closing a form meant destroying the comp. Nothing runs backwards, because an application landing against a comp whose roster is being scored is the state the lock exists to make impossible.
 
 `registration` is the public form, authored as data in the comp config exactly like the rubric — waiver text, `requireAuditionUrl`, `maxRosterSize`, and `fields`, the board's own questions. Null, or a `status` other than `open`, and there is no form to fill in; `openRegistration` collapses those two cases into one answer, because distinguishing them publicly would leak the existence of a comp that has not announced itself.
+
+`duties` is C1's vocabulary, authored the same way and for the same reason (`0017`). PRD §7.3 specifies coordination in one line and names no duties, so the list is a board's to state — the fee schedule's precedent, where a list that does not fit is a signal about the design rather than a bug in the parser. Each entry carries an `id` (the key an `assignments` row stores, under the same never-rename rule as a field id, and validated by the same regex), a `label`, a `category` from the four in `DUTY_CATEGORIES`, and whether it needs SWA training. Null and `[]` are collapsed to the same fact.
 
 `registration.fields` is both the form and the schema its answers are validated against, which is what keeps one definition of what a comp asked. Each field carries an `id`, a `label`, a type (`text | longtext | number | select | checkbox`), and whether it is required. The `id` is the key answers are stored under and is the one thing a board must not change once applications start arriving — renaming it orphans every answer already filed. The `label` is what the applicant reads and is safe to reword at any time; keeping the two separate is the whole reason the id is stated rather than derived.
 
@@ -50,7 +52,7 @@ Login is **org-scoped**, not global, and hangs off `people` so that a board memb
 
 `revoked_at` is the only way somebody comes back off a comp, and it is read by every membership filter, so a revoked membership stops resolving on the next request. The session is left alone on purpose: killing it would sign that person out of comps this board has no say over.
 
-**What can be *handed out* is narrower than what can be held.** `INVITABLE_ROLES` is `board | captain`; `liaison` is a real role with a real actor and **no reader**, because *what does a liaison see* is C1's question and C1 needs `assignments`, which is in the designed-not-migrated group below. Offering it let a board mint a credential whose journey ended on a page that refused to load — the failure [ADR-0011](decisions/0011-nothing-mints-a-link.md) spent a decision refusing, arriving through the door ADR-0016 opened. It goes back on the list in the same commit that gives it a screen.
+**What can be handed out and what can be held are equal again, and stayed two lists.** `INVITABLE_ROLES` was `board | captain` from P1 until C1: `liaison` was a real role with a real actor and **no reader**, because *what does a liaison see* is C1's question, and offering it let a board mint a credential whose journey ended on a page that refused to load — the failure [ADR-0011](decisions/0011-nothing-mints-a-link.md) spent a decision refusing, arriving through the door ADR-0016 opened. C1 gave it a screen and the role went back on the list in that commit, which is the rule the constant carried. They remain two constants for `BILLABLE_STATUSES`' reason: they answer *what may be issued* and *what may be held*, and the day a fourth role is representable before it is issuable, one moves and the other must not.
 
 **`sessions`** — `id`, `user_id`, `token_hash` (unique), `expires_at`, `revoked_at`, `user_agent`, `created_at`
 
@@ -240,9 +242,25 @@ The Gita, per PRD §9. Modeled now, built after paying customers exist.
 
 `kind` ∈ `walk | lobby | stretch | props | tech_in | tech_out | food | judge_cutoff | transport`. `derived_from` records which buffer variable produced the timing, so a live delay can re-derive the cascade instead of a human doing it by mouth.
 
-**`assignments`** — `id`, `comp_id`, `person_id`, `duty`, `starts_at`, `ends_at`, `swa_trained`
+---
 
-Replaces the ~30 hand-compiled per-person columns of the SATURDAY IND sheet.
+## Coordination
+
+Migrated in `0017`, with C1. `comp_roles` was dropped in `0016` in the same phase — see above.
+
+**`assignments`** — `id`, `comp_id`, `person_id`, `duty_id`, `category`, `team_id`, `starts_at`, `ends_at`, `note`, `swa_trained_at`, `acknowledged_at`, `completed_at`, `created_by_person_id`, `created_at`, `revoked_at`
+
+Person ↔ duty ↔ time. Replaces the ~30 hand-compiled per-person columns of the SATURDAY IND sheet.
+
+`duty_id` keys into `comps.duties` rather than a table, for `custom_answers`' reason: the config is both the vocabulary and the labels it is read under, so there is one definition of what a comp asked somebody to do and it survives to be read a year later. `category` ∈ `team | judge | hospitality | general`, denormalized off that config because a CHECK and the Gita's timing derivations both need it in SQL. **Four categories, each named for its reader** — a category nothing reads is `judge_assignments.division` again.
+
+**Three timestamps, not booleans.** `swa_trained_at` is the board's mark; `acknowledged_at` and `completed_at` are the liaison's, and the only two writes a liaison makes in this product. DATA_MODEL designed this as `swa_trained boolean` and was wrong for `waiver_accepted_at`'s and `reconciled_at`'s reason: a boolean records a claim and a timestamp records an event, and *when was this person trained* is the question a board has to answer.
+
+`revoked_at`, never `DELETE`: deleting a duty somebody already acknowledged destroys the record that they were told to be at the door at four, which is the record a board needs on the day nobody was.
+
+Two partial unique indexes rather than one, and the split is forced. Postgres treats NULLs as distinct, so a single unique over `(comp, person, duty, team)` would constrain team duties and silently let two identical `general` duties stack on one person. `assignments_live_unique` covers `team_id is not null` and `assignments_live_no_team_unique` the rest; `assignments_team_check` has already made that split equivalent to `category = 'team'`, so it is one rule expressed twice by necessity rather than two that could drift. `db:doctor` looks both up.
+
+`person_id` is a **bare FK**, exactly as `scores.team_id` is, so the database will take an assignment naming somebody at another comp. Every write resolves it against a scoped read first.
 
 ---
 
