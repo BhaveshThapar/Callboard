@@ -29,12 +29,24 @@ jobs:
     steps:
       - name: Send what is due
         env:
-          BASE_URL: ${{ secrets.PRODUCTION_URL }}
+          # A repository *variable*, not a secret: a public URL is not a credential, and a variable's
+          # absence is diagnosable in the settings UI instead of being guessed at. The argument that
+          # actually decides it is the third one, though -- GitHub masks secret values in logs, so
+          # every failure below would print `***` instead of the host it asked, and a verdict
+          # without its subject is what made the preflight useless for nineteen days. `CRON_SECRET`
+          # stays a secret; that one is a credential.
+          BASE_URL: ${{ vars.PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
+          # Fails rather than exits 0, and that changed on Aug 15, 2026 after this workflow ran
+          # every five minutes for twelve days, reported success every time, and never made a
+          # request: both secrets were unset the whole while. A scheduler that reports success
+          # while doing nothing is the same defect this repo keeps recording one layer out --
+          # a green signal whose subject is missing. If the sweep is not wanted, disable the
+          # workflow; do not let it pass by doing nothing.
           if [ -z "$BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "::notice::PRODUCTION_URL or CRON_SECRET is unset — the outbox is not being swept."
-            exit 0
+            echo "::error::PRODUCTION_URL or CRON_SECRET is unset — the outbox is not being swept."
+            exit 1
           fi
           code=$(curl -sS -o /tmp/sweep.json -w "%{http_code}" \
             -H "authorization: Bearer $CRON_SECRET" \
@@ -46,4 +58,6 @@ jobs:
             echo "::notice::comms is not configured on the deployment yet"
             exit 0
           fi
-          [ "$code" = "200" ] || { echo "::error::sweep returned $code"; exit 1; }
+          # Names the host, which is the point of `PRODUCTION_URL` being a variable: as a secret this
+          # line printed `***/api/cron/send` and left you guessing which deployment answered.
+          [ "$code" = "200" ] || { echo "::error::sweep returned $code from $BASE_URL/api/cron/send"; exit 1; }
