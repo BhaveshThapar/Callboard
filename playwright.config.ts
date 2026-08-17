@@ -56,9 +56,31 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: "bun run dev",
+        /**
+         * **A production build in CI, `next dev` on a laptop, and the difference is not a preference.**
+         *
+         * `next dev` compiles a route the first time somebody visits it, and it recompiles while the
+         * suite is running. A Server Action's id is derived from the build, so a page rendered before
+         * a recompile posts an id the server no longer knows, and Next answers:
+         *
+         *     Failed to find Server Action. This request might be from an older or newer deployment.
+         *
+         * The form silently does nothing, and the test fails several assertions later on a heading
+         * that never appeared — naming a scoring bug that is really a compiler race. It cost three
+         * red runs across two PRs before the line was read rather than the failure it produced, and
+         * with `retries: 0` (correctly) every occurrence is a red build.
+         *
+         * `next build` once, then `next start`, removes the whole class: ids are fixed at build time
+         * and nothing recompiles mid-suite. It is also closer to what production actually serves,
+         * which is this repo's own standing complaint about every other verdict it prints — an
+         * instrument pointed at something other than the thing it is describing.
+         *
+         * The build is part of the command rather than a CI step so that `bun run e2e` means the same
+         * thing on a laptop with `CI=1` as it does in Actions, and the timeout carries it.
+         */
+        command: process.env.CI ? "bun run build && bun run start" : "bun run dev",
         url: "http://localhost:3000",
         reuseExistingServer: !process.env.CI && !databaseNamedByShell,
-        timeout: 120_000,
+        timeout: process.env.CI ? 300_000 : 120_000,
       },
 });
