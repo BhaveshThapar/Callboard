@@ -115,6 +115,7 @@ export type Observed = {
    * a duplicate login for one email, or two sessions sharing a token are all unrepresentable.
    */
   accountGuaranteeEnforced: boolean;
+  scheduleGuaranteeEnforced: boolean;
   coordGuaranteeEnforced: boolean;
   /**
    * People holding more than one unspent invitation to the same comp and role — the state
@@ -326,6 +327,24 @@ const moneyProblems = (observed: Observed): string[] => {
  * into one comp. Reseeding fixes neither and is not offered, for the reason it is not offered for a
  * forked chain.
  */
+/**
+ * G1's guarantee. Two teams holding the same slot in the running order is not a cosmetic clash: the
+ * derivation keys every walk, stretch and tech call off a team's position, so a duplicate hands two
+ * teams the same stage time and the liaison walking each of them the same instruction.
+ *
+ * `chainProblems`' shape, and its reason — the guarantee lives in the database, so the code cannot
+ * assume it is there. Named rather than counted, because the constraint is also `DEFERRABLE` and a
+ * database that has it non-deferred would reject every reorder instead of allowing the trade.
+ */
+const scheduleProblems = (observed: Observed): string[] =>
+  observed.scheduleGuaranteeEnforced
+    ? []
+    : [
+        "two teams can hold the same slot in the running order: " +
+          "teams_comp_performance_order_unique is missing. " +
+          "Apply the migrations with 'bun run db:migrate'.",
+      ];
+
 const accountProblems = (observed: Observed): string[] => {
   const problems: string[] = [];
 
@@ -580,6 +599,7 @@ export const summarizeHealth = (
         ...chainProblems(observed),
         ...moneyProblems(observed),
         ...accountProblems(observed),
+        ...scheduleProblems(observed),
         ...commsProblems(observed),
         "comp not seeded — run 'bun run db:seed'",
       ],
@@ -592,6 +612,7 @@ export const summarizeHealth = (
     ...chainProblems(observed),
     ...moneyProblems(observed),
     ...accountProblems(observed),
+    ...scheduleProblems(observed),
     ...commsProblems(observed),
   ];
 
