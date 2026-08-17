@@ -25,6 +25,7 @@ src/app/          Next.js routes. Server components read; server actions write.
 src/lib/auth/     Actor resolution + the scoped projections. Every read passes through here.
 src/lib/comp/     Comp services: build tabulation input, lock, board snapshot.
 src/lib/audit/    Append-only log of everything that touched a score, a lock, or an override.
+src/lib/coord/    C1: the duty vocabulary and who is on what, when.
 src/lib/tabulation/  Pure. No database. No clock. No randomness.
 src/db/           Drizzle schema + migrations + seed.
 ```
@@ -91,7 +92,7 @@ The audit trail is not instrumentation. It is the product. Paper clipboards in a
 
 ## What is deliberately absent
 
-No Stripe, and no routing of any kind. No Gita. No row-level security — though the spike that ADR-0006 said would be awkward has now been run, and `db.batch` carries a `SET LOCAL` and its query as one transaction on neon-http. Still no place to put a file — but A4's materials half no longer waits on one, because it takes a **link**, as A1 always did for the audition video, behind a `putMaterial` seam a blob store can land in without a migration. Each is designed — see [DATA_MODEL.md](DATA_MODEL.md), [PAYMENTS.md](PAYMENTS.md), and [FEATURE_MAP.md](FEATURE_MAP.md) — and each waits behind the founding-partner gate in PRD §13.
+No Stripe, and no routing of any kind. No Gita — though C1 landed on August 16, 2026, so `assignments` exists and G4's per-person views have the table they hang off. No row-level security — though the spike that ADR-0006 said would be awkward has now been run, and `db.batch` carries a `SET LOCAL` and its query as one transaction on neon-http. Still no place to put a file — but A4's materials half no longer waits on one, because it takes a **link**, as A1 always did for the audition video, behind a `putMaterial` seam a blob store can land in without a migration. Each is designed — see [DATA_MODEL.md](DATA_MODEL.md), [PAYMENTS.md](PAYMENTS.md), and [FEATURE_MAP.md](FEATURE_MAP.md) — and each waits behind the founding-partner gate in PRD §13.
 
 **Two things this section said until August 2026 and no longer can.** `Actor` is no longer `BoardActor | JudgeActor`: P1 added `team` and `liaison`, and *something* mints a link now — an invitation, which names who it is for before it is accepted ([ADR-0016](decisions/0016-accounts-for-people-who-stay-links-for-people-who-visit.md), the successor ADR-0011 named for itself). And there **is** a comms engine ([ADR-0020](decisions/0020-a-message-sends-once.md)): an outbox whose guarantee is a unique index, swept on a schedule, with five product paths queueing into it. What is still absent there is not code — it is a sending credential on the deployed database, so production records rather than sends.
 

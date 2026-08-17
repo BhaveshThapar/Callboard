@@ -37,12 +37,17 @@ const ROLE_LABEL: Record<AccountRole, string> = {
 
 /**
  * The options come from `INVITABLE_ROLES` rather than from a list written out here, so a role
- * gaining a screen is one edit in the schema and not two that can disagree. `ROLE_LABEL` still
- * covers every `AccountRole`, because a liaison invited before this narrowed is still on the table.
+ * gaining a screen is one edit in the schema and not two that can disagree.
+ *
+ * **`Record<InvitableRole, string>` is what makes that a mechanism rather than a promise.** When C1
+ * put `liaison` back on the list, this file stopped compiling until a label existed — so the rule
+ * *"put it back in the same commit that gives it a screen"* is enforced by the type checker in both
+ * directions, and a role cannot become issuable while the form has nothing to call it.
  */
 const INVITE_LABEL: Record<InvitableRole, string> = {
   captain: "Team captain",
   board: "Board member",
+  liaison: "Liaison",
 };
 
 /**

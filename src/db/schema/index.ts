@@ -6,4 +6,5 @@ export * from "./money";
 export * from "./accounts";
 export * from "./comms";
 export * from "./drive";
+export * from "./coord";
 export * from "./audit";

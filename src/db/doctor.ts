@@ -13,6 +13,7 @@ import {
   CHAIN_INDEX_NAMES,
   comps,
   ACCOUNT_CONSTRAINT_NAMES,
+  ASSIGNMENT_CONSTRAINT_NAMES,
   COMMS_CONSTRAINT_NAMES,
   MONEY_CONSTRAINT_NAMES,
   judgeAssignments,
@@ -35,7 +36,10 @@ type MoneyObservation = Pick<
 
 type SchemaObservation = Pick<Observed, "migrationsApplied" | "migrationsExpected">;
 
-type AccountObservation = Pick<Observed, "accountGuaranteeEnforced" | "duplicateInvitations">;
+type AccountObservation = Pick<
+  Observed,
+  "accountGuaranteeEnforced" | "coordGuaranteeEnforced" | "duplicateInvitations"
+>;
 
 type CommsObservation = Pick<
   Observed,
@@ -47,6 +51,16 @@ const COMMS_TABLES = ["messages", "message_events"] as const;
 
 /** The tables migration `0012` creates. Absent means P1 has not been applied here. */
 const ACCOUNT_TABLES = ["users", "memberships", "sessions", "invitations"] as const;
+
+/**
+ * C1's guarantee. `assignments` carries no chain and no denormalized counter, so there is no
+ * residual to report and no drift to find -- what there is, is a pair of partial unique indexes that
+ * make "one live duty per person" a fact about the database rather than about the code. A comp whose
+ * database has the code and not the indexes lets a double-clicked button assign the same duty twice,
+ * so the preflight looks them up for `CHAIN_INDEXES`' reason: the guarantee lives in the database,
+ * therefore the code cannot assume it is there.
+ */
+const COORD_TABLES = ["assignments"] as const;
 
 /**
  * The tables the money spine needs. `deposit_events` arrives in `0010` rather than `0009` and was
@@ -263,10 +277,17 @@ const observeAccounts = async (): Promise<AccountObservation> => {
 
   const names = new Set(present.rows.map((row) => row.name));
   const accountGuaranteeEnforced = ACCOUNT_CONSTRAINT_NAMES.every((name) => names.has(name));
-
   const existing = new Set(tables.rows.map((row) => row.tablename));
+
+  // A database from before `0017` has no `assignments` at all, which is not the same failure as one
+  // that has the table without its indexes. The first is "you have not migrated", already reported
+  // by the migration count; the second is a guarantee that is missing while the code assumes it.
+  const coordGuaranteeEnforced =
+    !COORD_TABLES.every((table) => existing.has(table)) ||
+    ASSIGNMENT_CONSTRAINT_NAMES.every((name) => names.has(name));
+
   if (!ACCOUNT_TABLES.every((table) => existing.has(table))) {
-    return { accountGuaranteeEnforced, duplicateInvitations: [] };
+    return { accountGuaranteeEnforced, coordGuaranteeEnforced, duplicateInvitations: [] };
   }
 
   const duplicates = await db.execute<{ person_id: string; live: number }>(sql`
@@ -279,6 +300,7 @@ const observeAccounts = async (): Promise<AccountObservation> => {
 
   return {
     accountGuaranteeEnforced,
+    coordGuaranteeEnforced,
     duplicateInvitations: duplicates.rows.map((row) => ({
       personId: row.person_id,
       live: row.live,

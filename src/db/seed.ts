@@ -11,7 +11,6 @@ import {
   boardAssignments,
   charges,
   comps,
-  compRoles,
   feeSchedules,
   paymentAllocations,
   payments,
@@ -248,7 +247,7 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
   const org = await findOrCreateOrg(config);
 
   // The comp is the unit of replacement, and everything a comp owns cascades from it: teams,
-  // rubrics, both kinds of assignment, comp_roles, scores, deductions, tab_runs, audit_log. A
+  // rubrics, both kinds of assignment, scores, deductions, tab_runs, audit_log. A
   // sibling comp under the same org -- the org's other division -- is untouched, which is the
   // whole point. `people` hangs off the org and survives; see `findOrCreatePeople`.
   await db.delete(comps).where(and(eq(comps.orgId, org.id), eq(comps.slug, config.comp.slug)));
@@ -263,15 +262,12 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
       venue: config.comp.venue ?? null,
       status: config.comp.status,
       registration: config.registration ?? null,
+      duties: config.duties ?? null,
     })
     .returning();
   if (!comp) throw new Error("failed to seed comp");
 
   const boardPeople = await findOrCreatePeople(org.id, config.board);
-
-  await db
-    .insert(compRoles)
-    .values(boardPeople.map((p) => ({ compId: comp.id, personId: p.id, role: "board" as const })));
 
   const boardTokens = boardPeople.map((person) => ({ person, token: createToken() }));
   await db.insert(boardAssignments).values(
@@ -364,10 +360,6 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
   }
 
   const judgePeople = await findOrCreatePeople(org.id, config.judges);
-
-  await db
-    .insert(compRoles)
-    .values(judgePeople.map((p) => ({ compId: comp.id, personId: p.id, role: "judge" as const })));
 
   const judgeTokens = judgePeople.map((person) => ({ person, token: createToken() }));
   await db.insert(judgeAssignments).values(

@@ -14,12 +14,17 @@ export const dynamic = "force-dynamic";
 /**
  * What each role can reach, which is the shell's whole job.
  *
- * A board sees the four screens it runs the comp from. A captain sees one page, their own team, and
- * the absence of the other four is the point: `ownTeamForCaptain` carries no other team, no score
- * and no bid code but its own, and a nav offering *Roster* would be promising something the actor
- * behind it cannot resolve. A liaison has nothing until C1, so their nav is empty rather than
- * pointing at a page that would `notFound()` — which is exactly the defect P1 shipped and was
- * audited for.
+ * A board sees the screens it runs the comp from. A captain sees one page, their own team, and the
+ * absence of the others is the point: `ownTeamForCaptain` carries no other team, no score and no bid
+ * code but its own, and a nav offering *Roster* would be promising something the actor behind it
+ * cannot resolve. A liaison's nav was **empty** until C1, deliberately — a link that 404s is the
+ * defect P1 shipped and was audited for — and now holds the one page a liaison can open.
+ *
+ * **Comp day is one tab for both, and that is a decision rather than an accident.** A board assigns
+ * duties there and a liaison reads their own; splitting them would take a board to seven tabs on the
+ * phone this product is used from, and P4's own argument is that ad-hoc navigation is how A9's
+ * dashboard shipped reachable only by typing its URL. The Gita's timeline belongs on that page too,
+ * because a person's duties and their timings are one question — which is what G4 says out loud.
  */
 const NAV_FOR: Record<AccountRole, (base: string) => NavItem[]> = {
   board: (base) => [
@@ -28,9 +33,10 @@ const NAV_FOR: Record<AccountRole, (base: string) => NavItem[]> = {
     { href: `${base}/money`, label: "Money" },
     { href: `${base}/results`, label: "Results" },
     { href: `${base}/people`, label: "People" },
+    { href: `${base}/comp-day`, label: "Comp day" },
   ],
   captain: (base) => [{ href: `${base}/team`, label: "Team" }],
-  liaison: () => [],
+  liaison: (base) => [{ href: `${base}/comp-day`, label: "My duties" }],
 };
 
 /**

@@ -52,3 +52,13 @@ Nothing here touches `src/lib/tabulation/`, so no locked snapshot replays differ
 **Nothing mints a link, and that is still deliberate.** A person added to a comp after it is seeded still cannot be given a link without a reseed, and a lost board link is still unrecoverable from inside the product. ADR-0011 argued that a mint path is the thin end of board management, which is Module A and gated on PRD §13, and that argument is unchanged — this ADR narrows the blast radius of a seed, it does not add a way to avoid one.
 
 **There is still no setup UI.** Two divisions means two hand-written configs and two founder-run seeds. FEATURE_MAP P2 keeps that deferred on purpose (PRD §12: white-glove founding support).
+
+## Amendment — August 16, 2026
+
+`comp_roles` appears twice above, in the list of what cascades from a comp and in the note about a
+person dropped from a config. **That table was dropped in `0016` with C1**, having never had a
+reader; `assignments` replaced it. Neither sentence's *point* changes — a comp still owns everything
+that cascades from it, and a person dropped from a config still keeps their `people` row while
+losing their access — so the body is left as written rather than edited, which is how the record of
+what was true in July stays readable. This note is what stops the stale name being mistaken for a
+live table.

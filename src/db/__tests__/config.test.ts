@@ -394,3 +394,69 @@ describe("parseCompConfig", () => {
     });
   });
 });
+
+/**
+ * C1. Duties are the board's own vocabulary, so the parser is the only door -- a duty that reaches
+ * `assignments` with a category the CHECK refuses surfaces as raw SQL at seed time, and a duty id a
+ * board later renames orphans every assignment already filed.
+ */
+describe("parseCompConfig — duties", () => {
+  const withDuties = (duties: unknown): Record<string, unknown> => ({ ...minimal(), duties });
+
+  it("accepts a duty in each of the four categories", () => {
+    const parsed = parseCompConfig(
+      withDuties([
+        { id: "walk", label: "Team liaison", category: "team" },
+        { id: "runner", label: "Judge runner", category: "judge" },
+        { id: "food", label: "Hospitality", category: "hospitality" },
+        { id: "door", label: "Door greeter", category: "general" },
+      ]),
+    );
+    expect(parsed.duties?.map((d) => d.category)).toEqual(["team", "judge", "hospitality", "general"]);
+  });
+
+  it("refuses a category outside the four, naming the path and the four", () => {
+    expect(() => parseCompConfig(withDuties([{ id: "a", label: "A", category: "venue" }]))).toThrow(
+      /duties\[0\]\.category.*team, judge, hospitality, general/,
+    );
+  });
+
+  it("refuses two duties sharing an id, because an assignment could not say which it meant", () => {
+    expect(() =>
+      parseCompConfig(
+        withDuties([
+          { id: "door", label: "Door", category: "general" },
+          { id: "door", label: "Other door", category: "general" },
+        ]),
+      ),
+    ).toThrow(/duties\[1\]\.id/);
+  });
+
+  it("refuses an id that is not a storage key, for a custom field id's reason", () => {
+    expect(() =>
+      parseCompConfig(withDuties([{ id: "Door Greeter", label: "D", category: "general" }])),
+    ).toThrow(/duties\[0\]\.id/);
+  });
+
+  it("treats a stated-empty list and an absent one as the same fact", () => {
+    expect(parseCompConfig(withDuties([])).duties).toBeUndefined();
+    expect(parseCompConfig(minimal()).duties).toBeUndefined();
+  });
+
+  it("defaults swaRequired to false rather than leaving it undefined", () => {
+    const parsed = parseCompConfig(withDuties([{ id: "door", label: "D", category: "general" }]));
+    expect(parsed.duties?.[0]?.swaRequired).toBe(false);
+  });
+
+  it("keeps swaRequired when a board states it, since that is the checklist PRD 7.3 asks for", () => {
+    const parsed = parseCompConfig(
+      withDuties([{ id: "walk", label: "W", category: "team", swaRequired: true }]),
+    );
+    expect(parsed.duties?.[0]?.swaRequired).toBe(true);
+  });
+
+  it("parses the duties block shipped in the example config", () => {
+    const raw = JSON.parse(readFileSync("comp-config.example.json", "utf8")) as unknown;
+    expect(parseCompConfig(raw).duties).toHaveLength(4);
+  });
+});

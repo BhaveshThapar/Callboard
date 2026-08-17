@@ -1,5 +1,4 @@
 import { notFound, redirect } from "next/navigation";
-import { cardClass } from "@/components/styles";
 import { recentAudit } from "@/lib/audit/log";
 import { compIdBySlugs, describeCompAccess, resolveBoardAccess } from "@/lib/auth/access";
 import { boardSnapshot } from "@/lib/comp/board";
@@ -37,16 +36,13 @@ export default async function CompHome({
     if (!access) notFound();
     if (access.role === "captain") redirect(`/app/${org}/${comp}/team`);
 
-    return (
-      <div className={cardClass} data-testid="no-screen-yet">
-        <h2 className="text-card font-semibold text-heading">Nothing here yet</h2>
-        <p className="mt-2 text-body text-muted">
-          Liaison duties and the schedule they hang off are not built. Your membership at this comp
-          is real; there is simply no screen behind it, and saying so is better than sending you to a
-          page that would refuse to load.
-        </p>
-      </div>
-    );
+    /**
+     * A liaison. This branch used to render a card saying the screen was not built, which was true
+     * and is not any more — C1 built it, so the honest thing is the same redirect the captain gets.
+     * Every role that can open this comp now lands somewhere it can act, which is what the shell was
+     * supposed to guarantee and did not for as long as one role had nowhere to go.
+     */
+    redirect(`/app/${org}/${comp}/comp-day`);
   }
 
   const scope: BoardFormScope = { compId: actor.compId, basePath: `/app/${org}/${comp}` };

@@ -114,6 +114,34 @@
       }
     ]
   },
+  "duties": [
+    {
+      "id": "team_liaison",
+      "label": "Team liaison",
+      "category": "team",
+      "swaRequired": true,
+      "help": "Walk your team from the green room to the stage and back."
+    },
+    {
+      "id": "judge_runner",
+      "label": "Judge runner",
+      "category": "judge",
+      "swaRequired": false,
+      "help": "Collect score sheets between sets and keep the panel to its cutoff."
+    },
+    {
+      "id": "hospitality",
+      "label": "Hospitality",
+      "category": "hospitality",
+      "swaRequired": false
+    },
+    {
+      "id": "door_greeter",
+      "label": "Door greeter",
+      "category": "general",
+      "swaRequired": false
+    }
+  ],
   "feeSchedule": {
     "perDancerCents": 7000,
     "perRoomCents": 14000,
