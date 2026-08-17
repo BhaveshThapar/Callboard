@@ -52,6 +52,7 @@ const healthy: Observed = {
   unexplainedRefunds: [],
   accountGuaranteeEnforced: true,
   coordGuaranteeEnforced: true,
+  scheduleGuaranteeEnforced: true,
   duplicateInvitations: [],
   commsGuaranteeEnforced: true,
   driftingMessages: [],
@@ -79,6 +80,7 @@ const unseeded: Observed = {
   unexplainedRefunds: [],
   accountGuaranteeEnforced: true,
   coordGuaranteeEnforced: true,
+  scheduleGuaranteeEnforced: true,
   duplicateInvitations: [],
   commsGuaranteeEnforced: true,
   driftingMessages: [],
@@ -458,6 +460,34 @@ describe("summarizeHealth migration lag", () => {
  * database rather than of the code — a comp running against a database that has the code and not the
  * indexes lets a double-clicked assign button write the duty twice, and nothing else would notice.
  */
+/**
+ * G1. A duplicate slot is not a cosmetic clash: every walk, stretch and tech call is derived off a
+ * team's position, so two teams sharing one hands them the same stage time and hands the liaison
+ * walking each of them the same instruction.
+ */
+describe("summarizeHealth — the running-order guarantee", () => {
+  it("reports a database where two teams could hold the same slot", () => {
+    const health = summarizeHealth({ ...healthy, scheduleGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (!health.ok) {
+      expect(health.problems.join(" ")).toMatch(/same slot in the running order/);
+      expect(health.problems.join(" ")).toMatch(/db:migrate/);
+      // Reseeding does not create a constraint. Offering it is the demo lying about its own repair.
+      expect(health.problems.join(" ")).not.toMatch(/db:seed/);
+    }
+  });
+
+  it("reports it even when the comp is not seeded, because seeding does not add it", () => {
+    const health = summarizeHealth({ ...unseeded, scheduleGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (!health.ok) expect(health.problems.join(" ")).toMatch(/same slot in the running order/);
+  });
+
+  it("says nothing when the constraint is there", () => {
+    expect(summarizeHealth(healthy, expected).ok).toBe(true);
+  });
+});
+
 describe("summarizeHealth — the coordination guarantee", () => {
   it("reports a database whose assignments indexes are missing, and names the remedy", () => {
     const health = summarizeHealth({ ...healthy, coordGuaranteeEnforced: false }, expected);

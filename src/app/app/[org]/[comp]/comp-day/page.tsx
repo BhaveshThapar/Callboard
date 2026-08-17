@@ -1,5 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { cardClass } from "@/components/styles";
+import type { TeamStatus } from "@/db/schema";
+import { PERFORMING_STATUSES } from "@/db/schema";
 import { compIdBySlugs, resolveBoardAccess } from "@/lib/auth/access";
 import { compsForSession, resolveLiaisonActor } from "@/lib/auth/accounts";
 import { readSessionCookie } from "@/lib/auth/cookies";
@@ -8,6 +10,7 @@ import { dutiesForComp, listAssignmentsForBoard } from "@/lib/coord/assignments"
 import { listInvitationsForBoard } from "@/lib/auth/accounts";
 import { listRosterForBoard } from "@/lib/auth/scope";
 import { DutyPanel } from "./DutyPanel";
+import { ShowOrderPanel } from "./ShowOrderPanel";
 import { MyDuties } from "./MyDuties";
 
 export const dynamic = "force-dynamic";
@@ -83,6 +86,24 @@ export default async function CompDayPage({
               pending: !p.acceptedAt,
             }))}
           teams={roster.map((t) => ({ id: t.id, name: t.name }))}
+        />
+
+        <ShowOrderPanel
+          compId={compId}
+          basePath={base}
+          /*
+           * The draw is over the teams that take the stage, `PERFORMING_STATUSES` -- not the whole
+           * roster. An applicant and a waitlisted team have no slot, and a dropped team's slot is a
+           * hole the board closes by renumbering.
+           */
+          rows={roster
+            .filter((t) => (PERFORMING_STATUSES as readonly TeamStatus[]).includes(t.status))
+            .map((t) => ({
+              id: t.id,
+              name: t.name,
+              bidCode: t.bidCode,
+              position: t.performanceOrder,
+            }))}
         />
       </div>
     );

@@ -55,7 +55,9 @@ import { revokeConnection } from "@/lib/drive/connections";
 import { importTeams, previewImport } from "@/lib/drive/import";
 import { parseMaterials } from "@/lib/roster/materials";
 import {
+  moveInShowOrder,
   regenerateCharges,
+  setShowOrder,
   setTeamBilling,
   setTeamStatus,
   setWaitlistRank,
@@ -468,6 +470,60 @@ export const setTeamStatusAction = async (
  * arrival order was the only order it could ever have. A board that has decided a team should go
  * first now has an instrument to say so, instead of dropping and re-waitlisting teams to fake one.
  */
+/**
+ * G1 — the Friday-night draw, and moving one act inside it.
+ *
+ * Two actions rather than one because they are two different acts: `setShowOrderAction` states the
+ * whole order, which is what a board does once after the mixer game; `moveInShowOrderAction` trades
+ * two adjacent slots, which is what it does when something changes. A single "save the order" form
+ * that renumbered on every click would rewrite every team's slot to move one act, and a running
+ * order lives on a printed emcee sheet and eight phones.
+ *
+ * Both take their scope from `compId` and resolve the team against `listRosterForBoard`, so neither
+ * adds a window. The order arrives as one newline-free string per row rather than a JSON blob,
+ * because the form has to keep working without JavaScript — B2's rule, applied to a board screen.
+ */
+export const setShowOrderAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+  const order = formData.getAll("order").map((value) => String(value)).filter(Boolean);
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const result = await setShowOrder(actor, order);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/comp-day`);
+  return { status: "ok", message: "Running order saved." };
+};
+
+export const moveInShowOrderAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+  const teamId = String(formData.get("teamId") ?? "");
+  const direction = String(formData.get("direction") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  if (direction !== "up" && direction !== "down") {
+    return { status: "error", message: "That is not a direction." };
+  }
+
+  const result = await moveInShowOrder(actor, teamId, direction);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/comp-day`);
+  return { status: "ok", message: "Running order changed." };
+};
+
 export const setWaitlistRankAction = async (
   _previous: BoardActionState,
   formData: FormData,

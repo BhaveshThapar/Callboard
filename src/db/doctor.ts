@@ -21,6 +21,7 @@ import {
   comps,
   ACCOUNT_CONSTRAINT_NAMES,
   ASSIGNMENT_CONSTRAINT_NAMES,
+  TEAMS_SHOW_ORDER_UNIQUE,
   COMMS_CONSTRAINT_NAMES,
   MONEY_CONSTRAINT_NAMES,
   judgeAssignments,
@@ -43,7 +44,10 @@ type MoneyObservation = Pick<
 
 type AccountObservation = Pick<
   Observed,
-  "accountGuaranteeEnforced" | "coordGuaranteeEnforced" | "duplicateInvitations"
+  | "accountGuaranteeEnforced"
+  | "coordGuaranteeEnforced"
+  | "scheduleGuaranteeEnforced"
+  | "duplicateInvitations"
 >;
 
 type CommsObservation = Pick<
@@ -282,8 +286,18 @@ const observeAccounts = async (): Promise<AccountObservation> => {
     !COORD_TABLES.every((table) => existing.has(table)) ||
     ASSIGNMENT_CONSTRAINT_NAMES.every((name) => names.has(name));
 
+  // G1. `teams` has existed since `0000`, so unlike `assignments` there is no "the table is not
+  // there yet" case to excuse -- a database missing this is a database that has not applied `0018`,
+  // and it will happily give two teams the same stage time.
+  const scheduleGuaranteeEnforced = names.has(TEAMS_SHOW_ORDER_UNIQUE);
+
   if (!ACCOUNT_TABLES.every((table) => existing.has(table))) {
-    return { accountGuaranteeEnforced, coordGuaranteeEnforced, duplicateInvitations: [] };
+    return {
+      accountGuaranteeEnforced,
+      coordGuaranteeEnforced,
+      scheduleGuaranteeEnforced,
+      duplicateInvitations: [],
+    };
   }
 
   const duplicates = await db.execute<{ person_id: string; live: number }>(sql`
@@ -297,6 +311,7 @@ const observeAccounts = async (): Promise<AccountObservation> => {
   return {
     accountGuaranteeEnforced,
     coordGuaranteeEnforced,
+    scheduleGuaranteeEnforced,
     duplicateInvitations: duplicates.rows.map((row) => ({
       personId: row.person_id,
       live: row.live,

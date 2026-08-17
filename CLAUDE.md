@@ -71,13 +71,13 @@ This is **enforced by ESLint**, not by discipline: `eslint.config.mjs` carries a
 
 **A `teamId` on a form is a claim.** The rule is one line: **a `teamId` is resolved against the scoped read that produced the form it arrived on.** That read is the check — comp scope and status filtering both come free from its own `where`, which is what stops the check from becoming a second definition of "which teams count".
 
-There are three windows over teams, because they answer different questions, and **seven** write paths resolve against whichever one produced their form:
+There are three windows over teams, because they answer different questions, and **nine** write paths resolve against whichever one produced their form:
 
 | Window | Write paths |
 |---|---|
 | `listTeamsForJudge` → `resolveTeamForJudge` | `submitScores`, `submitNote` |
 | `listTeamsForBoard` → `resolveTeamForBoard` | `addDeductionAction`, `overrideAction` |
-| `listRosterForBoard` → `resolveRosterTeamForBoard` | `setTeamStatus`, `setWaitlistRank`, `setTeamBilling` |
+| `listRosterForBoard` → `resolveRosterTeamForBoard` | `setTeamStatus`, `setWaitlistRank`, `setTeamBilling`, `setShowOrder`, `moveInShowOrder` |
 
 Two more answer questions that are not about which teams count, and each is argued below:
 
@@ -85,6 +85,8 @@ Two more answer questions that are not about which teams count, and each is argu
 |---|---|
 | `ownTeamForCaptain` | `submitMaterials` |
 | `listDutiesForLiaison` → `resolveDutyForLiaison` | `acknowledgeDutyAction`, `completeDutyAction` |
+
+**G1 added the eighth and ninth and no window** ([ADR-0023](docs/decisions/0023-the-draw-is-a-column-not-a-table.md)): `RosterTeamView` already carries `performanceOrder`, so *which team dances third* asks no new question about which teams count. `docs/DATA_MODEL.md` designed a `show_order` table and it was **not built** — it is `teams.performance_order` with extra steps, a column that existed since `0000`, was already read by both scoring windows, and had no writer in the product at all. `comp_roles`' lesson from the other direction.
 
 `setTeamBilling` is the seventh and not a fourth window, for the reason A3 was not: `rosterSize` and `rooms` are already on `RosterTeamView`, so stating them asks no new question about which teams count. **Four** comp-scoped writes deliberately resolve **nothing**, because their subject is the actor's own comp rather than a row in it: `setCompStatus`, `regenerateCharges`, `sendAnnouncementAction` and `sendFeedbackAction` take scope from `actor.compId`, which is what the link resolved to. A write with no id on its form has no claim to check; that is not an exemption from the rule, it is the rule finding nothing to do. The two comms ones are worth reading as confirmation rather than as an addition: *tell everybody who is coming* and *send every placed team its notes* are questions about a comp, and both answer them by filtering a window that already exists (`listRosterForBoard`, and the frozen run) rather than by asking a new one.
 
