@@ -6,7 +6,7 @@ The record is comp-scoped and multi-tenant: many orgs, many comps per org, isola
 
 Two groups of tables follow. The first group exists in Postgres, through migration `0017` — `0014` adds A4's materials columns to `teams`, `0015` adds `drive_connections` for A11, `0016` drops `comp_roles`, and `0017` adds `assignments` and `comps.duties` for C1. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
 
-It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `show_order` and `schedule_segments` — the Gita (PRD §9). `assignments` left it with C1 in `0017` and is described under *Coordination* below.
+It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `schedule_segments` — the Gita (PRD §9). `assignments` left it with C1 in `0017` and is described under *Coordination* below; `show_order` left it with G1 in `0018` by **not being built at all** ([ADR-0023](decisions/0023-the-draw-is-a-column-not-a-table.md)).
 
 ---
 
@@ -238,7 +238,9 @@ The residual is ADR-0014's again and gets the same instrument: the database cann
 
 The Gita, per PRD §9. Modeled now, built after paying customers exist.
 
-**`show_order`** — `comp_id`, `team_id`, `position`. The single input, drawn Friday night. Everything else is derived.
+**`show_order`** — **not built, and it will not be** ([ADR-0023](decisions/0023-the-draw-is-a-column-not-a-table.md)). It was designed here as `comp_id`, `team_id`, `position`, which is `teams.performance_order` with extra steps: that column has existed since `0000`, both scoring windows already ordered by it, and it had no writer in the product at all. G1 gave it the writer it was missing rather than a second place to disagree about which team dances third. `0018` adds `teams_comp_performance_order_unique`, and it is `DEFERRABLE INITIALLY DEFERRED` — a reorder is a *trade* of two adjacent positions in one `UPDATE`, and a non-deferred unique refuses that halfway through. Probed on `dev` rather than assumed; the partial unique index this started as failed on the first swap.
+
+This is `comp_roles`' lesson a second time, arriving from the other direction. There, a designed table was dropped because it was not the shape the feature needed. Here, a designed table is never created because a column already **was** it. Same rule: a designed table earns its migration when the code reaches it, and what the code reaches for is allowed to differ from what the design guessed.
 
 **`schedule_segments`** — `id`, `comp_id`, `team_id`, `kind`, `starts_at`, `ends_at`, `derived_from`
 

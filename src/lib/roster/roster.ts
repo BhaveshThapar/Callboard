@@ -2,13 +2,15 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Transaction } from "@/db";
 import { db, withTransaction } from "@/db";
 import type { TeamStatus } from "@/db/schema";
-import { BILLABLE_STATUSES, teams } from "@/db/schema";
+import { BILLABLE_STATUSES, PERFORMING_STATUSES, teams } from "@/db/schema";
 import { recordAudit } from "@/lib/audit/log";
 import type { BoardActor, TeamActor } from "@/lib/auth/scope";
 import { listRosterForBoard, ownTeamForCaptain, resolveRosterTeamForBoard } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
 import { feeScheduleFor, syncCharges, today, voidChargesFor } from "@/lib/money/charges";
 import { refusalFor, UNKNOWN_REFUSAL } from "@/lib/money/refusals";
+import type { DrawCandidate, PositionRewrite } from "@/lib/schedule/draw";
+import { move, redraw } from "@/lib/schedule/draw";
 import type { MaterialsInput } from "./materials";
 import {
   canTransition,
@@ -549,4 +551,144 @@ export const nextBidCode = async (compId: string): Promise<string> => {
     const code = `T-${String(n).padStart(3, "0")}`;
     if (!used.has(code)) return code;
   }
+};
+
+/**
+ * G1 — the Friday-night draw, written down.
+ *
+ * **Not a fourth window.** `RosterTeamView` already carries `performanceOrder`, so *which team dances
+ * third* asks no new question about which teams count; it is A3's argument again, one column over.
+ * Both writes below resolve against `listRosterForBoard`, which is what makes another comp's team and
+ * a team that is not in this draw refusals rather than checks somebody has to remember to write.
+ *
+ * **Refused after the lock**, for `setWaitlistRank`'s reason and more sharply: `teams` lives inside
+ * `tab_runs.inputs` and `performance_order` is on `teams`, so re-drawing after a lock would describe
+ * a comp the locked result does not.
+ */
+const drawCandidates = async (actor: BoardActor): Promise<DrawCandidate[]> =>
+  (await listRosterForBoard(actor))
+    .filter((team) => (PERFORMING_STATUSES as readonly TeamStatus[]).includes(team.status))
+    .map((team) => ({
+      teamId: team.id,
+      position: team.performanceOrder,
+      bidCode: team.bidCode,
+    }));
+
+/**
+ * Writes a set of position rewrites as one statement.
+ *
+ * One statement, not a transaction, and that is what `teams_comp_performance_order_unique` being
+ * `DEFERRABLE INITIALLY DEFERRED` buys: a trade holds two teams at the same position halfway through
+ * the UPDATE, and a non-deferred unique rejects it. Deferred, the check lands at the end of the
+ * implicit transaction the statement already is — so the sanctioned `withTransaction` callers stay at
+ * four.
+ *
+ * The explicit `::integer` cast is `setWaitlistRank`'s: every branch of the `case` is a bound
+ * parameter, so without it Postgres has nothing to infer from and resolves the whole expression to
+ * text.
+ */
+const applyPositions = async (
+  actor: BoardActor,
+  rewrites: readonly PositionRewrite[],
+): Promise<void> => {
+  await db
+    .update(teams)
+    .set({
+      performanceOrder: sql`case ${sql.join(
+        rewrites.map((r) => sql`when ${teams.id} = ${r.teamId} then ${r.position}::integer`),
+        sql` `,
+      )} end`,
+    })
+    .where(
+      and(
+        eq(teams.compId, actor.compId),
+        inArray(
+          teams.id,
+          rewrites.map((r) => r.teamId),
+        ),
+      ),
+    );
+};
+
+/**
+ * States the whole running order, `1..N`, in the sequence the board gives.
+ *
+ * This is the bulk act: a board typing in what the mixer game produced, or closing the hole a drop
+ * left behind. Callboard **ingests** the draw and does not run it (`docs/ROADMAP.md`'s one exception
+ * to the tarpit), so there is no randomness here and there could not be — `src/lib/schedule/` is
+ * fenced against it.
+ *
+ * A team the board does not name keeps a slot at the end rather than losing one. A draw that silently
+ * dropped a team from the running order is the class of failure this product exists to prevent, and
+ * it would surface on stage rather than on a screen.
+ */
+export const setShowOrder = async (actor: BoardActor, order: readonly string[]): Promise<RosterMove> => {
+  if (await latestLockedRun(actor.compId)) return { ok: false, message: LOCKED };
+
+  const candidates = await drawCandidates(actor);
+  if (candidates.length === 0) {
+    return { ok: false, message: "No team is accepted yet, so there is no running order to draw." };
+  }
+
+  const rewrites = redraw(candidates, order);
+  if (rewrites.length === 0) return { ok: true };
+
+  await applyPositions(actor, rewrites);
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "comp.draw",
+    entity: "comp",
+    entityId: actor.compId,
+    before: { order: candidates.map((c) => ({ teamId: c.teamId, position: c.position })) },
+    after: { rewrites },
+  });
+
+  return { ok: true };
+};
+
+/**
+ * Moves one team one place up or down the running order.
+ *
+ * A **trade**, never a renumber — `setWaitlistRank`'s rule, and the stakes are higher here. A running
+ * order is read off a printed sheet by an emcee and off a phone by every liaison, so renumbering the
+ * whole show to move one act is how six people end up holding different answers to *when do I walk*.
+ */
+export const moveInShowOrder = async (
+  actor: BoardActor,
+  teamId: string,
+  direction: "up" | "down",
+): Promise<RosterMove> => {
+  if (await latestLockedRun(actor.compId)) return { ok: false, message: LOCKED };
+
+  const team = await resolveRosterTeamForBoard(actor, teamId);
+  if (!team) return { ok: false, message: "That team is not in this comp." };
+  if (team.performanceOrder === null) {
+    return { ok: false, message: `${team.name} is not in the running order yet.` };
+  }
+
+  const rewrites = move(await drawCandidates(actor), teamId, direction);
+  if (rewrites.length === 0) {
+    const end = direction === "up" ? "start" : "end";
+    return { ok: false, message: `${team.name} is already at the ${end} of the running order.` };
+  }
+
+  await applyPositions(actor, rewrites);
+
+  await recordAudit({
+    compId: actor.compId,
+    actorKind: "board",
+    actorPersonId: actor.personId,
+    action: "team.showorder",
+    entity: "team",
+    entityId: teamId,
+    before: { performanceOrder: team.performanceOrder },
+    // The whole trade, not just the team the board clicked: a trade moves two rows and an audit row
+    // naming one of them would not explain the other.
+    after: { direction, rewrites },
+  });
+
+  return { ok: true };
 };
