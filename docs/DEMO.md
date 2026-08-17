@@ -41,13 +41,32 @@ It confirms a board link *and* a judge link resolve and that both the board and 
 ```
 ✓ Demo healthy: board "Ananya Krishnan", 3 judges, 9 teams.
   ep-round-fire-a6dyy8t8-pooler · the deployed demo
+
+Configuration (this shell, not the deployment):
+  ⚠ nothing sent from this host leaves the building: RESEND_API_KEY and COMMS_FROM are unset…
+  ⚠ the outbox is never swept: CRON_SECRET is unset…
+
+  Note: the verdict above is about this shell. db:doctor cannot see Vercel's environment.
+  Re-run with --host https://<the deployment> to ask the deployment itself.
 ```
 
 Without `· the deployed demo`, you checked a different database and the deployed one is still whatever it was. That is not hypothetical: **the demo returned 500s from July 13 to August 1, 2026** — nineteen days, across three waves of merged work — because Neon `main` sat at migration `0006` while Vercel served code expecting `0010`. The preflight existed the whole time and was run against `dev`, which was current. Both runs printed the same green line.
 
 The doctor now also refuses a database behind the repo, by counting `drizzle.__drizzle_migrations` against `drizzle/meta/_journal.json`. That check exists because the two older ones are constraint-shaped and migrations `0007` and `0008` add no constraint at all — nothing could see them missing, and `0007` is the one that broke the demo.
 
-**Merging is not deploying.** Vercel ships the code on a merge to `main`; nothing applies the migration. After merging anything with a new file in `drizzle/`, run `DATABASE_URL='<neon main pooled>' bun run db:migrate` and then this preflight.
+**Two subjects, and they are different machines.** The database half is about whatever `DATABASE_URL` names. The configuration half is about *this shell* — so running the documented command above puts production's database in front of your laptop's `RESEND_API_KEY`, and the config block says so rather than pretending otherwise. To ask the deployment what it is actually configured to do:
+
+```bash
+DATABASE_URL='<neon main pooled>' bun run db:doctor --host https://<your-app>.vercel.app
+```
+
+That reads `/api/health` on the deployment, and the block is then labelled with the URL instead of *this shell*.
+
+**A caveat is not a failure.** An absence — no `RESEND_API_KEY`, no `CRON_SECRET` — is reported and exits 0, because that is production's deliberate state today and a preflight that went red for it is one you would learn to skip. A **hazard** exits 1: a half-configured pair, a `DRIVE_TOKEN_KEY` that is set and the wrong length, or `CRON_SECRET` set while sending is off. That last one is the destructive combination — the sweep marks everything queued as sent through a transport that sends nothing, scrubs the invitation links, and the dedupe index then refuses to queue any of it again. **If you ever switch comms on, the order is `RESEND_API_KEY` + `COMMS_FROM`, then `NEXT_PUBLIC_BASE_URL`, then `CRON_SECRET` last.**
+
+**Merging is not deploying.** Vercel ships the code on a merge to `main`; nothing applies the migration. After merging anything with a new file in `drizzle/`, run `DATABASE_URL='<neon main pooled>' bun run db:migrate` and then this preflight. [`RUNBOOK.md`](RUNBOOK.md) is the host-shaped checklist this page's preflight is the database-shaped half of.
+
+CI now says so on its own, so this no longer depends on remembering: `.github/workflows/migrations.yml` runs on every push to `main` that touches `drizzle/`, and again daily, comparing what production reports having applied against `drizzle/meta/_journal.json`. It asks over HTTP rather than connecting to production's database, so there is **no database credential in CI** — it needs one repository *variable*, `PRODUCTION_URL`. The post-merge run is expected to be red until you migrate; re-run it from the Actions tab once you have.
 
 ## Before the call
 

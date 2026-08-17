@@ -1,6 +1,6 @@
 # ADR-0006 — Tenancy by app-layer scoping now; Postgres RLS later
 
-**Status:** accepted · July 9, 2026
+**Status:** accepted · July 9, 2026 · **amended August 15, 2026 — two of the three triggers have fired**
 
 ## Context
 
@@ -42,3 +42,29 @@ The honest risk: app-layer scoping degrades as the codebase grows and the number
 3. **A query outside `src/lib/auth/scope.ts` selects from `teams` or `scores`.** If that happens, the invariant has already stopped being enforced by structure, and it needs to be enforced by the database.
 
 Until then, `scope.ts` is the boundary, and CLAUDE.md says so.
+
+## Amendment — August 15, 2026
+
+**Two of the three triggers have fired — one outright, one quietly — and the third has not.** This is recorded here because a trigger nobody checks is a hope, which is the thing the section above says it is not. The count is stated rather than left to be inferred from the list, because an earlier draft of this line and the status line above it both read *all three*, while item 3 below says the opposite: a summary that disagrees with the list under it is exactly the defect the amendment was written to fix, one altitude up.
+
+1. **Module A shipped.** A1–A3, A6–A10 and P1 are live. Money and personal contact information are in the database, so the cost of a leak is no longer hypothetical.
+2. **A query outside `scope.ts` selects from `teams` or `scores` — at 14 sites across 7 files**: `src/db/doctor.ts`, `src/db/seed.ts`, `src/lib/comp/board.ts`, `src/lib/comp/public.ts`, `src/lib/comp/tab.ts`, `src/lib/drive/import.ts`, `src/lib/roster/roster.ts`. Several are legitimate — the seeder and the doctor are not request-scoped, and `public.ts` is one of the three deliberate `Actor`-less projections — but the ADR's own wording was *"if that happens, the invariant has already stopped being enforced by structure."* It has happened. Discipline did not scale, exactly as predicted.
+3. **The first paying customer has not arrived.** Track 1 is 0/10 conversations and 0/3 signatures, so the one trigger that would make an isolation bug a *breach* rather than a bug is still unfired. That is the only reason this remains an amendment rather than a supersession.
+
+**One claim in the Context section is wrong, and it is now measured rather than believed.** *"A serverless HTTP driver makes session state awkward"* was being leaned on as a *reason*. It is a cost: [`e2e/rls-spike.spec.ts`](../../e2e/rls-spike.spec.ts) puts the prefix at roughly **2–5% on an eight-way fan-out** — median 83ms bare against 85ms prefixed over nine rounds, recorded and deliberately not asserted against a threshold, because a latency budget nobody agreed to is a test that fails on somebody's bad afternoon. Awkward, still: every scoped read here is a fan-out — `listRosterForBoard` issues four queries, `boardSnapshot` eight — and each is a separate HTTP request needing its own prefix. But *awkward* is a cost to pay, and the objection to P3 is now policy design rather than latency.
+
+**That claim was *believed* rather than *known* until the spike became a file, and this paragraph is the second correction to it.** The amendment's first draft said "the spike has been run" when no spike existed in this repository: no `set_config`, no `current_setting`, no `SET LOCAL` in `src/`, `drizzle/` or `e2e/`; `db.batch` with no callers; `*.local.ts` gitignored, so whatever was run left nothing behind. Two documents asserted a result nobody could reproduce, and the only way to discover it was to grep for something that is not there — which is why the rule now stated in `CLAUDE.md` is that a document may not claim a spike was run unless the spike is a file. **P3's first act was that probe, and it has landed.** What it found:
+
+- **The mechanism carries.** A GUC set by `set_config` inside `db.batch` is readable by the next statement in the same batch.
+- **And it does not leak.** The same GUC reads empty on the next request to the same pooled endpoint. **Both halves are asserted, because either alone passes vacuously** — this is the probe that decides whether the design is safe at all, and neither document had mentioned it.
+
+Both paragraphs replace draft sentences rather than being appended under a second date, because the amendment had not yet merged when each was found: there was no history to preserve, only a PR to get right.
+
+**What P3 must not inherit from this ADR.** Two things it does not say, both of which would make an RLS rollout inert rather than wrong:
+
+- **RLS does not apply to the table owner.** `DATABASE_URL` is a single connection string and nothing in this repo mentions a non-owner role, so policies added today would exist, read correctly, and deny nothing. That is this codebase's signature defect — *written, with nothing reaching it* — in its purest form, and it would pass every test written against it. P3's first act is a `callboard_app` role without `BYPASSRLS`, and `db:doctor` asserting the app connects as a non-owner.
+- **Not every table carries a scope key.** [DATA_MODEL.md](../DATA_MODEL.md) claimed it did, and was corrected on the same day as this amendment: `rubric_criteria`, `payment_allocations`, `sessions` and `message_events` carry neither `comp_id` nor `org_id`, and reach scope through one join each. A policy cannot be keyed on a column that is not there, so each needs a join policy or a denormalized column — a decision, not a detail.
+
+The verification that matters is a **denial** test: connect as the app role, set the *wrong* `comp_id`, assert zero rows. A policy that permits is invisible, and a passing RLS suite that never proves a refusal is this ADR's failure mode wearing a green check.
+
+**And one trap the probe covered, because a spike run by hand would have missed it.** `SET LOCAL app.comp_id = $1` is not valid SQL — Postgres refuses it with `syntax error at or near "$1"`, so `select set_config('app.comp_id', $1, true)` is the only parameterizable form. Somebody testing this in a console with a literal comp id gets a green result and writes the wrong mechanism down, which is approximately how this ADR acquired the sentence it spent two paragraphs correcting. The probe asserts the refusal *and its message*, so a compile error cannot satisfy it — an earlier draft passed by catching one, which is a green test asserting nothing, this repo's own recurring defect appearing inside the file written to close an instance of it.

@@ -359,3 +359,102 @@ test("db:doctor reports a database missing a column, rather than dying on it", (
 
   expect(doctor().ok).toBe(true);
 });
+
+/**
+ * The configuration half, and it is driven through the CLI rather than through `summarizeConfig`
+ * for the reason the rest of this file exists: the unit tests fabricate a `ConfigObserved`, and what
+ * they structurally cannot check is whether `readConfigEnv` agrees with `sendingConfigured`,
+ * `driveConfigured` and `sealingConfigured` about what the environment actually says. A tri-state
+ * derived from the wrong variable would leave every unit test green.
+ *
+ * **None of these break the database**, unlike everything above — so they need no `break-db` entry
+ * and no `finally`. They are env-driven, and that difference is the point.
+ *
+ * `CALLBOARD_ENV_FILE` points at a path that does not exist, so `.env.local` cannot quietly supply a
+ * variable the test is asserting is absent. `DATABASE_URL` is therefore passed explicitly.
+ */
+const doctorWithEnv = (overrides: Record<string, string | undefined>): { ok: boolean; output: string } => {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined) env[key] = value;
+  }
+
+  env.CALLBOARD_ENV_FILE = join(tmpdir(), "callboard-no-such-env-file");
+  env.DATABASE_URL = process.env.DATABASE_URL ?? "";
+
+  for (const name of ["RESEND_API_KEY", "COMMS_FROM", "CRON_SECRET", "NEXT_PUBLIC_BASE_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DRIVE_TOKEN_KEY"]) {
+    delete env[name];
+  }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete env[key];
+    else env[key] = value;
+  }
+
+  try {
+    return {
+      ok: true,
+      output: execFileSync("bunx", ["tsx", "src/db/doctor-cli.ts"], { encoding: "utf8", env }),
+    };
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string };
+    return { ok: false, output: `${failure.stdout ?? ""}${failure.stderr ?? ""}` };
+  }
+};
+
+/**
+ * The regression test for the reported defect, and equally the test that the fix did not overshoot.
+ * Production has no comms configuration on purpose; a preflight that went red for it is one the
+ * founder learns to ignore before a prospect call. It is also what keeps CI green — `ci.yml`'s
+ * acceptance job sets no Resend variables.
+ */
+test("db:doctor passes a host with no comms configuration, and says what that costs", () => {
+  seed();
+
+  const health = doctorWithEnv({});
+  expect(health.ok).toBe(true);
+  expect(health.output).toContain("healthy");
+  expect(health.output).toMatch(/leaves the building/);
+  expect(health.output).toMatch(/never swept/);
+  // A caveat is not a problem, and must not be printed as one.
+  expect(health.output).not.toMatch(/Demo not ready/);
+});
+
+test("db:doctor fails the one combination that destroys mail, and says what it destroys", () => {
+  seed();
+
+  const health = doctorWithEnv({ CRON_SECRET: "not-a-real-secret" });
+  expect(health.ok).toBe(false);
+  expect(health.output).toMatch(/reaching\s+nobody|reached nobody/);
+  expect(health.output).toMatch(/Unset CRON_SECRET/);
+});
+
+/**
+ * Proves `readConfigEnv` and `sealingConfigured` agree. A 16-byte key makes `sealingKey()` return
+ * null exactly as an absent one does, so the only way to tell the two apart is to read the length —
+ * and an operator told to "set DRIVE_TOKEN_KEY" when they already have loses an afternoon.
+ */
+test("db:doctor fails a DRIVE_TOKEN_KEY that is set and the wrong length", () => {
+  seed();
+
+  const shortKey = Buffer.alloc(16, 7).toString("base64");
+  const health = doctorWithEnv({ DRIVE_TOKEN_KEY: shortKey });
+  expect(health.ok).toBe(false);
+  expect(health.output).toMatch(/16 bytes, not 32/);
+});
+
+/**
+ * The branch that would have caught the real production state had comms been switched on first.
+ * The opt-out's visible line and its `List-Unsubscribe` header come off one field, so a host that
+ * can send and cannot form the URL broadcasts with no way out at all.
+ */
+test("db:doctor fails a sending host that cannot form an opt-out URL", () => {
+  seed();
+
+  const health = doctorWithEnv({
+    RESEND_API_KEY: "re_not_a_real_key",
+    COMMS_FROM: "nobody@example.com",
+  });
+  expect(health.ok).toBe(false);
+  expect(health.output).toMatch(/no way out of it at all/);
+  expect(health.output).toMatch(/not only the List-Unsubscribe header/);
+});
