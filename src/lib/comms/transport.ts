@@ -116,3 +116,23 @@ export const transportFromEnv = (): Transport => {
  */
 export const sendingConfigured = (): boolean =>
   Boolean(process.env.RESEND_API_KEY && process.env.COMMS_FROM);
+
+/**
+ * What a board is told when the queue is as far as its message will ever get.
+ *
+ * For three weeks `sendingConfigured` had exactly one caller — the invitation — so the other five
+ * paths reported "on its way", "Sent to 8 teams" and "watch the outbox" against a deployment whose
+ * transport is `recordingTransport`. That transport returns `{ok: true}`, so `sweep` takes the
+ * success branch and the row lands `sent` with a null `provider_ref`: from inside the database an
+ * unconfigured host is indistinguishable from a working one, and the only place the difference can
+ * surface is the screen, before the board closes the tab.
+ *
+ * A sentence rather than a shared string, because the remedies differ: an invitation can be handed
+ * over by hand and says so, and a dues reminder has no manual fallback in this product. One
+ * predicate, two sentences — collapsing them would mean telling a treasurer to do something the
+ * product cannot do.
+ */
+export const NOT_SENDING = "Sending is not configured here, so nothing will actually leave.";
+
+export const sendingCaveat = (queuedSomething: boolean): string =>
+  queuedSomething && !sendingConfigured() ? ` ${NOT_SENDING}` : "";

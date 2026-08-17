@@ -21,7 +21,7 @@ import { planFeedbackDelivery } from "@/lib/comms/feedback";
 import { enqueue } from "@/lib/comms/outbox";
 import { planDepositReturned, planPaymentReceipt } from "@/lib/comms/receipts";
 import { captainsByTeam } from "@/lib/comms/recipients";
-import { sendingConfigured } from "@/lib/comms/transport";
+import { sendingCaveat, sendingConfigured } from "@/lib/comms/transport";
 import { feeScheduleFor, today } from "@/lib/money/charges";
 import { whoOwes } from "@/lib/money/who-owes";
 import { invite, listInvitationsForBoard, orgOfComp, revokeAccess } from "@/lib/auth/accounts";
@@ -740,7 +740,9 @@ export const recordPaymentAction = async (
     message:
       (result.creditCents > 0
         ? `Recorded. ${formatCents(result.creditCents)} of it is not attached to anything yet.`
-        : "Recorded.") + RECEIPT_SAID[receipt],
+        : "Recorded.") +
+      RECEIPT_SAID[receipt] +
+      sendingCaveat(receipt === "queued"),
   };
 };
 
@@ -944,7 +946,7 @@ export const advanceDepositAction = async (
       result.state === "refunded"
         ? `Deposit returned. It is no longer owed and no longer counted as paid.${
             told ? " The captain has been told." : ""
-          }`
+          }${sendingCaveat(told)}`
         : `Deposit is now ${result.state.replace("_", " ")}.`,
   };
 };
@@ -1256,7 +1258,9 @@ export const sendDuesRemindersAction = async (
 
   return {
     status: failed > 0 ? "error" : "ok",
-    message: `${parts.join(" · ")}. Sending happens in the background; watch the outbox.`,
+    message: `${parts.join(" · ")}. Sending happens in the background; watch the outbox.${sendingCaveat(
+      queued > 0,
+    )}`,
   };
 };
 
@@ -1354,7 +1358,9 @@ export const sendAnnouncementAction = async (
 
   return {
     status: "ok",
-    message: `${parts.join(" · ")}. Anyone who unsubscribed will not receive it.`,
+    message: `${parts.join(" · ")}. Anyone who unsubscribed will not receive it.${sendingCaveat(
+      queued > 0,
+    )}`,
   };
 };
 
@@ -1460,7 +1466,10 @@ export const sendFeedbackAction = async (
       : null,
   ].filter((part) => part !== null);
 
-  return { status: "ok", message: `${parts.join(" · ")}. No scores are included.` };
+  return {
+    status: "ok",
+    message: `${parts.join(" · ")}. No scores are included.${sendingCaveat(queued > 0)}`,
+  };
 };
 
 
