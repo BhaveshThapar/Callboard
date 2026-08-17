@@ -1,0 +1,132 @@
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { expect, test } from "@playwright/test";
+import { parseHealthPayload } from "../src/db/health";
+
+/**
+ * Read from disk rather than imported from `src/db/journal.ts`, which the app reaches through a
+ * static JSON import so the Next bundler inlines it. Playwright's loader wants an import attribute
+ * that Next's does not, and bending the app's import to suit a test would be the wrong way round.
+ * It is the same file either way, so this is one definition read two ways rather than two numbers.
+ */
+const migrationsExpected = (
+  JSON.parse(readFileSync("drizzle/meta/_journal.json", "utf8")) as { entries: unknown[] }
+).entries.length;
+
+/**
+ * `/api/health` is what lets CI ask production how far along it is **without a production database
+ * credential in GitHub Actions**, so its contract is load-bearing in a way a route usually is not:
+ * the guard's whole value is that a wrong answer here fails loudly rather than passing quietly.
+ *
+ * Two properties are asserted that no unit test can reach. That the route is reachable and dynamic
+ * at all — `next build` runs against a fake `DATABASE_URL` on the premise that nothing here is
+ * statically rendered, so a missing `force-dynamic` would break the build rather than this test, but
+ * a *cached* answer would break only this one. And that what it puts on the wire is what
+ * `parseHealthPayload` accepts, which is the seam where a renamed field would otherwise turn into a
+ * silent "answered 200 with a body this does not recognise" on the day it mattered.
+ */
+
+test("/api/health answers a payload the client parser accepts", async ({ request }) => {
+  const response = await request.get("/api/health");
+  expect(response.status()).toBe(200);
+
+  const parsed = parseHealthPayload(await response.json());
+  expect(parsed).not.toBeNull();
+  if (!parsed) throw new Error("unreachable");
+
+  // The count comes from `drizzle/meta/_journal.json` on both sides, so this is really asserting
+  // that the route reached a migrated database rather than that two constants match.
+  expect(parsed.migrations.expected).toBe(migrationsExpected);
+  expect(parsed.migrations.applied).toBe(migrationsExpected);
+});
+
+/**
+ * A cached health endpoint is a green check that is a lie about a fact that has changed — this
+ * repo's signature defect, served from a CDN. The guard would keep reporting a migrated production
+ * for as long as the edge held the response.
+ */
+test("/api/health refuses to be cached", async ({ request }) => {
+  const response = await request.get("/api/health");
+  expect(response.headers()["cache-control"]).toContain("no-store");
+});
+
+/**
+ * **The projection is the scope**, this repo's rule for every read with no `Actor` behind it. A
+ * schema version and a handful of configuration states are safe to serve unauthenticated; an org
+ * name, a comp, a person or a connection string is not. Asserted against the serialized body rather
+ * than the parsed object, because a field the parser ignores would still have been on the wire.
+ */
+test("/api/health leaks no product data and no secret value", async ({ request }) => {
+  const body = await (await request.get("/api/health")).text();
+
+  for (const forbidden of ["neon.tech", "postgres", "password", "token", "@", "org", "comp", "team", "person"]) {
+    expect(body.toLowerCase()).not.toContain(forbidden);
+  }
+
+  // Where a variable is unset the route names it, which is deliberate and is not a value. Asserted
+  // against a closed allowlist rather than against the absence of a secret: an assertion that a
+  // value is missing passes trivially on a host where that value was never set, which is every host
+  // this runs on.
+  const parsed = parseHealthPayload(JSON.parse(body));
+  const nameable = [
+    "RESEND_API_KEY",
+    "COMMS_FROM",
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "NEXT_PUBLIC_BASE_URL",
+  ];
+  for (const name of [...(parsed?.config.sendingMissing ?? []), ...(parsed?.config.driveMissing ?? [])]) {
+    expect(nameable).toContain(name);
+  }
+});
+
+/**
+ * The guard's own success path, driven the way CI drives it. `db:migration-check` imports nothing
+ * from `@/db`, so this also proves it runs with no `DATABASE_URL` at all — which is the property
+ * that makes the credential-free design work rather than merely sound good.
+ */
+test("db:migration-check passes against a deployment that is up to date", () => {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && key !== "DATABASE_URL") env[key] = value;
+  }
+  env.PRODUCTION_URL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
+
+  const output = execFileSync("bunx", ["tsx", "src/db/migration-check-cli.ts"], {
+    encoding: "utf8",
+    env,
+  });
+
+  expect(output).toContain(`has applied all ${migrationsExpected} migrations`);
+  expect(output).toContain(env.PRODUCTION_URL);
+});
+
+/**
+ * A 404 means the route is not deployed, which during the first rollout of `/api/health` is exactly
+ * the state to fail loudly on. Merging is not deploying, and this is the one place that distinction
+ * shows up as an HTTP status.
+ *
+ * That it is not *retried* is proved by counting calls in `health-client.test.ts`, not here. This
+ * test asserted elapsed wall-clock time for one run and failed on a loaded machine — a timing bound
+ * is only ever a proxy for "it did not retry", and it is a proxy that goes red under exactly the
+ * conditions where nobody trusts a red test anyway.
+ */
+test("db:migration-check fails when the health route is not deployed", () => {
+  const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && key !== "DATABASE_URL") env[key] = value;
+  }
+  env.PRODUCTION_URL = `${process.env.E2E_BASE_URL ?? "http://localhost:3000"}/not-deployed-here`;
+
+  let output = "";
+  try {
+    execFileSync("bunx", ["tsx", "src/db/migration-check-cli.ts"], { encoding: "utf8", env });
+    throw new Error("expected a non-zero exit");
+  } catch (error) {
+    const failure = error as { stdout?: string; stderr?: string };
+    output = `${failure.stdout ?? ""}${failure.stderr ?? ""}`;
+  }
+
+  expect(output).toMatch(/health route is not deployed/);
+  expect(output).toMatch(/Merging is not deploying/);
+});

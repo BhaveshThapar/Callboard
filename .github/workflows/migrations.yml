@@ -1,0 +1,65 @@
+name: Migrations
+
+# Is the deployment behind the repo?
+#
+# From July 13 to August 1, 2026, Neon `main` sat at migration `0006` while Vercel served code
+# expecting `0010`. Every Module A screen and the public comp page returned HTTP 500 for nineteen
+# days while three waves of work merged green. Merging is not deploying, and deploying is not
+# migrating -- nothing applies a migration but a person, and nothing reminded them.
+#
+# This asks the deployment over HTTP rather than connecting to production's database, so there is no
+# database credential in CI at all. See `src/app/api/health/route.ts` for what it answers and why
+# that projection is safe to serve unauthenticated.
+#
+# Its own file rather than a job in `ci.yml`, because that would need an `if` on the branch and
+# produce a *skipped* check on every pull request -- and `ci.yml` already records why a PR reading
+# CLEAN with no check on it is worse than one reading red.
+on:
+  # Fires exactly when `main` gains a migration, while the person who merged it is still at the
+  # keyboard. **This run is expected to be red until they migrate**, which is the reminder that did
+  # not exist for nineteen days -- so the failure names the command rather than just reporting.
+  push:
+    branches: [main]
+    paths: ["drizzle/**"]
+  # The one that would actually have caught the outage. A drift that *persists* is a different fact
+  # from one that just appeared: the push run is a to-do, nineteen consecutive daily failures are an
+  # emergency. Note GitHub disables scheduled workflows after 60 days of repository inactivity, which
+  # is the other reason the hand crank below is not optional.
+  schedule:
+    - cron: "0 14 * * *"
+  # `ci.yml`'s hand crank, and here also the repair affordance: it is how a person turns the
+  # post-merge red green again after actually applying the migration.
+  workflow_dispatch:
+
+concurrency:
+  group: migration-check
+  cancel-in-progress: false
+
+jobs:
+  applied:
+    runs-on: ubuntu-latest
+    env:
+      # A repository *variable*, not a secret: a public URL is not a credential, and a variable's
+      # absence is diagnosable in the settings UI instead of being guessed at.
+      PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # `comms.yml`'s failure mode, refused. That workflow exited 0 with a notice when its secrets
+      # were unset until August 15, 2026, which is why it ran every five minutes from Aug 3, touched
+      # nothing, and reported success the whole time. A green check here would be a lie.
+      - if: ${{ env.PRODUCTION_URL == '' }}
+        run: |
+          echo "::error::PRODUCTION_URL is not set, so nothing was checked against production."
+          exit 1
+
+      # Earns its twenty seconds: the alternative -- curl plus a shell count of `drizzle/*.sql` --
+      # would be a second definition of how many migrations exist, and it would be wrong the first
+      # time somebody generated one. `journal.ts` is the only definition.
+      - run: bun install --frozen-lockfile
+
+      - name: Is production behind main?
+        run: bun run db:migration-check

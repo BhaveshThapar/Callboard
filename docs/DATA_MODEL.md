@@ -1,8 +1,10 @@
 # Data model
 
-The record is comp-scoped and multi-tenant: many orgs, many comps per org, isolated. Every table carries `comp_id`, or `org_id` where it outlives a single comp.
+The record is comp-scoped and multi-tenant: many orgs, many comps per org, isolated. Most tables carry `comp_id`, or `org_id` where they outlive a single comp.
 
-Two groups of tables follow. The first group exists in Postgres, through migration `0017`. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
+**That sentence said *every* table until August 15, 2026, and it was not true.** `orgs` is the tenancy root and needs no key, and **four carry neither**: `rubric_criteria`, `payment_allocations`, `sessions` and `message_events`. Each reaches its scope through exactly one join — to `rubrics`, `payments`, `users` and `messages` respectively — which is fine while scoping is app-layer and is precisely what P3 has to answer for, because a row-level-security policy cannot be written against a column that is not there. Overstating it mattered for one reason: P3's design was being planned against the claim rather than against the schema.
+
+Two groups of tables follow. The first group exists in Postgres, through migration `0017` — `0014` adds A4's materials columns to `teams`, `0015` adds `drive_connections` for A11, `0016` drops `comp_roles`, and `0017` adds `assignments` and `comps.duties` for C1. The second group is designed here and **not migrated**, because no code touches it yet and migrating tables nothing reads is just dead code with a schema.
 
 It used to say those land "with Module A". They do not, and the sentence outlived its own truth: Module A landed in `0009`–`0011`, and what is left in that group is `show_order` and `schedule_segments` — the Gita (PRD §9). `assignments` left it with C1 in `0017` and is described under *Coordination* below.
 
@@ -146,7 +148,7 @@ A partial unique index on `supersedes_id` (where it is not null) means **two run
 
 **`audit_log`** — `id`, `comp_id`, `actor_kind`, `actor_person_id`, `action`, `entity`, `entity_id`, `before`, `after`, `at`
 
-Append-only, indexed on `(comp_id, at)`. `actor_kind` ∈ `board | judge | system`. Every score submission, deduction, lock, and override lands here.
+Append-only, indexed on `(comp_id, at)`. `actor_kind` ∈ `board | judge | team | liaison | system` — P1 added the last two with accounts in `0012`, and this line said three until August 15, 2026. `ACTOR_KINDS` in `src/db/schema/audit.ts` is the one definition and `audit_log_actor_kind_check` derives from it, so a sixth kind is a migration rather than a type edit. Every score submission, deduction, lock, and override lands here.
 
 ---
 

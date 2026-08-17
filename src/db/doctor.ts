@@ -1,13 +1,20 @@
-import journal from "../../drizzle/meta/_journal.json";
 import { and, count, eq, gt, isNull, sql } from "drizzle-orm";
 import type { BoardActor, JudgeActor } from "@/lib/auth/scope";
 import { listJudgeLabelsForBoard } from "@/lib/auth/scope";
 import { boardSnapshot } from "@/lib/comp/board";
 import { judgeSnapshot } from "@/lib/comp/judge";
 import type { CompConfig } from "./config";
+import { readConfigEnv } from "./config-env";
 import { summarizeHealth } from "./health";
-import type { DemoHealth, Observed } from "./health";
+import type {
+  ConfigObserved,
+  ConfigSource,
+  DemoHealth,
+  HealthPayload,
+  Observed,
+} from "./health";
 import { db } from "./index";
+import { observeSchemaVersion } from "./schema-version";
 import {
   boardAssignments,
   CHAIN_INDEX_NAMES,
@@ -34,8 +41,6 @@ type MoneyObservation = Pick<
   | "unexplainedRefunds"
 >;
 
-type SchemaObservation = Pick<Observed, "migrationsApplied" | "migrationsExpected">;
-
 type AccountObservation = Pick<
   Observed,
   "accountGuaranteeEnforced" | "coordGuaranteeEnforced" | "duplicateInvitations"
@@ -45,6 +50,24 @@ type CommsObservation = Pick<
   Observed,
   "commsGuaranteeEnforced" | "driftingMessages" | "stuckMessages"
 >;
+
+/**
+ * What this process's environment carries — a different question from what its database holds, and
+ * the only observation here whose subject is not the database.
+ */
+const observeConfig = (source: ConfigSource): ConfigObserved => ({ ...readConfigEnv(), source });
+
+/**
+ * The same observation, from a host that was asked instead of a shell that was read.
+ *
+ * The `source` is supplied by the caller rather than taken from the payload: the responder is the
+ * one thing that cannot be trusted to say which machine answered, and a wrong subject here is the
+ * entire defect `--host` exists to fix.
+ */
+export const observeConfigFromPayload = (
+  payload: HealthPayload,
+  host: string,
+): ConfigObserved => ({ ...payload.config, source: { host } });
 
 /** The tables migration `0013` creates. Absent means C2 has not been applied here. */
 const COMMS_TABLES = ["messages", "message_events"] as const;
@@ -74,33 +97,6 @@ const MONEY_TABLES = [
   "payment_allocations",
   "deposit_events",
 ] as const;
-
-/**
- * How far behind the repo this database is.
- *
- * `drizzle.__drizzle_migrations` lives in the `drizzle` schema, not `public` — every other catalog
- * query here filters on `schemaname = 'public'` and would miss it. A database that has never run
- * drizzle-kit has no such table, and `to_regclass` returns null rather than throwing, which is what
- * keeps a preflight reporting where a bare `select` would crash.
- *
- * The expected count is `drizzle/meta/_journal.json`, imported rather than written down, for the
- * reason `CHAIN_INDEXES` and `MONEY_CONSTRAINTS` have one definition each: a number typed here would
- * be a second one, and it would be wrong the first time somebody generated a migration.
- */
-const observeSchema = async (): Promise<SchemaObservation> => {
-  const migrationsExpected = journal.entries.length;
-
-  const result = await db.execute<{ applied: number | null }>(sql`
-    select case
-             when to_regclass('drizzle.__drizzle_migrations') is null then null
-             else (select count(*)::int from drizzle.__drizzle_migrations)
-           end as applied
-  `);
-
-  // `?? null` rather than `|| null`: a database with the table and zero rows has applied 0, which
-  // is the most behind it is possible to be and must not read as "cannot tell".
-  return { migrationsApplied: result.rows[0]?.applied ?? null, migrationsExpected };
-};
 
 /**
  * Whether over-allocation is still representable on this database, and whether a counter has
@@ -424,9 +420,18 @@ const observeChain = async (): Promise<ChainObservation> => {
  * It only reads, so it is safe against `main` -- which is the database it most needs to be run
  * against, and was not.
  */
-export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> => {
+export const checkDemoHealth = async (
+  config: CompConfig,
+  /**
+   * Defaulted rather than always read here, because `--host` asks the *deployment* what it carries.
+   * Without that the config verdict would be about the shell the CLI happens to be running in,
+   * printed under a line naming production's compute — a verdict whose subject is the wrong machine,
+   * which is the failure this whole check exists to stop.
+   */
+  configObserved: ConfigObserved = observeConfig("this shell"),
+): Promise<DemoHealth> => {
   const [schema, chain, money, accounts, comms, [comp]] = await Promise.all([
-    observeSchema(),
+    observeSchemaVersion(),
     observeChain(),
     observeMoney(),
     observeAccounts(),
@@ -442,6 +447,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
   if (!comp) {
     return summarizeHealth(
       {
+        config: configObserved,
         ...schema,
         ...chain,
         ...money,
@@ -530,6 +536,7 @@ export const checkDemoHealth = async (config: CompConfig): Promise<DemoHealth> =
 
   return summarizeHealth(
     {
+      config: configObserved,
       ...schema,
       ...chain,
       ...money,

@@ -3,11 +3,67 @@
  * unit-tests without DATABASE_URL; `doctor.ts` gathers the `Observed` facts and applies it.
  */
 
+/**
+ * Whose environment a config verdict is about.
+ *
+ * The whole reason this field exists: `db:doctor` is documented as being run with production's
+ * `DATABASE_URL` in front of it, and `process.env.RESEND_API_KEY` is still the laptop's. A config
+ * section that did not say which host it had asked would print a verdict about the wrong one, under
+ * a line that says *the deployed demo* — which is the exact defect this check was added to close,
+ * reproduced one layer out.
+ */
+export type ConfigSource = "this shell" | { host: string };
+
+/**
+ * Which configuration groups the environment behind a verdict actually carries.
+ *
+ * States and variable *names* only, never a value read out of `process.env`. A preflight that
+ * printed a key would be a preflight nobody could paste into an issue.
+ */
+export type ConfigObserved = {
+  sending: "on" | "off" | "partial";
+  /** Which of the pair is absent, when `partial`. */
+  sendingMissing: readonly string[];
+  cron: boolean;
+  baseUrl: boolean;
+  drive: "on" | "off" | "partial";
+  driveMissing: readonly string[];
+  sealing: "on" | "off" | "unusable";
+  /** Decoded length, only when `unusable`, so the sentence can say what is actually wrong. */
+  sealingKeyBytes: number | null;
+  source: ConfigSource;
+};
+
+/**
+ * Two lists, because an absence and a contradiction are not the same fact.
+ *
+ * **A caveat is reported and never fatal.** A laptop legitimately has no Resend key, and production
+ * having none is a deliberate, documented state that three files argue for on purpose. A preflight
+ * that went red for it would be a preflight the founder learns to ignore before a prospect call,
+ * which is the failure `schemaProblems` above already names: one that cries wolf gets skipped.
+ *
+ * **A hazard is set-but-unusable, or a combination whose effect is destructive.** Somebody has
+ * already done the work and the product is not getting the benefit — or worse, is about to do
+ * something it cannot take back.
+ */
+export type ConfigVerdict = {
+  caveats: string[];
+  hazards: string[];
+  source: ConfigSource;
+};
+
+/**
+ * `ok` answers *can a prospect be shown this database?* The config verdict answers *would a button
+ * on this host do what the screen says?* Two questions, so they must not share one boolean — and
+ * specifically because `db:seed` gates on `ok`, so a config fact landing in `problems` would make a
+ * missing mail key refuse to seed a demo.
+ */
 export type DemoHealth =
-  | { ok: true; board: string; judges: number; teams: number }
-  | { ok: false; problems: string[] };
+  | { ok: true; board: string; judges: number; teams: number; config: ConfigVerdict }
+  | { ok: false; problems: string[]; config: ConfigVerdict };
 
 export type Observed = {
+  config: ConfigObserved;
   /**
    * Migrations this database has applied, or null when the `drizzle` schema is absent — skipped,
    * not guessed, the same rule the money queries follow when their tables are missing.
@@ -103,20 +159,58 @@ const RESEED = "reseed with 'bun run db:seed'";
  * is a different failure with no evidence of ever happening here, and a preflight that cries wolf
  * is a preflight that gets skipped before a call.
  *
- * Reseeding is not offered, for the reason the other two do not offer it: a seed does not apply a
+ * **The sentence has one definition; the policy on `unknown` belongs to each caller.** `db:doctor`
+ * skips it — a database with no `drizzle` schema is one this cannot tell about, and guessing would
+ * make the preflight cry wolf. `db:migration-check` fails on it, because CI asking production how
+ * far along it is and getting "no drizzle schema" means it reached something that is not the
+ * production database. Same string, two remedies, which is `CHAIN_INDEXES`' arrangement exactly.
+ */
+export type MigrationComparison =
+  | { state: "level"; applied: number; expected: number }
+  | { state: "ahead"; applied: number; expected: number }
+  | { state: "behind"; applied: number; expected: number; behind: number; sentence: string }
+  | { state: "unknown"; expected: number; sentence: string };
+
+export const compareMigrations = (
+  applied: number | null,
+  expected: number,
+): MigrationComparison => {
+  if (applied === null) {
+    return {
+      state: "unknown",
+      expected,
+      sentence:
+        "this database has no 'drizzle' schema, so it has never had a migration applied and " +
+        "cannot say how far along it is.",
+    };
+  }
+
+  // `ahead` is a real state and deliberately not a problem: production legitimately runs ahead of a
+  // checkout during a deploy, and of an older branch always. It is reported, never failed on.
+  if (applied > expected) return { state: "ahead", applied, expected };
+  if (applied === expected) return { state: "level", applied, expected };
+
+  const behind = expected - applied;
+  return {
+    state: "behind",
+    applied,
+    expected,
+    behind,
+    sentence:
+      `this database is ${behind} migration${behind === 1 ? "" : "s"} behind the repo ` +
+      `(${applied} applied, ${expected} in drizzle/). ` +
+      "The code deployed in front of it expects columns and tables it does not have — apply them " +
+      "with 'bun run db:migrate'.",
+  };
+};
+
+/**
+ * Reseeding is not offered, for the reason the other checks do not offer it: a seed does not apply a
  * migration, and `db:seed` runs this very check afterwards and would refuse to print links anyway.
  */
 const schemaProblems = (observed: Observed): string[] => {
-  if (observed.migrationsApplied === null) return [];
-  if (observed.migrationsApplied >= observed.migrationsExpected) return [];
-
-  const behind = observed.migrationsExpected - observed.migrationsApplied;
-  return [
-    `this database is ${behind} migration${behind === 1 ? "" : "s"} behind the repo ` +
-      `(${observed.migrationsApplied} applied, ${observed.migrationsExpected} in drizzle/). ` +
-      "The code deployed in front of it expects columns and tables it does not have — apply them " +
-      "with 'bun run db:migrate'.",
-  ];
+  const comparison = compareMigrations(observed.migrationsApplied, observed.migrationsExpected);
+  return comparison.state === "behind" ? [comparison.sentence] : [];
 };
 
 /**
@@ -292,10 +386,192 @@ const commsProblems = (observed: Observed): string[] => {
   return problems;
 };
 
+/**
+ * The order to switch comms on in, and it is not stylistic.
+ *
+ * `recordingTransport.send` returns `{ ok: true }`, so a sweep against an unconfigured host takes the
+ * *success* branch: the row lands `sent` with a null `provider_ref` and `scrubPayload` destroys the
+ * raw invitation link (ADR-0021). `messages_comp_dedupe_unique` then refuses a re-enqueue, and
+ * `enqueue` returns `duplicate` — which by design is not an error and shows a board *already sent*.
+ * Permanently marked sent, credential destroyed, unsendable, having reached nobody.
+ *
+ * Stated up front rather than only detected afterwards, because there is no `revoked_at` on
+ * somebody's inbox and a detector that fires after the fact is worth less than a sentence read while
+ * the operator is still choosing.
+ */
+const SENDING_ORDER =
+  "if you configure comms, set RESEND_API_KEY and COMMS_FROM first, then NEXT_PUBLIC_BASE_URL, " +
+  "then CRON_SECRET last. In that order because a sweep against a host that cannot send still " +
+  "marks every queued message sent, scrubs the invitation links out of the payloads, and the " +
+  "dedupe index then refuses to queue any of them again.";
+
+const configCaveats = (config: ConfigObserved): string[] => {
+  const caveats: string[] = [];
+
+  if (config.sending === "off") {
+    caveats.push(
+      "nothing sent from this host leaves the building: RESEND_API_KEY and COMMS_FROM are unset, " +
+        "so the transport records instead. Every message still queues, and the screens now say so.",
+    );
+  }
+
+  if (!config.cron) {
+    caveats.push(
+      "the outbox is never swept: CRON_SECRET is unset, so /api/cron/send answers 503 to everyone. " +
+        "Queued messages accumulate and nothing claims them.",
+    );
+  }
+
+  if (!config.baseUrl && config.sending !== "on") {
+    caveats.push(
+      "NEXT_PUBLIC_BASE_URL is unset, so invitation links would be relative and an announcement " +
+        "would carry no opt-out. Harmless only because this host cannot send.",
+    );
+  }
+
+  if (config.drive === "off") {
+    caveats.push(
+      "Drive import is off: GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are unset, so the import " +
+        "screen says it is not configured rather than starting a handshake it cannot finish.",
+    );
+  }
+
+  if (config.sealing === "off") {
+    caveats.push(
+      "DRIVE_TOKEN_KEY is unset, so connecting a Google account is refused rather than storing a " +
+        "refresh token in the clear. That is the correct default, not a fault.",
+    );
+  }
+
+  // Only on a clean slate. Once `cron` is set the ordering has already been decided, and the hazard
+  // below is the sentence that matters -- repeating this one under it would bury the recovery.
+  if (config.sending === "off" && !config.cron) caveats.push(SENDING_ORDER);
+
+  return caveats;
+};
+
+const configHazards = (config: ConfigObserved): string[] => {
+  const hazards: string[] = [];
+
+  if (config.sending === "partial") {
+    hazards.push(
+      `sending is half-configured — ${config.sendingMissing.join(" and ")} ` +
+        `${config.sendingMissing.length === 1 ? "is" : "are"} unset, so the transport records ` +
+        "instead of sending while the other variable sits there looking configured. Set it, or " +
+        "unset both.",
+    );
+  }
+
+  // The destructive one. Every other entry here describes something not working; this describes
+  // something working exactly as built, in an order that cannot be undone.
+  if (config.cron && config.sending !== "on") {
+    hazards.push(
+      "CRON_SECRET is set while RESEND_API_KEY and COMMS_FROM are not, which is the one " +
+        "combination that destroys mail. The next sweep will claim everything queued, send it " +
+        "through a transport that sends nothing, mark it sent, scrub the invitation links out of " +
+        "the payloads, and the dedupe index will then refuse to queue any of it again — reaching " +
+        "nobody, permanently. Unset CRON_SECRET until sending is configured.",
+    );
+  }
+
+  if (!config.baseUrl && config.sending === "on") {
+    hazards.push(
+      "this host can send and cannot form an opt-out URL: NEXT_PUBLIC_BASE_URL is unset, so an " +
+        "announcement ships with no way out of it at all — not only the List-Unsubscribe header, " +
+        "none, because the visible line and the header come off one field so that they cannot " +
+        "disagree. Set NEXT_PUBLIC_BASE_URL before broadcasting anything.",
+    );
+  }
+
+  if (config.drive === "partial") {
+    hazards.push(
+      `Drive import is set up and unusable — ${config.driveMissing.join(" and ")} ` +
+        `${config.driveMissing.length === 1 ? "is" : "are"} unset, so the import screen reports ` +
+        "'not configured' while the other Google variables are plainly there.",
+    );
+  }
+
+  if (config.sealing === "unusable") {
+    hazards.push(
+      `DRIVE_TOKEN_KEY is set but decodes to ${config.sealingKeyBytes} bytes, not 32, so ` +
+        "aes-256-gcm cannot use it and connecting a Google account is refused as though the key " +
+        "were absent. Generate one with randomBytes(32).toString('base64').",
+    );
+  }
+
+  return hazards;
+};
+
+export const summarizeConfig = (config: ConfigObserved): ConfigVerdict => ({
+  caveats: configCaveats(config),
+  hazards: configHazards(config),
+  source: config.source,
+});
+
+/**
+ * What `/api/health` puts on the wire, and the one definition of it — the route writes this shape
+ * and `db:doctor --host` reads it, so a field renamed on one side is a compile error on the other.
+ *
+ * `source` is deliberately absent: the answer's subject is the host that answered, which the caller
+ * already knows and the responder cannot be trusted to state.
+ */
+export type HealthPayload = {
+  migrations: { applied: number | null; expected: number };
+  config: Omit<ConfigObserved, "source">;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((entry) => typeof entry === "string");
+
+const isOneOf = <T extends string>(value: unknown, allowed: readonly T[]): value is T =>
+  typeof value === "string" && (allowed as readonly string[]).includes(value);
+
+/**
+ * Parsed rather than cast, because this arrives over a network from a host the CLI was pointed at by
+ * hand. A cast would let a typo'd URL answering some other JSON produce a confident verdict about a
+ * machine that is not this product — which is the failure mode the whole `--host` flag exists to
+ * fix, arriving through the flag itself.
+ */
+export const parseHealthPayload = (value: unknown): HealthPayload | null => {
+  if (!isRecord(value)) return null;
+
+  const { migrations, config } = value;
+  if (!isRecord(migrations) || !isRecord(config)) return null;
+
+  const { applied, expected } = migrations;
+  if (applied !== null && typeof applied !== "number") return null;
+  if (typeof expected !== "number") return null;
+
+  if (!isOneOf(config.sending, ["on", "off", "partial"] as const)) return null;
+  if (!isOneOf(config.drive, ["on", "off", "partial"] as const)) return null;
+  if (!isOneOf(config.sealing, ["on", "off", "unusable"] as const)) return null;
+  if (!isStringArray(config.sendingMissing) || !isStringArray(config.driveMissing)) return null;
+  if (typeof config.cron !== "boolean" || typeof config.baseUrl !== "boolean") return null;
+  if (config.sealingKeyBytes !== null && typeof config.sealingKeyBytes !== "number") return null;
+
+  return {
+    migrations: { applied, expected },
+    config: {
+      sending: config.sending,
+      sendingMissing: config.sendingMissing,
+      cron: config.cron,
+      baseUrl: config.baseUrl,
+      drive: config.drive,
+      driveMissing: config.driveMissing,
+      sealing: config.sealing,
+      sealingKeyBytes: config.sealingKeyBytes,
+    },
+  };
+};
+
 export const summarizeHealth = (
   observed: Observed,
   expected: { judges: number; teams: number },
 ): DemoHealth => {
+  const config = summarizeConfig(observed.config);
   if (!observed.compFound) {
     return {
       ok: false,
@@ -307,6 +583,7 @@ export const summarizeHealth = (
         ...commsProblems(observed),
         "comp not seeded — run 'bun run db:seed'",
       ],
+      config,
     };
   }
 
@@ -343,11 +620,12 @@ export const summarizeHealth = (
     problems.push(`only ${observed.teams} of ${expected.teams} teams seeded — ${RESEED}`);
   }
 
-  if (problems.length > 0) return { ok: false, problems };
+  if (problems.length > 0) return { ok: false, problems, config };
   return {
     ok: true,
     board: observed.boardName ?? "",
     judges: observed.judges,
     teams: observed.teams,
+    config,
   };
 };
