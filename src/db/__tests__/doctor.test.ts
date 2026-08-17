@@ -21,6 +21,7 @@ const healthy: Observed = {
   forkedDeposits: [],
   unexplainedRefunds: [],
   accountGuaranteeEnforced: true,
+  coordGuaranteeEnforced: true,
   duplicateInvitations: [],
   commsGuaranteeEnforced: true,
   driftingMessages: [],
@@ -46,6 +47,7 @@ const unseeded: Observed = {
   forkedDeposits: [],
   unexplainedRefunds: [],
   accountGuaranteeEnforced: true,
+  coordGuaranteeEnforced: true,
   duplicateInvitations: [],
   commsGuaranteeEnforced: true,
   driftingMessages: [],
@@ -411,5 +413,26 @@ describe("summarizeHealth migration lag", () => {
   /** Skipped, not guessed: a database with no `drizzle` schema cannot be compared. */
   it("says nothing when the migration table is absent", () => {
     expect(summarizeHealth({ ...healthy, migrationsApplied: null }, expected).ok).toBe(true);
+  });
+});
+
+/**
+ * C1. The pair of partial unique indexes is what makes "one live duty per person" a property of the
+ * database rather than of the code — a comp running against a database that has the code and not the
+ * indexes lets a double-clicked assign button write the duty twice, and nothing else would notice.
+ */
+describe("summarizeHealth — the coordination guarantee", () => {
+  it("reports a database whose assignments indexes are missing, and names the remedy", () => {
+    const health = summarizeHealth({ ...healthy, coordGuaranteeEnforced: false }, expected);
+    expect(health.ok).toBe(false);
+    if (!health.ok) {
+      expect(health.problems.join(" ")).toMatch(/same duty twice/);
+      expect(health.problems.join(" ")).toMatch(/db:migrate/);
+    }
+  });
+
+  it("says nothing when the indexes are there", () => {
+    const health = summarizeHealth(healthy, expected);
+    expect(health.ok).toBe(true);
   });
 });

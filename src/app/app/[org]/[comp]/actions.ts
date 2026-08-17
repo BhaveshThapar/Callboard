@@ -24,7 +24,21 @@ import { captainsByTeam } from "@/lib/comms/recipients";
 import { sendingCaveat, sendingConfigured } from "@/lib/comms/transport";
 import { feeScheduleFor, today } from "@/lib/money/charges";
 import { whoOwes } from "@/lib/money/who-owes";
-import { invite, listInvitationsForBoard, orgOfComp, revokeAccess } from "@/lib/auth/accounts";
+import {
+  invite,
+  listInvitationsForBoard,
+  orgOfComp,
+  resolveLiaisonActor,
+  revokeAccess,
+} from "@/lib/auth/accounts";
+import {
+  acknowledgeDuty,
+  assignDuty,
+  completeDuty,
+  resolveAssignmentForBoard,
+  revokeDuty,
+  setSwaTrained,
+} from "@/lib/coord/assignments";
 import type { InvitableRole } from "@/db/schema";
 import { INVITABLE_ROLES } from "@/db/schema";
 import type { DepositState } from "@/lib/money/deposit";
@@ -52,6 +66,7 @@ import {
   listJudgeLabelsForBoard,
   listRosterForBoard,
   NOT_COMPETING,
+  resolveDutyForLiaison,
   resolveRosterTeamForBoard,
   resolveTeamForBoard,
 } from "@/lib/auth/scope";
@@ -1613,3 +1628,157 @@ export const disconnectDriveAction = async (
     message: "Disconnected. Remove Callboard from your Google account to end the grant there too.",
   };
 };
+
+/* ---------------------------------------------------------------------------------------------- *
+ * C1 — liaison & volunteer coordination.
+ *
+ * Four board writes and two liaison ones. The board's resolve their claims one level down reads that
+ * already exist; the liaison's resolve theirs down `listDutiesForLiaison`, which is the fifth window.
+ * ---------------------------------------------------------------------------------------------- */
+
+/** `datetime-local` gives no zone, and an empty field is an absence rather than the epoch. */
+const optDateTime = (value: FormDataEntryValue | null): Date | null => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+};
+
+export const assignDutyAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+  const personId = String(formData.get("personId") ?? "").trim();
+  const dutyId = String(formData.get("dutyId") ?? "").trim();
+  const teamId = String(formData.get("teamId") ?? "").trim();
+  const note = String(formData.get("note") ?? "").trim();
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  /**
+   * The `personId` is a claim. It resolves against the People screen's own read — the same read that
+   * produced the dropdown — so comp scope and "is this person actually on this comp" both come free
+   * from its `where`. `assignments.person_id` is a bare FK, exactly as `scores.team_id` is, so
+   * without this the database takes a row naming somebody at another comp and nobody is told.
+   */
+  const invited = await listInvitationsForBoard(actor);
+  if (!invited.some((p) => p.personId === personId)) {
+    return { status: "error", message: "That person is not on this comp." };
+  }
+
+  // And the teamId resolves against the roster window, `inviteAction`'s precedent exactly.
+  if (teamId && !(await resolveRosterTeamForBoard(actor, teamId))) {
+    return { status: "error", message: NOT_COMPETING };
+  }
+
+  const result = await assignDuty(actor, {
+    personId,
+    dutyId,
+    teamId: teamId || null,
+    startsAt: optDateTime(formData.get("startsAt")),
+    endsAt: optDateTime(formData.get("endsAt")),
+    note: note || null,
+  });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/comp-day`);
+  return { status: "ok", message: "Assigned." };
+};
+
+export const revokeDutyAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  // One level down the read that produced the form, and the array holds only this comp's live rows —
+  // so another comp's duty and an already-revoked one are refused by the same `find`.
+  if (!(await resolveAssignmentForBoard(actor, assignmentId))) {
+    return { status: "error", message: "That duty is not in this comp." };
+  }
+
+  const result = await revokeDuty(actor, assignmentId);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/comp-day`);
+  return { status: "ok", message: "Taken back. The record of it stays." };
+};
+
+export const setSwaTrainedAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+  const trained = String(formData.get("trained") ?? "") === "true";
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  if (!(await resolveAssignmentForBoard(actor, assignmentId))) {
+    return { status: "error", message: "That duty is not in this comp." };
+  }
+
+  const result = await setSwaTrained(actor, assignmentId, trained);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/comp-day`);
+  return { status: "ok", message: trained ? "Marked trained." : "Mark removed." };
+};
+
+/**
+ * The liaison's two writes, and the only two in this product.
+ *
+ * They do **not** go through `resolveBoardAccess`: a liaison is an account actor, so this is
+ * `team/page.tsx`'s path — session cookie, comp id, `resolveLiaisonActor`. The `assignmentId`
+ * resolves against `listDutiesForLiaison`, whose rows are already only this person's, so a
+ * hand-crafted POST naming somebody else's duty finds nothing.
+ */
+const liaisonAction = async (
+  formData: FormData,
+  run: (
+    actor: { compId: string; personId: string },
+    assignmentId: string,
+  ) => Promise<{ ok: boolean; message?: string }>,
+  done: string,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+  const assignmentId = String(formData.get("assignmentId") ?? "");
+
+  const session = await readSessionCookie();
+  if (!session) return { status: "error", message: NO_ACCESS };
+
+  const actor = await resolveLiaisonActor(session, compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  if (!(await resolveDutyForLiaison(actor, assignmentId))) {
+    return { status: "error", message: "That is not one of your duties." };
+  }
+
+  const result = await run(actor, assignmentId);
+  if (!result.ok) return { status: "error", message: result.message ?? "That did not work." };
+
+  revalidatePath(`${basePath}/comp-day`);
+  return { status: "ok", message: done };
+};
+
+export const acknowledgeDutyAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> =>
+  liaisonAction(formData, acknowledgeDuty, "Got it — the board can see you have this.");
+
+export const completeDutyAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => liaisonAction(formData, completeDuty, "Marked done.");

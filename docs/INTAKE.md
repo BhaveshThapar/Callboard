@@ -56,6 +56,10 @@ You are not committing to anything by sending this, and it costs you nothing. If
 
 This one **is** entered into the product: it becomes your comp's configuration, and each team's total is generated from it and their roster rather than typed by hand. Send the room count per team if you have it. If you don't, say so rather than sending zeros — a team whose rooms are unknown gets **no hotel charge and a note saying why**, which is recoverable, whereas a $0 hotel charge looks settled and is not.
 
+**Your duty list.** What jobs you assign people on comp day, and which of them need SWA training — team liaison, judge runner, hospitality, door. Just the names you actually use; five lines in an email is enough.
+
+This one **is** entered into the product, the same way the fee schedule is: it becomes your comp's duty vocabulary, and a board assigns people against it. There is no default list on purpose. PRD §7.3 specifies coordination in one line and names no duties, so a list invented here would be this repo guessing at your comp — and a list of yours that does not fit is a signal about the design rather than a bug in the parser. Say if a duty is about **one team** (a liaison walking Nazaare) rather than about the comp, because that is what lets it hang off the running order later.
+
 **Last season's payment records.** What actually arrived, however it arrived. What matters most is the ugly parts:
 - Payments that came in as one lump covering several things. *(Mayuri's worst: a single $2,160 that was hotel + security deposit + registration, unbundled by hand.)*
 - Payments that arrived as the wrong number. *(A $100 deposit that landed as $97.01, because the card fee came out first.)*
@@ -64,7 +68,7 @@ This one **is** entered into the product: it becomes your comp's configuration, 
 
 ### Be straight about what happens to it
 
-**Your fee schedule now has somewhere to go; your payment history still does not.** As of July 31, 2026 the tables that hold obligations and payments (`fee_schedules`, `charges`, `payments`, `payment_allocations`) are being built, so the fee schedule you send is entered as your comp's configuration and the product computes what each team owes from it.
+**Your fee schedule and your duty list now have somewhere to go; your payment history still does not.** As of July 31, 2026 the tables that hold obligations and payments (`fee_schedules`, `charges`, `payments`, `payment_allocations`) are being built, so the fee schedule you send is entered as your comp's configuration and the product computes what each team owes from it. C1 landed on August 16, 2026, so the duty list is configuration too.
 
 **Last season's records are different, and we are not going to pretend otherwise.** They are not imported. They go in a folder, and they are what the build is checked against — the $2,160 lump and the $97.01 deposit are test cases before they are anything else. There is no bulk import, and building one before seeing three real boards' exports would be guessing at the format.
 

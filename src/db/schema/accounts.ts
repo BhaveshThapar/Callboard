@@ -25,31 +25,38 @@ import { teams } from "./teams";
  */
 
 /**
- * What an account may do at a comp. Deliberately **not** `CompRole`: that enum describes what a
- * person *is* at a comp (including `attendee`, who has no account and never will), while this says
- * what a session is allowed to resolve to. Two questions, two lists — `BILLABLE_STATUSES` and
- * `SCOREABLE_STATUSES`' reason, which equal each other today and answer different things.
+ * What an account may do at a comp — what a session is allowed to resolve to, and nothing wider.
+ *
+ * It used to define itself against `CompRole`, an enum on the `comp_roles` table that described what
+ * a person *was* at a comp (including `attendee`, who has no account and never will). That table was
+ * dropped with C1, so the contrast is gone and the definition has to stand on its own: this list is
+ * the set of authorities, and there is no longer a second list describing participation.
  */
 export const ACCOUNT_ROLES = ["board", "captain", "liaison"] as const;
 export type AccountRole = (typeof ACCOUNT_ROLES)[number];
 
 /**
- * What a board may actually hand out today, which is **not** every role a membership can hold.
+ * What a board may hand out — and since C1 that is every role a membership can hold.
  *
- * `liaison` is a real role with a real actor kind and a real resolver, and it has no reader: nothing
- * in the product answers *what does a liaison see*, because that is C1's question and C1 needs the
- * `assignments` table that does not exist yet. Offering it anyway meant a board could mint a
- * credential whose whole journey ended on a page that refused to load — a link that goes nowhere is
- * the failure ADR-0011 spent a decision refusing, arriving through the door ADR-0016 opened.
+ * It was `["captain", "board"]` from P1 until C1, and the reason was strict: `liaison` had a real
+ * actor kind, a real resolver and **no reader**, because *what does a liaison see* is C1's question
+ * and C1 needed a table that did not exist. Offering it anyway let a board mint a credential whose
+ * whole journey ended on a page that refused to load — the failure ADR-0011 spent a decision
+ * refusing, arriving through the door ADR-0016 opened. The rule written here was *put `liaison` back
+ * in the same commit that gives it a screen, and not before*, and this is that commit:
+ * `resolveLiaisonActor` has its first call site, and `/comp-day` is what an invitation now opens.
  *
- * So the role stays in `ACCOUNT_ROLES`, in the CHECK, and in `LiaisonActor`; what goes away is the
- * ability to issue one. This is the list, and it is the *rule* rather than the markup: the form reads
- * it to build its options and `inviteAction` reads it to refuse a hand-crafted POST, for
- * `validateAnswers`' reason — a `required` attribute is a courtesy to an honest board.
- *
- * Put `liaison` back here in the same commit that gives it a screen, and not before.
+ * The list stays the *rule* rather than the markup — the form reads it to build its options and
+ * `inviteAction` reads it to refuse a hand-crafted POST, for `validateAnswers`' reason. It also
+ * stays a separate constant from `ACCOUNT_ROLES` even now that they are equal, for
+ * `BILLABLE_STATUSES`' reason: they answer *what may be issued* and *what may be held*, and the day
+ * a fourth role is representable before it is issuable, one of them moves and the other must not.
  */
-export const INVITABLE_ROLES = ["captain", "board"] as const satisfies readonly AccountRole[];
+export const INVITABLE_ROLES = [
+  "captain",
+  "board",
+  "liaison",
+] as const satisfies readonly AccountRole[];
 export type InvitableRole = (typeof INVITABLE_ROLES)[number];
 
 /**
@@ -113,8 +120,8 @@ export const users = pgTable(
  *
  * Separate from `users` because authority is per comp and a login is per org: a captain at one comp
  * is nobody at the next one, and the board that ran last season should not silently still be the
- * board. Separate from `comp_roles` because that table describes participation — it carries
- * `attendee`, and it authorizes nothing — while this grants.
+ * board. It is now the **only** table saying who is at a comp in what capacity: `comp_roles` used to
+ * sit beside it describing participation, and was dropped with C1 having never had a reader.
  *
  * `team_id` is set exactly when `role = 'captain'`, and the CHECK says so rather than a comment: a
  * captain with no team could see nothing, and a liaison with a team would imply a claim nothing

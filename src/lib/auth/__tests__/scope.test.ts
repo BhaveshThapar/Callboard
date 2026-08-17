@@ -1,4 +1,5 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { AccountRole } from "@/db/schema";
 import { ACCOUNT_ROLES, INVITABLE_ROLES } from "@/db/schema/accounts";
 import { judgeLabel } from "../labels";
 import type { JudgeLabelView } from "../labels";
@@ -6,6 +7,7 @@ import type { PublicComp, PublicPlacement, PublicTeam } from "@/lib/comp/public"
 import type {
   BoardJudgeView,
   BoardTeamView,
+  DutyView,
   JudgeTeamView,
   LiaisonActor,
   RosterTeamView,
@@ -45,6 +47,29 @@ describe("the projections", () => {
     expectTypeOf<RosterTeamView>().toHaveProperty("balance");
     expectTypeOf<RosterTeamView>().toHaveProperty("charges");
     expectTypeOf<RosterTeamView>().toHaveProperty("name");
+  });
+
+  /**
+   * The fifth window, argued in `scope.ts` beside the fourth's. Its scope is the actor's own
+   * `personId`, so it cannot return somebody else's duty by construction — what these assert is the
+   * other half, that it cannot leak the comp *around* the duty.
+   *
+   * `bidCode` is the one that matters most. A liaison is a member of the public in ADR-0008's sense
+   * and holds a name for the team they are walking; handing them the code beside it would end blind
+   * judging for that comp from inside the product, which is what `publicComp` refuses for a page and
+   * `TeamOwnView` refuses for a captain.
+   */
+  it("gives a liaison their own duties and no way to reach the comp around them", () => {
+    expectTypeOf<DutyView>().toHaveProperty("dutyId");
+    expectTypeOf<DutyView>().toHaveProperty("acknowledgedAt");
+    expectTypeOf<DutyView>().toHaveProperty("teamName");
+
+    expectTypeOf<DutyView>().not.toHaveProperty("bidCode");
+    expectTypeOf<DutyView>().not.toHaveProperty("personName");
+    expectTypeOf<DutyView>().not.toHaveProperty("charges");
+    expectTypeOf<DutyView>().not.toHaveProperty("balance");
+    expectTypeOf<DutyView>().not.toHaveProperty("scores");
+    expectTypeOf<DutyView>().not.toHaveProperty("roster");
   });
 
   /**
@@ -120,20 +145,41 @@ describe("judgeLabel", () => {
 });
 
 /**
- * A credential a board can mint must open something. `ACCOUNT_ROLES` says what a membership may be;
- * `INVITABLE_ROLES` says what may be handed out, and the gap between them is deliberate.
+ * A credential a board can mint must open something.
+ *
+ * This asserted `not.toContain("liaison")` from P1 until C1, with a comment saying *put it back in
+ * the same commit as the screen; this test is what asks whether you did*. C1 is that commit, so the
+ * assertion inverts rather than disappearing — the rule was never *liaison is uninvitable*, it was
+ * **every invitable role opens something**, and that is the form it takes now.
+ *
+ * `ACCOUNT_ROLES` and `INVITABLE_ROLES` are equal again today and stay two constants, for
+ * `BILLABLE_STATUSES`' reason: they answer *what may be held* and *what may be issued*, and the day
+ * a fourth role is representable before it is issuable, one moves and the other must not.
  */
 describe("INVITABLE_ROLES", () => {
-  it("offers no role with nothing behind it", () => {
-    // `liaison` has an actor kind, a resolver and no reader — nothing in the product answers *what
-    // does a liaison see*, because that is C1's question and C1 needs a table that does not exist.
-    // Offering it let a board mint a link whose whole journey ended on a page that refused to load,
-    // which is what ADR-0011 spent a decision refusing. Put it back in the same commit as the
-    // screen; this test is what asks whether you did.
-    expect(INVITABLE_ROLES).not.toContain("liaison");
+  it("offers every role a membership can hold, now that each one opens a screen", () => {
+    for (const role of ACCOUNT_ROLES) expect(INVITABLE_ROLES).toContain(role);
   });
 
   it("offers only roles a membership can actually hold", () => {
     for (const role of INVITABLE_ROLES) expect(ACCOUNT_ROLES).toContain(role);
+  });
+
+  /**
+   * The guard that replaces the old one, and it is the load-bearing half: a role can be invited
+   * exactly when the shell has somewhere to send it. `NAV_FOR` in the comp layout is the same map
+   * one level up, so a role added to `ACCOUNT_ROLES` with no destination fails here rather than
+   * shipping a credential whose journey ends on a `notFound()` — ADR-0011's failure, the shape P1
+   * shipped and was audited for.
+   */
+  it("has a landing place for every role it offers", () => {
+    const DESTINATION: Record<AccountRole, string> = {
+      board: "",
+      captain: "/team",
+      liaison: "/comp-day",
+    };
+    for (const role of INVITABLE_ROLES) {
+      expect(DESTINATION[role]).toBeDefined();
+    }
   });
 });
