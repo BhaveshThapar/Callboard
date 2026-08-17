@@ -14,11 +14,18 @@ const NO_CLASS = {
 
 /**
  * A directory whose output must be a function of its input alone: no database, no clock, no
- * randomness. Two of these exist and both are load-bearing — `src/lib/tabulation/`, so a locked run
- * reproduces a year later from its own frozen row, and `src/lib/fees/schedule.ts`, so what a team
- * owes is a function of the schedule and the roster rather than of the day it was asked.
+ * randomness. Three of these exist and all are load-bearing — `src/lib/tabulation/`, so a locked run
+ * reproduces a year later from its own frozen row; `src/lib/fees/schedule.ts`, so what a team owes is
+ * a function of the schedule and the roster rather than of the day it was asked; and
+ * `src/lib/schedule/`, so a re-derived run of show is a function of the draw and the delays that were
+ * entered rather than of the moment somebody opened the page.
  *
- * This is a helper rather than two hand-written blocks because of a flat-config footgun: a later
+ * The third was reserved in writing before it existed, in `src/lib/coord/duties.ts`, and the test it
+ * had to pass is the reason `src/lib/coord/` is *not* fenced: a zone earns its place by protecting a
+ * claim somebody acts on — a number they are billed or ranked by, a time they are told to be
+ * somewhere — not by being pure. A zone added for symmetry dilutes what the fence means.
+ *
+ * This is a helper rather than three hand-written blocks because of a flat-config footgun: a later
  * `no-restricted-syntax` entry *replaces* an earlier one instead of merging into it, so the shared
  * selectors have to be re-declared inside every zone. Written twice by hand, the second copy is one
  * refactor away from silently losing the enum and class bans. Written once here, it cannot.
@@ -83,6 +90,10 @@ const config = [
   pureZone(
     ["src/lib/fees/**/*.ts"],
     "src/lib/fees/ is pure. What a team owes must be a function of the schedule and the roster; reading the world here makes a bill unexplainable to the treasurer holding it.",
+  ),
+  pureZone(
+    ["src/lib/schedule/**/*.ts"],
+    "src/lib/schedule/ is pure. A run of show must be a function of the draw, the buffers and the delays that were entered; reading the world here makes a timeline a liaison is standing in unreproducible five minutes later.",
   ),
 ];
 

@@ -1,0 +1,385 @@
+{
+  "input": {
+    "showOrder": [
+      {
+        "teamId": "team-c",
+        "position": 3
+      },
+      {
+        "teamId": "team-a",
+        "position": 1
+      },
+      {
+        "teamId": "team-h",
+        "position": 8
+      },
+      {
+        "teamId": "team-b",
+        "position": 2
+      },
+      {
+        "teamId": "team-e",
+        "position": 5
+      },
+      {
+        "teamId": "team-d",
+        "position": 4
+      },
+      {
+        "teamId": "team-g",
+        "position": 7
+      },
+      {
+        "teamId": "team-f",
+        "position": 6
+      }
+    ],
+    "delays": [
+      {
+        "seq": 1,
+        "minutes": 12,
+        "fromPosition": 4,
+        "reason": "stage tech overran"
+      },
+      {
+        "seq": 2,
+        "minutes": 9,
+        "fromPosition": 6,
+        "reason": "ambulance in the loading bay"
+      }
+    ]
+  },
+  "result": {
+    "totalDelayMinutes": 21,
+    "segments": [
+      {
+        "kind": "stretch",
+        "teamId": "team-a",
+        "ref": "stretch",
+        "startsAtMinute": 70,
+        "endsAtMinute": 90,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "stretch",
+        "teamId": "team-b",
+        "ref": "stretch",
+        "startsAtMinute": 82,
+        "endsAtMinute": 102,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "stretch",
+        "teamId": "team-c",
+        "ref": "stretch",
+        "startsAtMinute": 94,
+        "endsAtMinute": 114,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-a",
+        "ref": "lobby",
+        "startsAtMinute": 98,
+        "endsAtMinute": 108,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-b",
+        "ref": "lobby",
+        "startsAtMinute": 110,
+        "endsAtMinute": 120,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-a",
+        "ref": "walk",
+        "startsAtMinute": 114,
+        "endsAtMinute": 120,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "stretch",
+        "teamId": "team-d",
+        "ref": "stretch",
+        "startsAtMinute": 118,
+        "endsAtMinute": 138,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-c",
+        "ref": "lobby",
+        "startsAtMinute": 122,
+        "endsAtMinute": 132,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-a",
+        "ref": "tech_out",
+        "startsAtMinute": 123,
+        "endsAtMinute": 128,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-b",
+        "ref": "walk",
+        "startsAtMinute": 126,
+        "endsAtMinute": 132,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "stretch",
+        "teamId": "team-e",
+        "ref": "stretch",
+        "startsAtMinute": 130,
+        "endsAtMinute": 150,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-b",
+        "ref": "tech_out",
+        "startsAtMinute": 135,
+        "endsAtMinute": 140,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-c",
+        "ref": "walk",
+        "startsAtMinute": 138,
+        "endsAtMinute": 144,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-d",
+        "ref": "lobby",
+        "startsAtMinute": 146,
+        "endsAtMinute": 156,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-c",
+        "ref": "tech_out",
+        "startsAtMinute": 147,
+        "endsAtMinute": 152,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "stretch",
+        "teamId": "team-f",
+        "ref": "stretch",
+        "startsAtMinute": 151,
+        "endsAtMinute": 171,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-e",
+        "ref": "lobby",
+        "startsAtMinute": 158,
+        "endsAtMinute": 168,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-d",
+        "ref": "walk",
+        "startsAtMinute": 162,
+        "endsAtMinute": 168,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "stretch",
+        "teamId": "team-g",
+        "ref": "stretch",
+        "startsAtMinute": 163,
+        "endsAtMinute": 183,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-d",
+        "ref": "tech_out",
+        "startsAtMinute": 171,
+        "endsAtMinute": 176,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-e",
+        "ref": "walk",
+        "startsAtMinute": 174,
+        "endsAtMinute": 180,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "stretch",
+        "teamId": "team-h",
+        "ref": "stretch",
+        "startsAtMinute": 175,
+        "endsAtMinute": 195,
+        "room": "stretch",
+        "derivedFrom": "teamBuffers.stretch"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-f",
+        "ref": "lobby",
+        "startsAtMinute": 179,
+        "endsAtMinute": 189,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-e",
+        "ref": "tech_out",
+        "startsAtMinute": 183,
+        "endsAtMinute": 188,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-g",
+        "ref": "lobby",
+        "startsAtMinute": 191,
+        "endsAtMinute": 201,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-f",
+        "ref": "walk",
+        "startsAtMinute": 195,
+        "endsAtMinute": 201,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "lobby",
+        "teamId": "team-h",
+        "ref": "lobby",
+        "startsAtMinute": 203,
+        "endsAtMinute": 213,
+        "room": "green",
+        "derivedFrom": "teamBuffers.lobby"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-f",
+        "ref": "tech_out",
+        "startsAtMinute": 204,
+        "endsAtMinute": 209,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-g",
+        "ref": "walk",
+        "startsAtMinute": 207,
+        "endsAtMinute": 213,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-g",
+        "ref": "tech_out",
+        "startsAtMinute": 216,
+        "endsAtMinute": 221,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "walk",
+        "teamId": "team-h",
+        "ref": "walk",
+        "startsAtMinute": 219,
+        "endsAtMinute": 225,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.walk"
+      },
+      {
+        "kind": "tech_out",
+        "teamId": "team-h",
+        "ref": "tech_out",
+        "startsAtMinute": 228,
+        "endsAtMinute": 233,
+        "room": "stage",
+        "derivedFrom": "teamBuffers.tech_out"
+      },
+      {
+        "kind": "food",
+        "teamId": null,
+        "ref": "dinner",
+        "startsAtMinute": 300,
+        "endsAtMinute": 360,
+        "room": null,
+        "derivedFrom": "compSegments.dinner"
+      },
+      {
+        "kind": "judge_cutoff",
+        "teamId": null,
+        "ref": "cutoff",
+        "startsAtMinute": 421,
+        "endsAtMinute": 451,
+        "room": null,
+        "derivedFrom": "compSegments.cutoff"
+      }
+    ],
+    "gaps": [],
+    "slack": [
+      {
+        "id": "filler",
+        "label": "Filler act",
+        "budgetedMinutes": 8,
+        "consumedMinutes": 8,
+        "remainingMinutes": 0
+      },
+      {
+        "id": "judge_held",
+        "label": "Judge buffer, held over told",
+        "budgetedMinutes": 10,
+        "consumedMinutes": 10,
+        "remainingMinutes": 0
+      }
+    ],
+    "exhausted": [
+      "filler",
+      "judge_held"
+    ],
+    "unabsorbedMinutes": 3
+  }
+}
