@@ -51,6 +51,9 @@ import {
   releaseAllocation,
   setPaymentReconciled,
 } from "@/lib/money/ledger";
+import { NORMALIZATIONS } from "@/lib/tabulation/types";
+import type { NormalizationMethod } from "@/lib/tabulation/types";
+import { setRubric } from "@/lib/comp/rubric";
 import { addDelay } from "@/lib/comp/schedule";
 import { revokeConnection } from "@/lib/drive/connections";
 import { importTeams, previewImport } from "@/lib/drive/import";
@@ -492,6 +495,60 @@ export const setTeamStatusAction = async (
  * *position* rather than a team, which is PRD §9 G3's "per segment" read honestly: a team that has
  * already danced is not re-timed by the show slipping afterwards.
  */
+/**
+ * P2 — a board authors its own rubric.
+ *
+ * The criteria arrive as **parallel arrays** (`criterionId[]`, `criterionLabel[]`, …) rather than a
+ * JSON blob, so the form degrades without JavaScript and so a malformed row is a parse failure on
+ * one field rather than a silently dropped criterion. `FormData` preserves field order, which is
+ * what makes the arrays line up; a length mismatch is refused rather than zipped short.
+ *
+ * Scope is `actor.compId` and nothing else resolves — the subject is the actor's own comp, which is
+ * `setCompStatus`' shape. The criterion ids on the form are resolved inside `setRubric`, against the
+ * same read that built the form, and an id that read did not produce is refused rather than inserted.
+ */
+export const setRubricAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const ids = formData.getAll("criterionId").map(String);
+  const labels = formData.getAll("criterionLabel").map(String);
+  const maxes = formData.getAll("criterionMax").map(String);
+  const weights = formData.getAll("criterionWeight").map(String);
+
+  if (labels.length !== ids.length || labels.length !== maxes.length || labels.length !== weights.length) {
+    return { status: "error", message: "That form arrived incomplete. Reload and try again." };
+  }
+
+  const normalization = String(formData.get("normalization") ?? "");
+  if (!(NORMALIZATIONS as readonly string[]).includes(normalization)) {
+    return { status: "error", message: "That is not a normalization this product knows." };
+  }
+
+  const result = await setRubric(actor, {
+    name: String(formData.get("rubricName") ?? ""),
+    normalization: normalization as NormalizationMethod,
+    criteria: labels.map((label, i) => ({
+      // An empty string is a criterion being added; a uuid is one being edited.
+      ...(ids[i] ? { id: ids[i] } : {}),
+      label,
+      maxPoints: Number(maxes[i]),
+      weightBp: Number(weights[i]),
+      sortOrder: i,
+    })),
+  });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/results`);
+  return { status: "ok", message: "Rubric saved." };
+};
+
 export const addDelayAction = async (
   _previous: BoardActionState,
   formData: FormData,

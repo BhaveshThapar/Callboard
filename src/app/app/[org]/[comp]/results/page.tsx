@@ -4,8 +4,10 @@ import Link from "next/link";
 import { cardClass, eyebrowClass } from "@/components/styles";
 import { listTeamsForBoard } from "@/lib/auth/scope";
 import { resolveBoardAccessBySlugs } from "@/lib/auth/access";
+import { rubricForBoard } from "@/lib/comp/rubric";
 import { latestLockedRun, reproduce } from "@/lib/comp/tab";
 import { PrintButton } from "./PrintButton";
+import { RubricPanel } from "./RubricPanel";
 import { SendFeedback } from "./SendFeedback";
 
 export const dynamic = "force-dynamic";
@@ -32,9 +34,10 @@ export default async function ResultsPage({ params }: { params: Promise<{ org: s
    * only one could open. The tab is correct to exist: results are a thing this comp will have. What
    * it must not do is imply the board did something wrong by clicking it.
    */
+  const rubric = await rubricForBoard(actor);
   const locked = await latestLockedRun(actor.compId);
   if (!locked) {
-    return (
+    const empty = (
       <div className={cardClass} data-testid="results-not-locked">
         <h2 className="text-card font-semibold text-heading">Nothing is locked yet</h2>
         <p className="mt-2 text-body text-muted">
@@ -48,6 +51,16 @@ export default async function ResultsPage({ params }: { params: Promise<{ org: s
           Back to scoring →
         </Link>
       </div>
+    );
+
+    // Before the lock is exactly when a board authors its rubric, so the builder renders here too
+    // rather than only on a screen that needs a locked result to reach. This branch is what a comp
+    // being set up actually sees.
+    return (
+      <>
+        {empty}
+        {rubric && <RubricPanel scope={scope} rubric={rubric} />}
+      </>
     );
   }
 
@@ -145,6 +158,8 @@ export default async function ResultsPage({ params }: { params: Promise<{ org: s
       {/* The same projection, delivered rather than downloaded. Keyed on the team *and* this run,
           so a correction can be sent and a second click cannot reach anybody twice. */}
       <SendFeedback scope={scope} teams={placements.length} />
+
+      {rubric && <RubricPanel scope={scope} rubric={rubric} />}
 
       <footer className="mt-10 flex items-center justify-between gap-4 text-micro text-subtle">
         <span>
