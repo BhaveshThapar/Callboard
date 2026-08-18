@@ -232,19 +232,27 @@ The residual is ADR-0014's again and gets the same instrument: the database cann
 
 ---
 
-## Designed, not migrated
+## Schedule
 
-### Schedule
+**There is no longer a "designed, not migrated" group, and that is worth a sentence rather than a silent deletion.** It held exactly two tables, both the Gita's, and neither was built: `show_order` because a column already was it, `schedule_segments` because the thing it would store is derivable from what the database already holds. A designed table earns its migration when the code reaches it — and twice in a row, what the code reached for turned out to be different from what the design had guessed. That is the group working, not failing.
 
-The Gita, per PRD §9. Modeled now, built after paying customers exist.
+The Gita, per PRD §9. **Built on August 17, 2026** — and the group is smaller than it was designed to be, because both tables in it were argued out of existence rather than migrated.
 
 **`show_order`** — **not built, and it will not be** ([ADR-0023](decisions/0023-the-draw-is-a-column-not-a-table.md)). It was designed here as `comp_id`, `team_id`, `position`, which is `teams.performance_order` with extra steps: that column has existed since `0000`, both scoring windows already ordered by it, and it had no writer in the product at all. G1 gave it the writer it was missing rather than a second place to disagree about which team dances third. `0018` adds `teams_comp_performance_order_unique`, and it is `DEFERRABLE INITIALLY DEFERRED` — a reorder is a *trade* of two adjacent positions in one `UPDATE`, and a non-deferred unique refuses that halfway through. Probed on `dev` rather than assumed; the partial unique index this started as failed on the first swap.
 
 This is `comp_roles`' lesson a second time, arriving from the other direction. There, a designed table was dropped because it was not the shape the feature needed. Here, a designed table is never created because a column already **was** it. Same rule: a designed table earns its migration when the code reaches it, and what the code reaches for is allowed to differ from what the design guessed.
 
-**`schedule_segments`** — `id`, `comp_id`, `team_id`, `kind`, `starts_at`, `ends_at`, `derived_from`
+**`schedule_segments`** — **not built either, and for a different reason than `show_order`.** A derived schedule is a *function* of three things this database already holds: the draw (`teams.performance_order`), the buffers (`comps.schedule`) and the delay chain below. Storing the result would create a second answer to a question that already has one, and the disagreement between them is exactly the shape `db:doctor` exists to report. `tab_runs` freezes its inputs because a locked placement must survive the tables moving underneath it; a running order is a claim about *right now*, and the honest version of it is the one derived from what is true right now. It is also what makes G5 cheap: a push is the difference between the fold at `seq n-1` and the fold at `seq n`, and neither has to have been stored.
 
-`kind` ∈ `walk | lobby | stretch | props | tech_in | tech_out | food | judge_cutoff | transport`. `derived_from` records which buffer variable produced the timing, so a live delay can re-derive the cascade instead of a human doing it by mouth.
+**`comps.schedule`** — the buffers, as `ScheduleConfig` (`0019`). Authored as data like the rubric, the fee schedule and the duty vocabulary, and for a louder reason: [INTAKE.md](INTAKE.md) Part 3 asked a board for these numbers *before* the engine was written, because "a run-of-show is not five numbers, and a wrong one is not discovered by a treasurer in April. It is discovered on stage." One column rather than four, because the anchor, the zone, the rooms and the buffers are one answer to one question — *how does your show run* — and splitting them would let a comp acquire a timezone with no anchor. **Nothing in it has a default**: a comp that has not written its run of show down has `null` here and the screen says so; one that has written half of it gets stated gaps.
+
+`anchor` is a local wall-clock string and `timezone` is IANA, because `comps.comp_date` is a bare `date` with no time and no zone — a show that starts at 9am and runs past midnight cannot be expressed without both, and a server binding them in UTC would put a noon call time at 8am in production only. Rooms are config keys under the same never-rename rule as a duty id, validated by the same regex, because [INTAKE.md](INTAKE.md) is blunt that "almost every timing in a Gita is really a statement about a room being free."
+
+**`schedule_delays`** — `id`, `comp_id`, `seq`, `minutes`, `from_position`, `reason`, `created_by_person_id`, `created_at` (`0019`)
+
+G3, and the `tab_runs` chain applied to comp day: append-only, ordered by `seq`, state is the fold of the whole chain. `minutes` is **signed**, because a show can catch up and the only other way to record that would be editing history. `from_position` is the running-order position the delay starts biting from — PRD §9 G3's "per segment" read honestly, since a team that has already danced is not re-timed by a later slip. `reason` is `NOT NULL` for `override_reason`'s reason: the row exists so somebody can reconstruct a day, and "20 minutes" with no cause reconstructs nothing.
+
+`schedule_delays_comp_seq_unique` is the guarantee. The insert is a read-then-write of `max(seq) + 1` on a driver with no transactions, so two board members entering a delay in the same second **will** collide — and the index turns that into a retry (`nextBidCode`'s remedy) rather than two rows both claiming to be the fourth thing that happened.
 
 ---
 

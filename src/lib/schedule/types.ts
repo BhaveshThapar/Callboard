@@ -220,3 +220,27 @@ export type ScheduleResult = {
    */
   unabsorbedMinutes: number;
 };
+
+/**
+ * A comp's whole run of show, as a board states it: the buffers plus the two facts that bind them to
+ * a wall clock.
+ *
+ * `BufferConfig` is deliberately not extended in the engine's direction — `derive` takes the buffers
+ * and knows nothing about `anchor` or `timezone`, because the moment a pure derivation touches a
+ * wall clock it acquires a timezone bug nobody sees until March. Binding happens once, outside the
+ * fence, where somebody can look at it.
+ */
+export type ScheduleConfig = BufferConfig & {
+  /**
+   * When minute zero is, as a local wall-clock string (`YYYY-MM-DDTHH:MM`). Not a `Date` and not a
+   * UTC instant: a board says "doors at noon", and noon is a fact about the venue.
+   */
+  anchor: string;
+  /**
+   * The IANA zone the anchor is read in — `America/New_York`, not an offset. `comps.comp_date` is a
+   * bare `date` with no time and no zone, which is why this exists: a show that starts at 9am and
+   * runs past midnight cannot be expressed without one, and a server rendering it in UTC would put a
+   * 9am call time at 2pm.
+   */
+  timezone: string;
+};

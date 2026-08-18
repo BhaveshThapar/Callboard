@@ -1,5 +1,6 @@
 import { check, date, json, pgTable, text, timestamp, unique, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+import type { ScheduleConfig } from "@/lib/schedule/types";
 
 /**
  * One definition: the type, `comps_status_check`, the config parser, and the board's own lifecycle
@@ -122,6 +123,23 @@ export const comps = pgTable(
     registration: json("registration").$type<RegistrationConfig>(),
     /** C1. Null and `[]` are the same fact and the parser collapses them, `registration`'s reason. */
     duties: json("duties").$type<DutyConfig[]>(),
+    /**
+     * The Gita's buffers (G2), authored as data exactly like the rubric, the fee schedule and the
+     * duty vocabulary. `docs/INTAKE.md` promised a board this shape before the engine was written:
+     * *"the buffers become configuration — the same shape your fee schedule and your rubric already
+     * take, so the first real one to arrive is data rather than a migration."*
+     *
+     * **One column rather than four.** The anchor, the timezone, the rooms and the buffers are one
+     * answer to one question — *how does your show run* — and splitting them across columns would
+     * let a comp acquire a timezone with no anchor, or rooms nothing schedules into. `ScheduleConfig`
+     * is defined in `src/lib/schedule/`, which owns the vocabulary; the schema imports it, the
+     * direction `TabulationInput` and `FeeSchedule` already established.
+     *
+     * Null means this comp has not written its run of show down, which is every comp until a board
+     * does — and until it does, the comp-day screen says so rather than deriving a schedule out of
+     * defaults nobody chose.
+     */
+    schedule: json("schedule").$type<ScheduleConfig>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [

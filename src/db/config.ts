@@ -2,6 +2,8 @@ import { COMP_STATUSES, CUSTOM_FIELD_TYPES, DUTY_CATEGORIES } from "@/db/schema/
 import type { CompStatus, CustomField, DutyConfig, RegistrationConfig } from "@/db/schema/orgs";
 import { TEAM_STATUSES } from "@/db/schema/teams";
 import type { TeamStatus } from "@/db/schema/teams";
+import { COMP_SEGMENT_KINDS, TEAM_SEGMENT_KINDS } from "@/lib/schedule/types";
+import type { ScheduleConfig } from "@/lib/schedule/types";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
 
 /**
@@ -72,6 +74,7 @@ export type CompConfig = {
    * is the honest state of every comp until a board writes the list down.
    */
   duties?: DutyConfig[];
+  schedule?: ScheduleConfig;
   /**
    * What the comp charges, in cents — the five numbers [INTAKE.md](../../docs/INTAKE.md) asks a
    * treasurer for, authored as data the same way the rubric is.
@@ -387,6 +390,106 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     return parsed.length === 0 ? undefined : parsed;
   })();
 
+
+  /**
+   * G2's buffers, authored as data for the fee schedule's and the duty vocabulary's reason — and
+   * with a louder warning than either. `docs/INTAKE.md` Part 3 asked a board for these numbers
+   * *before* the engine was written, and said why the ordering mattered: "five numbers is a small
+   * enough guess to be wrong about cheaply. A run-of-show is not five numbers, and a wrong one is not
+   * discovered by a treasurer in April. It is discovered on stage."
+   *
+   * So **nothing here has a default.** A comp that has not written its run of show down has no
+   * `schedule` at all and the screen says so; a comp that has written down half of one gets stated
+   * gaps. The one thing the parser will not do is invent a number, because a buffer nobody chose is
+   * indistinguishable on a screen from one somebody did.
+   */
+  const schedule = ((): CompConfig["schedule"] => {
+    if (root.schedule === undefined || root.schedule === null) return undefined;
+    const raw = record(root.schedule, "schedule");
+
+    const roomIds = new Set<string>();
+    const rooms = array(raw.rooms ?? [], "schedule.rooms").map((room, i) => {
+      const path = `schedule.rooms[${i}]`;
+      const entry = record(room, path);
+      const id = str(entry.id, `${path}.id`);
+      if (!FIELD_ID.test(id)) {
+        fail(`${path}.id`, "a lowercase key like `green_room` — it is the key a segment stores");
+      }
+      if (roomIds.has(id)) fail(`${path}.id`, `an id no other room uses (not "${id}" twice)`);
+      roomIds.add(id);
+      return { id, label: str(entry.label, `${path}.label`) };
+    });
+
+    // A room a segment names must be a room the comp declared. The alternative is a timeline that
+    // sends a liaison to a space this venue does not have, which is a sentence nobody reads twice.
+    const roomOf = (value: unknown, path: string): string | null => {
+      const id = optStr(value, path);
+      if (id === undefined) return null;
+      if (!roomIds.has(id)) fail(path, `one of the rooms this comp declared (not "${id}")`);
+      return id;
+    };
+
+    const kinds = new Set<string>();
+    const teamBuffers = array(raw.teamBuffers ?? [], "schedule.teamBuffers").map((rule, i) => {
+      const path = `schedule.teamBuffers[${i}]`;
+      const entry = record(rule, path);
+      const kind = oneOf(entry.kind, TEAM_SEGMENT_KINDS, `${path}.kind`);
+      if (kinds.has(kind)) fail(`${path}.kind`, `a kind no other buffer uses (not "${kind}" twice)`);
+      kinds.add(kind);
+      return {
+        kind,
+        durationMinutes: optInt(entry.durationMinutes, `${path}.durationMinutes`) ?? null,
+        endsBeforePerformance:
+          optInt(entry.endsBeforePerformance, `${path}.endsBeforePerformance`) ?? null,
+        room: roomOf(entry.room, `${path}.room`),
+      };
+    });
+
+    const fixtureIds = new Set<string>();
+    const compSegments = array(raw.compSegments ?? [], "schedule.compSegments").map((seg, i) => {
+      const path = `schedule.compSegments[${i}]`;
+      const entry = record(seg, path);
+      const id = str(entry.id, `${path}.id`);
+      if (!FIELD_ID.test(id)) fail(`${path}.id`, "a lowercase key like `dinner`");
+      if (fixtureIds.has(id)) fail(`${path}.id`, `an id no other segment uses (not "${id}" twice)`);
+      fixtureIds.add(id);
+      return {
+        kind: oneOf(entry.kind, COMP_SEGMENT_KINDS, `${path}.kind`),
+        id,
+        label: str(entry.label, `${path}.label`),
+        startsAtMinute: int(entry.startsAtMinute, `${path}.startsAtMinute`),
+        durationMinutes: optInt(entry.durationMinutes, `${path}.durationMinutes`) ?? null,
+        room: roomOf(entry.room, `${path}.room`),
+        // Stated rather than defaulted, because both answers are wrong for the other case: food
+        // ordered for a clock time does not move when the show slips, and a judges' cutoff does.
+        movesWithShow: entry.movesWithShow === true,
+      };
+    });
+
+    const slackIds = new Set<string>();
+    const slack = array(raw.slack ?? [], "schedule.slack").map((pool, i) => {
+      const path = `schedule.slack[${i}]`;
+      const entry = record(pool, path);
+      const id = str(entry.id, `${path}.id`);
+      if (!FIELD_ID.test(id)) fail(`${path}.id`, "a lowercase key like `filler_act`");
+      if (slackIds.has(id)) fail(`${path}.id`, `an id no other pool uses (not "${id}" twice)`);
+      slackIds.add(id);
+      return { id, label: str(entry.label, `${path}.label`), minutes: int(entry.minutes, `${path}.minutes`) };
+    });
+
+    return {
+      anchor: str(raw.anchor, "schedule.anchor"),
+      timezone: str(raw.timezone, "schedule.timezone"),
+      firstSlotAtMinute: int(raw.firstSlotAtMinute, "schedule.firstSlotAtMinute"),
+      slotMinutes: optInt(raw.slotMinutes, "schedule.slotMinutes") ?? null,
+      changeoverMinutes: optInt(raw.changeoverMinutes, "schedule.changeoverMinutes") ?? 0,
+      rooms,
+      teamBuffers,
+      compSegments,
+      slack,
+    };
+  })();
+
   const feeSchedule = ((): FeeScheduleConfig | undefined => {
     if (root.feeSchedule === undefined || root.feeSchedule === null) return undefined;
     const f = record(root.feeSchedule, "feeSchedule");
@@ -444,6 +547,7 @@ export const parseCompConfig = (raw: unknown): CompConfig => {
     board,
     registration,
     duties,
+    schedule,
     feeSchedule,
   };
 };

@@ -51,6 +51,7 @@ import {
   releaseAllocation,
   setPaymentReconciled,
 } from "@/lib/money/ledger";
+import { addDelay } from "@/lib/comp/schedule";
 import { revokeConnection } from "@/lib/drive/connections";
 import { importTeams, previewImport } from "@/lib/drive/import";
 import { parseMaterials } from "@/lib/roster/materials";
@@ -483,6 +484,38 @@ export const setTeamStatusAction = async (
  * adds a window. The order arrives as one newline-free string per row rather than a JSON blob,
  * because the form has to keep working without JavaScript — B2's rule, applied to a board screen.
  */
+/**
+ * G3 — "we are running N minutes behind", the cell that does not exist in the spreadsheet today.
+ *
+ * Scope is `actor.compId` and nothing else resolves, because the subject is the comp rather than a
+ * row in it — `setCompStatus`'s and `regenerateCharges`' shape. The delay names a running-order
+ * *position* rather than a team, which is PRD §9 G3's "per segment" read honestly: a team that has
+ * already danced is not re-timed by the show slipping afterwards.
+ */
+export const addDelayAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const result = await addDelay(actor, {
+    minutes: Number(formData.get("minutes") ?? Number.NaN),
+    fromPosition: Number(formData.get("fromPosition") ?? Number.NaN),
+    reason: String(formData.get("reason") ?? ""),
+  });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/comp-day`);
+  return {
+    status: "ok",
+    message: "The running order has been re-timed. Everybody's page shows the new times.",
+  };
+};
+
 export const setShowOrderAction = async (
   _previous: BoardActionState,
   formData: FormData,
