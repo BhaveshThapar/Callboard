@@ -340,8 +340,9 @@ const scheduleProblems = (observed: Observed): string[] =>
   observed.scheduleGuaranteeEnforced
     ? []
     : [
-        "two teams can hold the same slot in the running order: " +
-          "teams_comp_performance_order_unique is missing. " +
+        "the running order is not guaranteed: teams_comp_performance_order_unique or " +
+          "schedule_delays_comp_seq_unique is missing, so two teams can hold the same slot or two " +
+          "board members can both claim to have entered the fourth delay. " +
           "Apply the migrations with 'bun run db:migrate'.",
       ];
 

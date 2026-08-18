@@ -263,6 +263,7 @@ export const seedFromConfig = async (config: CompConfig): Promise<SeededComp> =>
       status: config.comp.status,
       registration: config.registration ?? null,
       duties: config.duties ?? null,
+      schedule: config.schedule ?? null,
     })
     .returning();
   if (!comp) throw new Error("failed to seed comp");

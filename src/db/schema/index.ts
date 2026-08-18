@@ -7,4 +7,5 @@ export * from "./accounts";
 export * from "./comms";
 export * from "./drive";
 export * from "./coord";
+export * from "./schedule";
 export * from "./audit";

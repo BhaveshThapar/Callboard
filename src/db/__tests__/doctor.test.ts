@@ -470,7 +470,7 @@ describe("summarizeHealth — the running-order guarantee", () => {
     const health = summarizeHealth({ ...healthy, scheduleGuaranteeEnforced: false }, expected);
     expect(health.ok).toBe(false);
     if (!health.ok) {
-      expect(health.problems.join(" ")).toMatch(/same slot in the running order/);
+      expect(health.problems.join(" ")).toMatch(/running order is not guaranteed/);
       expect(health.problems.join(" ")).toMatch(/db:migrate/);
       // Reseeding does not create a constraint. Offering it is the demo lying about its own repair.
       expect(health.problems.join(" ")).not.toMatch(/db:seed/);
@@ -480,7 +480,7 @@ describe("summarizeHealth — the running-order guarantee", () => {
   it("reports it even when the comp is not seeded, because seeding does not add it", () => {
     const health = summarizeHealth({ ...unseeded, scheduleGuaranteeEnforced: false }, expected);
     expect(health.ok).toBe(false);
-    if (!health.ok) expect(health.problems.join(" ")).toMatch(/same slot in the running order/);
+    if (!health.ok) expect(health.problems.join(" ")).toMatch(/running order is not guaranteed/);
   });
 
   it("says nothing when the constraint is there", () => {

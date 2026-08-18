@@ -148,5 +148,82 @@
     "depositCents": 10000,
     "lateFeeCents": 2500,
     "lateAfter": "2027-02-01"
+  },
+  "schedule": {
+    "anchor": "2027-02-20T12:00",
+    "timezone": "America/New_York",
+    "firstSlotAtMinute": 120,
+    "slotMinutes": 8,
+    "changeoverMinutes": 4,
+    "rooms": [
+      {
+        "id": "stage",
+        "label": "Main stage"
+      },
+      {
+        "id": "green_room",
+        "label": "Green room"
+      },
+      {
+        "id": "stretch_space",
+        "label": "Stretch space"
+      }
+    ],
+    "teamBuffers": [
+      {
+        "kind": "stretch",
+        "durationMinutes": 20,
+        "endsBeforePerformance": 30,
+        "room": "stretch_space"
+      },
+      {
+        "kind": "lobby",
+        "durationMinutes": 10,
+        "endsBeforePerformance": 12,
+        "room": "green_room"
+      },
+      {
+        "kind": "walk",
+        "durationMinutes": 6,
+        "endsBeforePerformance": 0,
+        "room": "stage"
+      },
+      {
+        "kind": "tech_out",
+        "durationMinutes": 5,
+        "endsBeforePerformance": -8,
+        "room": "stage"
+      }
+    ],
+    "compSegments": [
+      {
+        "kind": "food",
+        "id": "dinner",
+        "label": "Dinner",
+        "startsAtMinute": 300,
+        "durationMinutes": 60,
+        "movesWithShow": false
+      },
+      {
+        "kind": "judge_cutoff",
+        "id": "cutoff",
+        "label": "Judges' cutoff",
+        "startsAtMinute": 420,
+        "durationMinutes": 30,
+        "movesWithShow": true
+      }
+    ],
+    "slack": [
+      {
+        "id": "filler_act",
+        "label": "Filler act",
+        "minutes": 8
+      },
+      {
+        "id": "judge_held",
+        "label": "Judge buffer, held over told",
+        "minutes": 10
+      }
+    ]
   }
 }

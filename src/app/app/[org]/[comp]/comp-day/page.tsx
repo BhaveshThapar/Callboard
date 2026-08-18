@@ -9,7 +9,9 @@ import { listDutiesForLiaison } from "@/lib/auth/scope";
 import { dutiesForComp, listAssignmentsForBoard } from "@/lib/coord/assignments";
 import { listInvitationsForBoard } from "@/lib/auth/accounts";
 import { listRosterForBoard } from "@/lib/auth/scope";
+import { clockAt, scheduleForBoard, scheduleIsLive } from "@/lib/comp/schedule";
 import { DutyPanel } from "./DutyPanel";
+import { SchedulePanel } from "./SchedulePanel";
 import { ShowOrderPanel } from "./ShowOrderPanel";
 import { MyDuties } from "./MyDuties";
 
@@ -45,12 +47,17 @@ export default async function CompDayPage({
 
   const board = await resolveBoardAccess(compId);
   if (board) {
-    const [duties, assigned, people, roster] = await Promise.all([
+    const [duties, assigned, people, roster, schedule, live] = await Promise.all([
       dutiesForComp(compId),
       listAssignmentsForBoard(board),
       listInvitationsForBoard(board),
       listRosterForBoard(board),
+      scheduleForBoard(board),
+      scheduleIsLive(compId),
     ]);
+
+    const clock = (minute: number): string =>
+      schedule.config ? clockAt(schedule.config, minute) : String(minute);
 
     return (
       <div className="max-w-5xl">
@@ -104,6 +111,40 @@ export default async function CompDayPage({
               bidCode: t.bidCode,
               position: t.performanceOrder,
             }))}
+        />
+
+        <SchedulePanel
+          compId={compId}
+          basePath={base}
+          configured={schedule.config !== null}
+          live={live}
+          timeline={(schedule.result?.segments ?? []).map((segment) => ({
+            kind: segment.kind,
+            ref: segment.ref,
+            teamName: segment.teamId ? (schedule.names[segment.teamId] ?? null) : null,
+            room:
+              schedule.config?.rooms.find((room) => room.id === segment.room)?.label ?? segment.room,
+            startsAt: clock(segment.startsAtMinute),
+            endsAt: clock(segment.endsAtMinute),
+          }))}
+          slack={(schedule.result?.slack ?? []).map((pool) => ({
+            ...pool,
+            exhausted: (schedule.result?.exhausted ?? []).includes(pool.id),
+          }))}
+          gaps={(schedule.result?.gaps ?? []).map((gap) => ({
+            kind: gap.kind,
+            teamName: gap.teamId ? (schedule.names[gap.teamId] ?? null) : null,
+            missing: gap.missing,
+          }))}
+          delays={schedule.delays.map(({ seq, minutes, fromPosition, reason }) => ({
+            seq,
+            minutes,
+            fromPosition,
+            reason,
+          }))}
+          totalDelayMinutes={schedule.result?.totalDelayMinutes ?? 0}
+          unabsorbedMinutes={schedule.result?.unabsorbedMinutes ?? 0}
+          maxPosition={roster.reduce((max, team) => Math.max(max, team.performanceOrder ?? 0), 0)}
         />
       </div>
     );
