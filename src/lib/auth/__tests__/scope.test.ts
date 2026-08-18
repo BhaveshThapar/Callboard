@@ -63,6 +63,9 @@ describe("the projections", () => {
     expectTypeOf<DutyView>().toHaveProperty("dutyId");
     expectTypeOf<DutyView>().toHaveProperty("acknowledgedAt");
     expectTypeOf<DutyView>().toHaveProperty("teamName");
+    // G4 widened this window rather than adding a sixth: the id is what joins a duty to the derived
+    // run of show, which is the *when* half of the question this window exists to answer.
+    expectTypeOf<DutyView>().toHaveProperty("teamId");
 
     expectTypeOf<DutyView>().not.toHaveProperty("bidCode");
     expectTypeOf<DutyView>().not.toHaveProperty("personName");
