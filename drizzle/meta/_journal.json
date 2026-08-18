@@ -141,6 +141,13 @@
       "when": 1786987674486,
       "tag": "0019_happy_doctor_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786987674487,
+      "tag": "0020_rls_comp_scope",
+      "breakpoints": true
     }
   ]
 }

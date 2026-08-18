@@ -1,6 +1,6 @@
 # ADR-0006 — Tenancy by app-layer scoping now; Postgres RLS later
 
-**Status:** accepted · July 9, 2026 · **amended August 15, 2026 — two of the three triggers have fired**
+**Status:** accepted · July 9, 2026 · **amended August 15, 2026 — two of the three triggers have fired** · **amended August 18, 2026 — the mechanism is built and proven; it is not yet enabled**
 
 ## Context
 
@@ -68,3 +68,61 @@ Both paragraphs replace draft sentences rather than being appended under a secon
 The verification that matters is a **denial** test: connect as the app role, set the *wrong* `comp_id`, assert zero rows. A policy that permits is invisible, and a passing RLS suite that never proves a refusal is this ADR's failure mode wearing a green check.
 
 **And one trap the probe covered, because a spike run by hand would have missed it.** `SET LOCAL app.comp_id = $1` is not valid SQL — Postgres refuses it with `syntax error at or near "$1"`, so `select set_config('app.comp_id', $1, true)` is the only parameterizable form. Somebody testing this in a console with a literal comp id gets a green result and writes the wrong mechanism down, which is approximately how this ADR acquired the sentence it spent two paragraphs correcting. The probe asserts the refusal *and its message*, so a compile error cannot satisfy it — an earlier draft passed by catching one, which is a green test asserting nothing, this repo's own recurring defect appearing inside the file written to close an instance of it.
+
+## Amendment — August 18, 2026: four things measured, and one not finished
+
+P3's mechanism now exists as code and is proven against the real schema. **It is not wired into any
+read**, and this section says so in the same breath, because a policy layer that half-works is this
+ADR's own stated failure mode — *"confidence without protection"*.
+
+**1. The role must be created with raw SQL, and this is the finding that would have sunk it.**
+`neondb_owner` has `rolbypassrls = true`. So does `neon_superuser`, **which every role created
+through Neon's console or API inherits**. A `callboard_app` made the obvious way carries every policy
+correctly and denies nothing — the purest form of this repo's recurring defect, and one that passes
+every test written against it, because the tests would be asserting that the right rows come back.
+`bun run db:rls-role` creates it with an explicit `NOBYPASSRLS` and then **verifies the flag**, rather
+than trusting that it asked.
+
+**2. The plumbing is a wrapper, not a rewrite.** This ADR deferred RLS partly on *"a session-variable
+plumbing layer through a serverless driver"*. Drizzle's neon-http driver resolves its client as
+`client.query ?? client`, so a `.query(sql, params, opts)` shim that wraps every statement in
+`transaction([set_config, statement])` — **one HTTP round trip** — scopes everything drizzle issues
+through it. `src/db/scoped.ts` is about fifteen lines. The cost this ADR was weighing was real and
+the estimate of it was wrong.
+
+**3. It cannot come from the connection string.** `?options=-c app.comp_id=…` reads back `null`;
+neon-http does not forward startup parameters. The batch is the only mechanism, which is what makes
+#33's probe load-bearing rather than incidental.
+
+**4. It denies, and it fails closed.** Against the real schema on `dev`: the owner sees 81 teams; the
+app role scoped to one comp sees 2, to another 5, and to a comp id that does not exist **0**. With no
+`app.comp_id` set at all it also returns **0**, because the policies compare against
+`nullif(current_setting('app.comp_id', true), '')::uuid` and a comparison with NULL is never true. A
+request that forgets the prefix therefore sees nothing rather than everything, which is the only
+direction this is permitted to fail in.
+
+`0020` enables row-level security and adds those policies on **22 of 27 tables** — every table with
+`comp_id`, `comps` on its own id, and `rubric_criteria`, `payment_allocations` and `message_events`
+through the one join each that this ADR's previous amendment named. The other five — `orgs`,
+`people`, `users`, `sessions`, `drive_connections` — are org- or user-scoped and outlive any comp; a
+comp-keyed policy on them would deny every legitimate read. **That is a second axis, and it is stated
+rather than left as an apparent oversight in a list that covers 22 of 27.**
+
+### What is not done, and where the next person should start
+
+`src/lib/auth/scope.ts` is **not** wired through `dbForComp`. It was, and the wiring was reverted.
+
+The rewrite itself was mechanically correct — fourteen substitutions, each inside an actor-taking
+projection, verified by mapping every call back to its enclosing function. `.select()` through the
+scoped handle works; `listJudgeLabelsForBoard` through it returns its three labels; the denial probe
+passes. But `bun run db:seed` fails its own verification under the app role, reproducibly, with
+*"board view failed to load"*, *"judge view failed to load"* and *"only 0 of 3 judges have a Judge N
+label"* — and `checkDemoHealth` catches the underlying error, so what it reports is the symptom.
+
+**The first act of finishing P3 is to stop `checkDemoHealth` swallowing that error**, which is worth
+doing on its own terms: a preflight whose whole job is to say what is wrong currently converts three
+different failures into the same sentence.
+
+Until the wiring lands, `DATABASE_URL_APP` is unset everywhere, the app connects as the owner, and
+tenancy rests exactly where it has always rested — on `scope.ts` and the `where` clause in every
+read. RLS here is defence in depth and it is not yet defending.
