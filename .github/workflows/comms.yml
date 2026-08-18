@@ -26,38 +26,43 @@ concurrency:
 jobs:
   sweep:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Send what is due
         env:
-          # A repository *variable*, not a secret: a public URL is not a credential, and a variable's
-          # absence is diagnosable in the settings UI instead of being guessed at. The argument that
-          # actually decides it is the third one, though -- GitHub masks secret values in logs, so
-          # every failure below would print `***` instead of the host it asked, and a verdict
-          # without its subject is what made the preflight useless for nineteen days. `CRON_SECRET`
-          # stays a secret; that one is a credential.
           BASE_URL: ${{ vars.PRODUCTION_URL }}
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
         run: |
-          # Fails rather than exits 0, and that changed on Aug 15, 2026 after this workflow ran
-          # every five minutes for twelve days, reported success every time, and never made a
-          # request: both secrets were unset the whole while. A scheduler that reports success
-          # while doing nothing is the same defect this repo keeps recording one layer out --
-          # a green signal whose subject is missing. If the sweep is not wanted, disable the
-          # workflow; do not let it pass by doing nothing.
+          # **An absence is a caveat; a contradiction is a hazard** -- #31's rule, applied to the
+          # scheduler that runs more often than anything else in this repo.
+          #
+          # This errored when its secrets were unset, on the argument that a scheduler reporting
+          # success while making no request is a lie. That argument is right about *silence* and
+          # wrong about *severity*: comms is deliberately unconfigured on production, so the
+          # condition is permanent, and a job that fires every five minutes turned it into 42 red
+          # runs out of the last 100. A signal that is always on carries no information -- the next
+          # real failure here arrives into a feed nobody reads, which is the defect this repo keeps
+          # recording, wearing a different colour.
+          #
+          # So an unset secret is a **notice** and exit 0: the state is already reported, by name,
+          # on the two instruments whose subject is the deployment -- `/api/health` and
+          # `db:doctor --host`. Being *configured* and failing to sweep is the contradiction, and
+          # that still fails loudly below.
           if [ -z "$BASE_URL" ] || [ -z "$CRON_SECRET" ]; then
-            echo "::error::PRODUCTION_URL or CRON_SECRET is unset — the outbox is not being swept."
-            exit 1
+            echo "::notice::comms is not configured (PRODUCTION_URL or CRON_SECRET unset) — nothing was swept. db:doctor --host reports this too."
+            exit 0
           fi
           code=$(curl -sS -o /tmp/sweep.json -w "%{http_code}" \
             -H "authorization: Bearer $CRON_SECRET" \
             "$BASE_URL/api/cron/send")
           cat /tmp/sweep.json
           echo
-          # 503 is "comms is not configured yet", which is a state to report rather than fail on.
+          # 503 is the host saying *I have no sending credential*, which is the same caveat one
+          # layer in: the secrets are set here and not there. Reported, not failed.
           if [ "$code" = "503" ]; then
-            echo "::notice::comms is not configured on the deployment yet"
+            echo "::notice::$BASE_URL has no sending credential yet, so nothing was swept."
             exit 0
           fi
-          # Names the host, which is the point of `PRODUCTION_URL` being a variable: as a secret this
-          # line printed `***/api/cron/send` and left you guessing which deployment answered.
-          [ "$code" = "200" ] || { echo "::error::sweep returned $code from $BASE_URL/api/cron/send"; exit 1; }
+          # Anything else is a configured scheduler that could not sweep a configured host. That is
+          # the contradiction, and it is worth waking somebody for.
+          [ "$code" = "200" ] || { echo "::error::sweep of $BASE_URL returned $code"; exit 1; }

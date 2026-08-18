@@ -38,6 +38,7 @@ concurrency:
 jobs:
   applied:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       # A repository *variable*, not a secret: a public URL is not a credential, and a variable's
       # absence is diagnosable in the settings UI instead of being guessed at.

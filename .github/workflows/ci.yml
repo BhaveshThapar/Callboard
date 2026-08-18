@@ -13,6 +13,10 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # A cap, because there was none and it cost two hours. A hung step does not fail -- it runs to
+    # the platform default of six hours, burning minutes the whole way, and reports nothing anybody
+    # can act on. Every job here now says how long it is allowed to be worth waiting for.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -49,6 +53,13 @@ jobs:
   # this job. `e2e/guard.ts` refuses that database besides.
   acceptance:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # **Not on a merge to `main`.** A PR's head is what gets squashed, so the push to `main` tests a
+    # tree that was green minutes earlier -- and this job is the expensive one, holding the single CI
+    # database for a quarter of an hour. Running it twice per change doubled the cost of every merge
+    # and bought nothing: if a squash could change behaviour, `check` still runs here and would say
+    # so. Drift against production is a different question and `migrations.yml` is what asks it.
+    if: github.event_name != 'push'
     # One CI database, so one run at a time. Queue rather than cancel: a half-migrated
     # database is worse than a slow pipeline.
     concurrency:
@@ -74,6 +85,23 @@ jobs:
           echo "::error::CI_DATABASE_URL is not set, so the PRD §8.3 acceptance test cannot run. A green check here would be a lie."
           exit 1
 
-      - run: bunx playwright install --with-deps chromium
+      # Chromium is ~130MB and the apt half of `--with-deps` reaches a mirror. Uncached, this step
+      # downloaded both on every run, and once **hung for two hours** without failing -- the single
+      # longest thing this repo has ever spent runner minutes on. Cached, a hit is seconds; the key
+      # is the lockfile, because that is what pins the Playwright version the browser must match.
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock', 'bun.lockb', 'package-lock.json') }}
+
+      - if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: bunx playwright install --with-deps chromium
+      # The browser binary caches; the system libraries it links against do not, so they are
+      # installed on a hit too. Cheap, and skipping it is how a cached run dies on a missing .so.
+      - if: steps.playwright-cache.outputs.cache-hit == 'true'
+        run: bunx playwright install-deps chromium
+
       - run: bun run db:migrate
       - run: bun run e2e
