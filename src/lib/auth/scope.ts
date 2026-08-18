@@ -563,6 +563,19 @@ export type DutyView = {
   id: string;
   dutyId: string;
   category: DutyCategory;
+  /**
+   * G4 widened this window; it did not add a sixth.
+   *
+   * A liaison already reads `teamName`, so the team is not new information — what the id adds is the
+   * ability to *join* this duty to the derived run of show and answer **when** as well as **what**,
+   * which is the question this window was argued into existence to answer. A3's move on
+   * `listRosterForBoard`, one window over: the columns change, the `where` does not.
+   *
+   * Still no `bid_code`, asserted at the type level in `scope.test.ts`. A liaison holds the name of
+   * the team they are walking; the code beside it would end blind judging from inside the product
+   * exactly as a captain's would.
+   */
+  teamId: string | null;
   teamName: string | null;
   startsAt: Date | null;
   endsAt: Date | null;
@@ -599,6 +612,7 @@ export const listDutiesForLiaison = async (actor: LiaisonActor): Promise<DutyVie
       id: assignments.id,
       dutyId: assignments.dutyId,
       category: assignments.category,
+      teamId: assignments.teamId,
       teamName: teams.name,
       startsAt: assignments.startsAt,
       endsAt: assignments.endsAt,

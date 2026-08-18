@@ -6,7 +6,9 @@ import { readSessionCookie } from "@/lib/auth/cookies";
 import { ownTeamForCaptain } from "@/lib/auth/scope";
 import { latestLockedRun } from "@/lib/comp/tab";
 import { describeBalance, formatCents } from "@/lib/money/format";
+import { MyTimeline } from "../comp-day/MyTimeline";
 import { MaterialsForm } from "./MaterialsForm";
+import { clockAt, timelineForCaptain } from "@/lib/comp/schedule";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +50,7 @@ export default async function MyTeamPage({
   }
 
   const team = await ownTeamForCaptain(actor);
+  const timeline = await timelineForCaptain(actor);
   if (!team) notFound();
 
   // Only to disable the dancer field and say why. `submitMaterials` refuses the request itself --
@@ -131,6 +134,19 @@ export default async function MyTeamPage({
           rosterSizeRequested: team.rosterSizeRequested,
           materialsSubmittedAt: team.materialsSubmittedAt,
         }}
+      />
+
+      <MyTimeline
+        configured={timeline.config !== null}
+        totalDelayMinutes={timeline.totalDelayMinutes}
+        empty="Your team is not in the running order yet. When the board records the draw, your walk and stretch times appear here."
+        entries={timeline.segments.map((segment) => ({
+          kind: segment.kind,
+          teamName: segment.teamName,
+          roomLabel: segment.roomLabel,
+          startsAt: timeline.config ? clockAt(timeline.config, segment.startsAtMinute) : "",
+          endsAt: timeline.config ? clockAt(timeline.config, segment.endsAtMinute) : "",
+        }))}
       />
 
       <p className="mt-6 text-caption text-subtle">

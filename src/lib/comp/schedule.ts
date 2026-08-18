@@ -12,13 +12,14 @@ import { db } from "@/db";
 import { violatedConstraint } from "@/db/errors";
 import type { ScheduleConfig } from "@/lib/schedule";
 import { derive, showOrderFrom } from "@/lib/schedule";
-import type { Delay, DrawCandidate, ScheduleResult } from "@/lib/schedule";
+import type { Delay, DrawCandidate, ScheduleResult, Segment } from "@/lib/schedule";
 import { clockAt as clockAtRaw } from "./clock";
 import { recordAudit } from "@/lib/audit/log";
-import type { BoardActor } from "@/lib/auth/scope";
-import { listRosterForBoard } from "@/lib/auth/scope";
+import type { BoardActor, LiaisonActor, TeamActor } from "@/lib/auth/scope";
+import { listDutiesForLiaison, listRosterForBoard, ownTeamForCaptain } from "@/lib/auth/scope";
 import {
   comps,
+  teams,
   PERFORMING_STATUSES,
   SCHEDULE_DELAY_SEQ_UNIQUE,
   scheduleDelays,
@@ -183,3 +184,112 @@ export const scheduleIsLive = async (compId: string): Promise<boolean> => {
   const [row] = await db.select({ status: comps.status }).from(comps).where(eq(comps.id, compId));
   return row?.status === "live";
 };
+
+/**
+ * One person's timeline — G4, and the ~30-column hand-compiled SATURDAY sheet it replaces.
+ *
+ * **Not a sixth window, and this is the argument.** Scope comes from `listDutiesForLiaison`, the
+ * fifth window, which is already keyed on `actor.personId` off a `memberships` row — so there is no
+ * read here that could return somebody else's duty, and no id arrives from a form. What this adds is
+ * *times*, which is the half of "what am I supposed to be doing, and when" the fifth window was
+ * argued into existence for and could not previously answer.
+ *
+ * The projection **is** the scope, `publicComp`'s rule: a liaison gets the segments of the teams they
+ * are walking plus the comp-wide fixtures everybody shares, and no other team's row appears at all.
+ * The derivation reads the whole draw internally because it has to — position 6's time depends on
+ * positions 1 through 5 — and then returns none of it.
+ */
+export type PersonTimeline = {
+  config: ScheduleConfig | null;
+  /** Their own segments, in time order. Comp-wide fixtures are included; other teams are not. */
+  segments: (Segment & { teamName: string | null; roomLabel: string | null })[];
+  totalDelayMinutes: number;
+};
+
+const timelineFrom = (
+  schedule: CompSchedule,
+  teamIds: ReadonlySet<string>,
+): PersonTimeline => ({
+  config: schedule.config,
+  totalDelayMinutes: schedule.result?.totalDelayMinutes ?? 0,
+  segments: (schedule.result?.segments ?? [])
+    .filter((segment) => segment.teamId === null || teamIds.has(segment.teamId))
+    .map((segment) => ({
+      ...segment,
+      teamName: segment.teamId ? (schedule.names[segment.teamId] ?? null) : null,
+      roomLabel:
+        schedule.config?.rooms.find((room) => room.id === segment.room)?.label ?? segment.room,
+    })),
+});
+
+/**
+ * The comp's schedule, without an `Actor` — an internal helper, deliberately not exported.
+ *
+ * `scheduleForBoard` reads the roster through `listRosterForBoard` because a board is entitled to
+ * every row of it. The per-person reads below cannot do that, so this one reads `teams` directly and
+ * every caller filters it before returning. A function in this file taking no `Actor` is exactly the
+ * shape somebody should flag on review, which is why it is said here and why nothing exports it.
+ */
+const compSchedule = async (compId: string): Promise<CompSchedule> => {
+  const [row] = await db.select({ schedule: comps.schedule }).from(comps).where(eq(comps.id, compId));
+  const roster = await db
+    .select({
+      id: teams.id,
+      name: teams.name,
+      bidCode: teams.bidCode,
+      status: teams.status,
+      performanceOrder: teams.performanceOrder,
+    })
+    .from(teams)
+    .where(eq(teams.compId, compId));
+
+  const names = Object.fromEntries(roster.map((team) => [team.id, team.name]));
+  const delays = await listDelays(compId);
+  const config = row?.schedule ?? null;
+  if (!config) return { config: null, result: null, delays, names };
+
+  const candidates: DrawCandidate[] = roster
+    .filter((team) => (PERFORMING_STATUSES as readonly TeamStatus[]).includes(team.status))
+    .map((team) => ({ teamId: team.id, position: team.performanceOrder, bidCode: team.bidCode }));
+
+  return {
+    config,
+    result: derive(
+      {
+        showOrder: showOrderFrom(candidates),
+        delays: delays.map(({ seq, minutes, fromPosition, reason }) => ({
+          seq,
+          minutes,
+          fromPosition,
+          reason,
+        })),
+      },
+      config,
+    ),
+    delays,
+    names,
+  };
+};
+
+/** What a liaison is doing, and when. Their duties' teams, plus what everybody shares. */
+export const timelineForLiaison = async (actor: LiaisonActor): Promise<PersonTimeline> => {
+  const duties = await listDutiesForLiaison(actor);
+  const teamIds = new Set(duties.flatMap((duty) => (duty.teamId ? [duty.teamId] : [])));
+  return timelineFrom(await compSchedule(actor.compId), teamIds);
+};
+
+/** What a captain's own team is doing, and when. Their team only — `ownTeamForCaptain`'s guarantee. */
+export const timelineForCaptain = async (actor: TeamActor): Promise<PersonTimeline> => {
+  const team = await ownTeamForCaptain(actor);
+  return timelineFrom(await compSchedule(actor.compId), new Set(team ? [team.id] : []));
+};
+
+/**
+ * ADJ·4 — food timing, surfaced on its own.
+ *
+ * PRD §7.2 specifies it in one line: *"the hospitality slice that already lives inside the Gita."*
+ * So it is a filter rather than a feature, and it is the reader `DUTY_CATEGORIES.hospitality` was
+ * created for and nothing had read until now.
+ */
+export const foodSegments = (schedule: CompSchedule): Segment[] =>
+  (schedule.result?.segments ?? []).filter((segment) => segment.kind === "food");

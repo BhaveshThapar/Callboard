@@ -9,11 +9,12 @@ import { listDutiesForLiaison } from "@/lib/auth/scope";
 import { dutiesForComp, listAssignmentsForBoard } from "@/lib/coord/assignments";
 import { listInvitationsForBoard } from "@/lib/auth/accounts";
 import { listRosterForBoard } from "@/lib/auth/scope";
-import { clockAt, scheduleForBoard, scheduleIsLive } from "@/lib/comp/schedule";
+import { clockAt, scheduleForBoard, scheduleIsLive, timelineForLiaison } from "@/lib/comp/schedule";
 import { DutyPanel } from "./DutyPanel";
 import { SchedulePanel } from "./SchedulePanel";
 import { ShowOrderPanel } from "./ShowOrderPanel";
 import { MyDuties } from "./MyDuties";
+import { MyTimeline } from "./MyTimeline";
 
 export const dynamic = "force-dynamic";
 
@@ -163,9 +164,10 @@ export default async function CompDayPage({
     notFound();
   }
 
-  const [mine, duties] = await Promise.all([
+  const [mine, duties, timeline] = await Promise.all([
     listDutiesForLiaison(liaison),
     dutiesForComp(compId),
+    timelineForLiaison(liaison),
   ]);
 
   return (
@@ -186,6 +188,19 @@ export default async function CompDayPage({
       ) : (
         <MyDuties compId={compId} basePath={base} duties={duties ?? []} mine={mine} />
       )}
+
+      <MyTimeline
+        configured={timeline.config !== null}
+        totalDelayMinutes={timeline.totalDelayMinutes}
+        empty="Nothing on the run of show is yours yet. A duty about one team puts that team's walk and stretch here."
+        entries={timeline.segments.map((segment) => ({
+          kind: segment.kind,
+          teamName: segment.teamName,
+          roomLabel: segment.roomLabel,
+          startsAt: timeline.config ? clockAt(timeline.config, segment.startsAtMinute) : "",
+          endsAt: timeline.config ? clockAt(timeline.config, segment.endsAtMinute) : "",
+        }))}
+      />
     </div>
   );
 }
