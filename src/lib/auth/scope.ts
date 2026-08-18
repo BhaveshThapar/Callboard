@@ -1,5 +1,6 @@
 import { and, eq, isNull, inArray, sql, sum } from "drizzle-orm";
 import { db } from "@/db";
+import { dbForComp } from "@/db/scoped";
 import {
   assignments,
   boardAssignments,
@@ -154,6 +155,8 @@ export type { JudgeLabelView } from "./labels";
 
 const SCOREABLE = SCOREABLE_STATUSES;
 
+const scoped = (actor: { compId: string }) => dbForComp(actor.compId) ?? db;
+
 export const resolveBoardActor = async (token: string): Promise<BoardActor | null> => {
   const [row] = await db
     .select({
@@ -212,7 +215,7 @@ export const resolveJudgeActor = async (token: string): Promise<JudgeActor | nul
 
 /** The judge's window onto `teams`. Never selects the team name. */
 export const listTeamsForJudge = (actor: JudgeActor): Promise<JudgeTeamView[]> =>
-  db
+  scoped(actor)
     .select({
       id: teams.id,
       bidCode: teams.bidCode,
@@ -224,7 +227,7 @@ export const listTeamsForJudge = (actor: JudgeActor): Promise<JudgeTeamView[]> =
 
 /** The board's window onto the same rows. */
 export const listTeamsForBoard = (actor: BoardActor): Promise<BoardTeamView[]> =>
-  db
+  scoped(actor)
     .select({
       id: teams.id,
       bidCode: teams.bidCode,
@@ -273,7 +276,7 @@ export const resolveTeamForBoard = async (
  * exists to prevent.
  */
 export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]> =>
-  db
+  scoped(actor)
     .select({
       assignmentId: judgeAssignments.id,
       name: people.name,
@@ -302,7 +305,7 @@ export const listJudgesForBoard = (actor: BoardActor): Promise<BoardJudgeView[]>
  */
 export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamView[]> => {
   const [roster, live, allocated, paid] = await Promise.all([
-    db
+    scoped(actor)
       .select({
         id: teams.id,
         bidCode: teams.bidCode,
@@ -330,7 +333,7 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
       .where(eq(teams.compId, actor.compId))
       .orderBy(teams.status, teams.waitlistRank, teams.name),
 
-    db
+    scoped(actor)
       .select({
         id: charges.id,
         teamId: charges.teamId,
@@ -343,7 +346,7 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
 
     // Grouped here rather than folded in JS, because one row per charge is the smallest thing that
     // answers "how much of this obligation is settled" and the alternative ships every allocation.
-    db
+    scoped(actor)
       .select({ chargeId: paymentAllocations.chargeId, paidCents: sum(paymentAllocations.amountCents) })
       .from(paymentAllocations)
       .innerJoin(charges, eq(charges.id, paymentAllocations.chargeId))
@@ -359,7 +362,7 @@ export const listRosterForBoard = async (actor: BoardActor): Promise<RosterTeamV
     // would make the allocation ceiling uninterpretable (ADR-0014, ADR-0015). Before `refunded_cents`
     // a returned deposit left this sum untouched, so the org's books overstated its cash by every
     // refund it had ever made and the team still read settled.
-    db
+    scoped(actor)
       .select({
         teamId: payments.teamId,
         paidCents: sum(sql`${payments.grossCents} - ${payments.refundedCents}`),
@@ -436,7 +439,7 @@ export type TeamOwnView = {
 
 export const ownTeamForCaptain = async (actor: TeamActor): Promise<TeamOwnView | null> => {
   const [team, charged, paid] = await Promise.all([
-    db
+    scoped(actor)
       .select({
         id: teams.id,
         name: teams.name,
@@ -458,7 +461,7 @@ export const ownTeamForCaptain = async (actor: TeamActor): Promise<TeamOwnView |
       .where(and(eq(teams.id, actor.teamId), eq(teams.compId, actor.compId)))
       .limit(1),
 
-    db
+    scoped(actor)
       .select({
         id: charges.id,
         kind: charges.kind,
@@ -468,7 +471,7 @@ export const ownTeamForCaptain = async (actor: TeamActor): Promise<TeamOwnView |
       .where(and(eq(charges.teamId, actor.teamId), isNull(charges.voidedAt)))
       .orderBy(charges.kind),
 
-    db
+    scoped(actor)
       .select({
         chargeId: paymentAllocations.chargeId,
         paidCents: sum(paymentAllocations.amountCents),
@@ -488,7 +491,7 @@ export const ownTeamForCaptain = async (actor: TeamActor): Promise<TeamOwnView |
     paidCents: paidByCharge.get(charge.id) ?? 0,
   }));
 
-  const [totals] = await db
+  const [totals] = await scoped(actor)
     .select({ paidCents: sum(sql`${payments.grossCents} - ${payments.refundedCents}`) })
     .from(payments)
     .where(and(eq(payments.teamId, actor.teamId), eq(payments.compId, actor.compId)));
@@ -522,7 +525,7 @@ export const listRegistrationFieldsForBoard = async (
  * score: the board sends these links and chases the people holding them, so the name is the point.
  */
 export const listBoardForBoard = (actor: BoardActor): Promise<BoardMemberView[]> =>
-  db
+  scoped(actor)
     .select({
       assignmentId: boardAssignments.id,
       personId: boardAssignments.personId,
@@ -540,7 +543,7 @@ export const listBoardForBoard = (actor: BoardActor): Promise<BoardMemberView[]>
  * it is never read.
  */
 export const listJudgeLabelsForBoard = async (actor: BoardActor): Promise<JudgeLabelView[]> => {
-  const rows = await db
+  const rows = await scoped(actor)
     .select({ assignmentId: judgeAssignments.id, labelSeq: judgeAssignments.labelSeq })
     .from(judgeAssignments)
     .where(eq(judgeAssignments.compId, actor.compId))
@@ -607,7 +610,7 @@ export type DutyView = {
  * already-revoked duty is refused by the same `find` that refuses another person's.
  */
 export const listDutiesForLiaison = async (actor: LiaisonActor): Promise<DutyView[]> => {
-  const rows = await db
+  const rows = await scoped(actor)
     .select({
       id: assignments.id,
       dutyId: assignments.dutyId,
