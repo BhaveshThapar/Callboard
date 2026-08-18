@@ -4,6 +4,7 @@ import { TEAM_STATUSES } from "@/db/schema/teams";
 import type { TeamStatus } from "@/db/schema/teams";
 import { COMP_SEGMENT_KINDS, TEAM_SEGMENT_KINDS } from "@/lib/schedule/types";
 import type { ScheduleConfig } from "@/lib/schedule/types";
+import { NORMALIZATIONS } from "@/lib/tabulation/types";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
 
 /**
@@ -95,7 +96,6 @@ export type FeeScheduleConfig = {
   lateAfter?: string;
 };
 
-const NORMALIZATIONS = ["raw", "zscore", "rank"] as const;
 const TIEBREAKER_KINDS = ["criterion", "head_to_head", "highest_single_judge"] as const;
 
 const fail = (path: string, expected: string): never => {

@@ -1,4 +1,12 @@
-export type NormalizationMethod = "raw" | "zscore" | "rank";
+/**
+ * One definition, and it had three: this type, a private `NORMALIZATIONS` in `src/db/config.ts`, and
+ * the string literals inside `rubrics_normalization_check`. The pure module owns the vocabulary and
+ * the schema imports it — `CHARGE_KINDS`' direction, and the reason `SCOREABLE_STATUSES` is a single
+ * `as const` rather than a type and a list that agree by hand.
+ */
+export const NORMALIZATIONS = ["raw", "zscore", "rank"] as const;
+
+export type NormalizationMethod = (typeof NORMALIZATIONS)[number];
 
 export type Tiebreaker =
   | { kind: "criterion"; criterionId: string }

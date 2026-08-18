@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { check, integer, jsonb, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { NORMALIZATIONS } from "@/lib/tabulation/types";
 import type { NormalizationMethod, Tiebreaker } from "@/lib/tabulation/types";
 import { comps } from "./orgs";
 
@@ -17,7 +18,12 @@ export const rubrics = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
-    check("rubrics_normalization_check", sql`${t.normalization} in ('raw','zscore','rank')`),
+    // Derived from `NORMALIZATIONS` rather than repeating it, `teams_status_check`'s shape: the
+    // list had three copies and this was the one that could not be reached from the other two.
+    check(
+      "rubrics_normalization_check",
+      sql`${t.normalization} in ${sql.raw(`(${NORMALIZATIONS.map((n) => `'${n}'`).join(",")})`)}`,
+    ),
   ],
 );
 
