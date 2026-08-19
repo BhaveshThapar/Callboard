@@ -17,7 +17,8 @@
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/db/seed-cli.ts",
     "db:doctor": "tsx src/db/doctor-cli.ts",
-    "db:migration-check": "tsx src/db/migration-check-cli.ts"
+    "db:migration-check": "tsx src/db/migration-check-cli.ts",
+    "db:rls-role": "tsx src/db/rls-role-cli.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.1",
