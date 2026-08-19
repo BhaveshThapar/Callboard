@@ -14,7 +14,16 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 const API = "https://api.stripe.com/v1";
 
-export const stripeConfigured = (): boolean => process.env.STRIPE_SECRET_KEY !== undefined;
+/**
+ * **An empty string is not configured**, and this said `!== undefined` for an hour, which is not the
+ * same test. Setting the variable with no value is a real thing that happens — it is what
+ * `vercel env add` leaves behind if you paste nothing — and under the wrong test the screen reports
+ * *ready to take payments* while every call 401s.
+ *
+ * `transportFromEnv` had this right from the start (`key && from`), for the reason stated there: the
+ * failure mode of getting it backwards is a screen claiming something the deployment cannot do.
+ */
+export const stripeConfigured = (): boolean => (process.env.STRIPE_SECRET_KEY ?? "") !== "";
 
 export type StripeResult<T> = { ok: true; value: T } | { ok: false; message: string };
 

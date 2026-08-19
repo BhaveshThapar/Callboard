@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
-import { describe, expect, it } from "vitest";
-import { verifySignature } from "../client";
+import { afterEach, describe, expect, it } from "vitest";
+import { stripeConfigured, verifySignature } from "../client";
 
 const SECRET = "whsec_test_secret_value";
 const PAYLOAD = JSON.stringify({ id: "evt_1", type: "payment_intent.succeeded" });
@@ -71,5 +71,35 @@ describe("verifySignature", () => {
   it("reads v1 even when Stripe sends other schemes alongside it", () => {
     const header = `${sign(PAYLOAD, now)},v0=ignored`;
     expect(verifySignature(PAYLOAD, header, SECRET, now)).toBe(true);
+  });
+});
+
+/**
+ * Found by trying to use it rather than by reading it: `STRIPE_SECRET_KEY` was set on production
+ * with an **empty value**, and `stripeConfigured` tested `!== undefined` — so the screen reported
+ * *ready to take payments* while every call would have 401'd. `transportFromEnv` had this right from
+ * the start, and its comment says why: the failure mode of getting it backwards is a screen claiming
+ * something the deployment cannot do.
+ */
+describe("stripeConfigured", () => {
+  const original = process.env.STRIPE_SECRET_KEY;
+  afterEach(() => {
+    if (original === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = original;
+  });
+
+  it("is false when unset", () => {
+    delete process.env.STRIPE_SECRET_KEY;
+    expect(stripeConfigured()).toBe(false);
+  });
+
+  it("is false when set to an empty string, which is what an empty paste leaves behind", () => {
+    process.env.STRIPE_SECRET_KEY = "";
+    expect(stripeConfigured()).toBe(false);
+  });
+
+  it("is true only with an actual key", () => {
+    process.env.STRIPE_SECRET_KEY = "sk_test_x";
+    expect(stripeConfigured()).toBe(true);
   });
 });
