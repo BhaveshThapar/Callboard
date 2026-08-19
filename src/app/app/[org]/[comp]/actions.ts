@@ -53,6 +53,7 @@ import {
 } from "@/lib/money/ledger";
 import { NORMALIZATIONS } from "@/lib/tabulation/types";
 import type { NormalizationMethod } from "@/lib/tabulation/types";
+import { beginOnboarding, refreshAccount, setRates } from "@/lib/stripe/connect";
 import { setRubric } from "@/lib/comp/rubric";
 import { addDelay } from "@/lib/comp/schedule";
 import { revokeConnection } from "@/lib/drive/connections";
@@ -507,6 +508,80 @@ export const setTeamStatusAction = async (
  * `setCompStatus`' shape. The criterion ids on the form are resolved inside `setRubric`, against the
  * same read that built the form, and an id that read did not produce is refused rather than inserted.
  */
+/**
+ * A5 — connecting the comp's own Stripe account, and stating its rates.
+ *
+ * Both take scope from `actor.compId` and resolve nothing else: the subject is the comp, which is
+ * `setCompStatus`' shape. `beginOnboarding` returns a URL rather than redirecting here, because a
+ * server action that redirected would lose the message on failure — and the realistic failure is
+ * Stripe being unreachable, which a board needs told rather than swallowed.
+ */
+export const connectStripeAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const base = process.env.NEXT_PUBLIC_BASE_URL ?? "";
+  const result = await beginOnboarding(actor, {
+    returnUrl: `${base}${basePath}/money?stripe=return`,
+    refreshUrl: `${base}${basePath}/money?stripe=refresh`,
+  });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/money`);
+  return { status: "ok", message: result.value.url };
+};
+
+export const refreshStripeAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const result = await refreshAccount(actor);
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/money`);
+  return {
+    status: "ok",
+    message: result.value.chargesEnabled
+      ? "Stripe is ready to take payments for this comp."
+      : result.value.detailsSubmitted
+        ? "Stripe has your details and is still verifying. It cannot take payments yet."
+        : "Stripe still needs details from you before it can take payments.",
+  };
+};
+
+export const setStripeRatesAction = async (
+  _previous: BoardActionState,
+  formData: FormData,
+): Promise<BoardActionState> => {
+  const compId = String(formData.get("compId") ?? "");
+  const basePath = String(formData.get("basePath") ?? "");
+
+  const actor = await resolveBoardAccess(compId);
+  if (!actor) return { status: "error", message: NO_ACCESS };
+
+  const result = await setRates(actor, {
+    nonprofitRate: formData.get("nonprofitRate") === "on",
+    // Stated as a percentage on the form and stored as basis points, so no float reaches the row.
+    surchargeBp: Math.round(Number(formData.get("surchargePercent") ?? 0) * 100),
+  });
+  if (!result.ok) return { status: "error", message: result.message };
+
+  revalidatePath(`${basePath}/money`);
+  return { status: "ok", message: "Saved." };
+};
+
 export const setRubricAction = async (
   _previous: BoardActionState,
   formData: FormData,

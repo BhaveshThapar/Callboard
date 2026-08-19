@@ -90,6 +90,121 @@ const applyAllocations = async (
  *    JS, and writing back is two acts across which another allocator can land; this is one atomic
  *    read-modify-write holding its own row lock. That is [ADR-0014] entire.
  */
+/**
+ * The one insert that makes a `payments` row, shared by the treasurer's form and the Stripe webhook.
+ *
+ * Extracted so the claim "a webhook does not create a second way to write money" is enforced by
+ * there being one function rather than asserted in a comment. `recordedByPersonId` is nullable here
+ * and only here: a routed payment has no human who typed it, and the audit row says `system` rather
+ * than borrowing somebody's name.
+ */
+const insertPayment = async (
+  tx: Transaction,
+  values: {
+    compId: string;
+    teamId: string;
+    rail: PaymentRail;
+    grossCents: number;
+    feeCents: number;
+    externalRef: string | null;
+    recordedByPersonId: string | null;
+  },
+): Promise<string> => {
+  const [payment] = await tx
+    .insert(payments)
+    .values({
+      compId: values.compId,
+      teamId: values.teamId,
+      rail: values.rail,
+      grossCents: values.grossCents,
+      feeCents: values.feeCents,
+      netCents: values.grossCents - values.feeCents,
+      allocatedCents: 0,
+      externalRef: values.externalRef,
+      recordedByPersonId: values.recordedByPersonId,
+    })
+    .returning({ id: payments.id });
+
+  if (!payment) throw new Error("payment insert returned no row");
+  return payment.id;
+};
+
+/**
+ * A5 — money that Stripe reports as settled, recorded by the same hand as everything else.
+ *
+ * **Not a second definition of a payment.** It writes through `insertPayment` below, the identical
+ * insert the treasurer's form uses, so the allocation counter, `net = gross - fee`, and every
+ * `MONEY_CONSTRAINTS` guarantee apply without being restated. A webhook with its own INSERT would be
+ * a second answer to *what is a payment*, and the first divergence between them would be invisible.
+ *
+ * **Attributed to `system`, with no person, and that is honest rather than a gap.** `ACTOR_KINDS`
+ * has carried `system` since the audit table existed. Attributing this to the board member who
+ * connected the Stripe account would name somebody who did not record it; attributing it to nobody
+ * at all is what `audit_log.actor_person_id` being nullable is for. *Every **board** action is
+ * attributed* stays true — this is not a board action, and it must not be able to masquerade as one.
+ *
+ * **It allocates nothing**, and that is A8's own rule rather than a shortcut: money arriving before
+ * anybody says what it is for is the ordinary case — a deposit lands while a team is still `applied`
+ * — and `allocatePayment` exists precisely so attribution can happen afterwards.
+ *
+ * The caller must already have proven the team belongs to `compId`. The webhook does that against
+ * the connected account rather than the event body, because the body is written by whoever created
+ * the session and the account is what Stripe vouches for.
+ */
+export const recordRoutedPayment = async (input: {
+  compId: string;
+  teamId: string;
+  grossCents: number;
+  feeCents: number;
+  rail: PaymentRail;
+  externalRef: string;
+}): Promise<LedgerResult> => {
+  if (input.grossCents <= 0) return { ok: false, message: "A payment must be more than zero." };
+  if (input.feeCents < 0) return { ok: false, message: "A processing fee cannot be negative." };
+
+  try {
+    return await withTransaction(async (tx) => {
+      const paymentId = await insertPayment(tx, {
+        compId: input.compId,
+        teamId: input.teamId,
+        rail: input.rail,
+        grossCents: input.grossCents,
+        feeCents: input.feeCents,
+        externalRef: input.externalRef,
+        recordedByPersonId: null,
+      });
+
+      await recordAudit(
+        {
+          compId: input.compId,
+          actorKind: "system",
+          actorPersonId: null,
+          action: "payment.record",
+          entity: "payment",
+          entityId: paymentId,
+          before: null,
+          after: {
+            teamId: input.teamId,
+            rail: input.rail,
+            grossCents: input.grossCents,
+            feeCents: input.feeCents,
+            allocatedCents: 0,
+            via: "stripe",
+          },
+        },
+        tx,
+      );
+
+      // Nothing attributed yet, so the whole amount is an unapplied credit -- which is exactly
+      // what `allocatePayment` exists to resolve, and what the money screen shows as unattached.
+      return { ok: true as const, paymentId, allocatedCents: 0, creditCents: input.grossCents };
+    });
+  } catch (error) {
+    const refusal = refusalFor(error);
+    return { ok: false, message: refusal ?? UNKNOWN_REFUSAL };
+  }
+};
+
 export const recordPayment = async (
   actor: BoardActor,
   input: PaymentInput,
@@ -132,22 +247,16 @@ export const recordPayment = async (
 
   try {
     return await withTransaction(async (tx) => {
-      const [payment] = await tx
-        .insert(payments)
-        .values({
-          compId: actor.compId,
-          teamId: input.teamId,
-          rail: input.rail,
-          grossCents: input.grossCents,
-          feeCents: input.feeCents,
-          netCents: input.grossCents - input.feeCents,
-          allocatedCents: 0,
-          externalRef: input.externalRef ?? null,
-          recordedByPersonId: actor.personId,
-        })
-        .returning({ id: payments.id });
-
-      if (!payment) throw new Error("payment insert returned no row");
+      const paymentId = await insertPayment(tx, {
+        compId: actor.compId,
+        teamId: input.teamId,
+        rail: input.rail,
+        grossCents: input.grossCents,
+        feeCents: input.feeCents,
+        externalRef: input.externalRef ?? null,
+        recordedByPersonId: actor.personId,
+      });
+      const payment = { id: paymentId };
 
       await applyAllocations(tx, payment.id, allocations);
 

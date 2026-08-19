@@ -14,11 +14,16 @@ const NO_CLASS = {
 
 /**
  * A directory whose output must be a function of its input alone: no database, no clock, no
- * randomness. Three of these exist and all are load-bearing — `src/lib/tabulation/`, so a locked run
+ * randomness. Four of these exist and all are load-bearing — `src/lib/tabulation/`, so a locked run
  * reproduces a year later from its own frozen row; `src/lib/fees/schedule.ts`, so what a team owes is
- * a function of the schedule and the roster rather than of the day it was asked; and
+ * a function of the schedule and the roster rather than of the day it was asked; 
  * `src/lib/schedule/`, so a re-derived run of show is a function of the draw and the delays that were
- * entered rather than of the moment somebody opened the page.
+ * entered rather than of the moment somebody opened the page; and `src/lib/stripe/rates.ts`, so a
+ * surcharge a dancer reads at checkout is reproducible from the receipt.
+ *
+ * Note the fourth is one **file**, not a directory: the rest of `src/lib/stripe/` talks to Stripe over
+ * `fetch` and could not be fenced. The arithmetic is separated from the call precisely so the half
+ * that must be reproducible can be.
  *
  * The third was reserved in writing before it existed, in `src/lib/coord/duties.ts`, and the test it
  * had to pass is the reason `src/lib/coord/` is *not* fenced: a zone earns its place by protecting a
@@ -90,6 +95,10 @@ const config = [
   pureZone(
     ["src/lib/fees/**/*.ts"],
     "src/lib/fees/ is pure. What a team owes must be a function of the schedule and the roster; reading the world here makes a bill unexplainable to the treasurer holding it.",
+  ),
+  pureZone(
+    ["src/lib/stripe/rates.ts"],
+    "src/lib/stripe/rates.ts is pure. What a payment costs to accept, and what a payer is asked for on top, must be a function of the amount and the rate card alone; reading the world here puts a number on a checkout page that cannot be reproduced from the receipt.",
   ),
   pureZone(
     ["src/lib/schedule/**/*.ts"],
