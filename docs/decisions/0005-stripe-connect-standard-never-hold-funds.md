@@ -1,6 +1,6 @@
 # ADR-0005 — Stripe Connect Standard; Callboard never holds funds
 
-**Status:** accepted · July 9, 2026 · *designed, not implemented*
+**Status:** accepted · July 9, 2026 · **implemented August 18, 2026, at the founder's direction and ahead of the gate**
 
 ## Context
 
@@ -32,8 +32,19 @@ So the **$300 flat fee per comp carries the revenue**, and the platform fee on p
 
 **Standard, not Express or Custom.** Express would give a slicker onboarding and put Callboard closer to the funds. That proximity is the thing we are refusing. Standard means the org owns its Stripe dashboard, its payouts, and its 1099 — and it means the answer to *"what happens to our money if you disappear?"* is *"nothing, it was never ours."* For a student vendor with a credibility problem (PRD §12), that answer is worth more than a nicer onboarding flow.
 
-## Not implemented
+## Implemented — August 18, 2026
 
-No Stripe code exists in this repo. The full spec is [PAYMENTS.md](../PAYMENTS.md); the ledger it writes to is [ADR-0002](0002-money-as-cents-and-allocations.md).
+**This said "not implemented" and that it would be built "when three founding partners commit (PRD §13), and not before."** Track 1 is still **0/10 conversations and 0/3 signatures**. It was built anyway, at the founder's direction, and that is recorded here rather than tidied away — the same way `FEATURE_MAP.md` records every other crossing of its own line.
 
-It is built when three founding partners commit (PRD §13), and not before. The founding season is free, so what lands is not money: a named person and comp date, their roster and fee schedule and last season's payment records, and a written $300 line in the 2027–28 budget. The first paid dollar arrives at Gate 2, in April 2027 — *after* this is built, which is the price of going free.
+What the decision above bought, now that there is code under it:
+
+- **Standard accounts.** `createConnectedAccount` passes `type: "standard"`. Funds settle to the org; the org owns the dashboard, the payouts and the 1099. Callboard's secret authorizes the call and never receives the money, and Stripe hosts the onboarding form — so this product never sees a bank number, a tax id or a date of birth.
+- **ACH-first (A5a).** `defaultRail` sends a lump over ACH and leaves a small item on card. The cap is the point: 0.8% capped at $5 means a $2,160 payment costs five dollars rather than $62.94. Asserted against Mayuri's own shape — ten lumps come to under $80 ACH-first against over $290 all-card.
+- **Nonprofit rate (A5b).** Stated by the board, never detected: whether Stripe has *verified* the status is a fact about their dashboard, and guessing would quote a fee the statement then disagrees with.
+- **Surcharge (A5c), capped at 3%** in the arithmetic **and** by a CHECK. A comp that set 4% would get no warning from Stripe — it would get a card-network rule violation, months later, aimed at the org.
+
+**One thing the spec promised that the arithmetic will not.** A5c cannot make an org whole on a card. 2.9% + 30¢ on $100 is $3.29 once grossed up, and the 3% cap permits recovering only $3.00 — the org is **29¢ short**. `planSurcharge` returns `netCents` stating that rather than rounding it away, because "you net exactly what you charge" with an unshown gap is PRD §14's own species in miniature.
+
+**And the fee is not derived.** `payments.fee_cents` is still recorded per payment, and the webhook writes `0` until the real figure arrives: Stripe's fee lives on the balance transaction and is not final when the intent succeeds. Guessing it from the rate card would put a number in the ledger that the March statement disagrees with — which is exactly what the gross/fee/net split exists to make visible.
+
+The full spec is [PAYMENTS.md](../PAYMENTS.md); the ledger it writes to is [ADR-0002](0002-money-as-cents-and-allocations.md). **The question this ADR reserved for founding partners — whether a student board wants card rails at all — is still unanswered**, and building the rails did not answer it.

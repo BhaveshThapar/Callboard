@@ -8,4 +8,5 @@ export * from "./comms";
 export * from "./drive";
 export * from "./coord";
 export * from "./schedule";
+export * from "./stripe";
 export * from "./audit";

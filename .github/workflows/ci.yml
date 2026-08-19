@@ -53,7 +53,11 @@ jobs:
   # this job. `e2e/guard.ts` refuses that database besides.
   acceptance:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 50, not 30. The suite is 159 tests across 30 spec files and most of them seed a comp through a
+    # `tsx` subprocess; it takes ~23 minutes on a quiet laptop and longer here. Thirty was right when
+    # this was written and became a self-inflicted failure as the suite grew -- a timeout that fires
+    # on healthy work teaches people to re-run rather than to read, which is the thing #39 was for.
+    timeout-minutes: 50
     # **Not on a merge to `main`.** A PR's head is what gets squashed, so the push to `main` tests a
     # tree that was green minutes earlier -- and this job is the expensive one, holding the single CI
     # database for a quarter of an hour. Running it twice per change doubled the cost of every merge
@@ -73,6 +77,12 @@ jobs:
       # broadcast fails on an empty string. Locally this comes from `.env.local`, which is why
       # the suite passed on a laptop and failed here.
       NEXT_PUBLIC_BASE_URL: http://localhost:3000
+      # **A fixture, not a secret.** `e2e/stripe.spec.ts` signs its own payloads with this exact
+      # string, so the workflow and the spec have to agree on it — and a real `whsec_…` here would be
+      # worse than useless, because the spec could not then produce a valid signature and every
+      # assertion would pass for the wrong reason. Without it the route answers 503 (*not configured*)
+      # and all four webhook tests fail on a status code rather than on anything they are about.
+      STRIPE_WEBHOOK_SECRET: whsec_e2e_secret
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -96,12 +106,21 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock', 'bun.lockb', 'package-lock.json') }}
 
+      # **No `--with-deps`, and that is the fix rather than a shortcut.** That flag shells out to apt,
+      # and apt on this runner has now hung three times: two hours before any timeout existed, a full
+      # 30-minute job budget after that, and exactly 10 minutes once the step was bounded. Three
+      # hangs, all in the apt half, none in the download.
+      #
+      # `ubuntu-latest` already ships the system libraries Chromium needs — `--with-deps` exists for
+      # bare containers, which this is not. So the install is now a pure download, which is the part
+      # that was never failing. If a library ever is genuinely missing, Playwright says so on launch,
+      # and a named missing `.so` is a far better failure than a step that stops responding.
+      #
+      # The bound stays, because a download can stall too, and because it is what turned "the suite
+      # timed out" into "this step timed out" — the difference between a verdict and its subject.
       - if: steps.playwright-cache.outputs.cache-hit != 'true'
-        run: bunx playwright install --with-deps chromium
-      # The browser binary caches; the system libraries it links against do not, so they are
-      # installed on a hit too. Cheap, and skipping it is how a cached run dies on a missing .so.
-      - if: steps.playwright-cache.outputs.cache-hit == 'true'
-        run: bunx playwright install-deps chromium
+        timeout-minutes: 10
+        run: bunx playwright install chromium
 
       - run: bun run db:migrate
       - run: bun run e2e

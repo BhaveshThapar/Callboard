@@ -8,7 +8,10 @@ import { feeScheduleFor, today } from "@/lib/money/charges";
 import { listDepositsForBoard } from "@/lib/money/deposits";
 import { describeBalance, formatCents } from "@/lib/money/format";
 import { listOpenPayments, listPaymentsForBoard } from "@/lib/money/ledger";
+import { stripeConfigured } from "@/lib/stripe/client";
+import { connectForBoard } from "@/lib/stripe/connect";
 import { describeGap, summarizeOpenPayments, whoOwes } from "@/lib/money/who-owes";
+import { StripeConnect } from "./StripeConnect";
 import { DepositTable } from "./DepositTable";
 import type { DebtorOption } from "./DuesReminders";
 import { DuesReminders } from "./DuesReminders";
@@ -37,6 +40,7 @@ export default async function MoneyPage({ params }: { params: Promise<{ org: str
   if (!actor) notFound();
 
   const scope: BoardFormScope = { compId: actor.compId, basePath: `/app/${org}/${comp}` };
+  const stripe = await connectForBoard(actor);
 
   /**
    * `listDepositsForBoard` calls `listRosterForBoard` again internally, and that duplicate read is
@@ -178,6 +182,8 @@ export default async function MoneyPage({ params }: { params: Promise<{ org: str
             instrument disappear at the moment it worked. */}
         <div className="mb-6">
           <DuesReminders scope={scope} debtors={debtors} />
+
+          <StripeConnect scope={scope} configured={stripeConfigured()} view={stripe} />
         </div>
 
         {report.rows.length === 0 ? (
