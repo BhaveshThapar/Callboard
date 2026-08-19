@@ -77,6 +77,12 @@ jobs:
       # broadcast fails on an empty string. Locally this comes from `.env.local`, which is why
       # the suite passed on a laptop and failed here.
       NEXT_PUBLIC_BASE_URL: http://localhost:3000
+      # **A fixture, not a secret.** `e2e/stripe.spec.ts` signs its own payloads with this exact
+      # string, so the workflow and the spec have to agree on it — and a real `whsec_…` here would be
+      # worse than useless, because the spec could not then produce a valid signature and every
+      # assertion would pass for the wrong reason. Without it the route answers 503 (*not configured*)
+      # and all four webhook tests fail on a status code rather than on anything they are about.
+      STRIPE_WEBHOOK_SECRET: whsec_e2e_secret
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

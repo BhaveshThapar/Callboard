@@ -21,7 +21,15 @@ type SeededComp = { compId: string; boardToken: string };
 
 const ORG = "stripe-e2e-org";
 const COMP = "stripe-e2e-comp";
-const SECRET = "whsec_e2e_secret";
+/**
+ * The same value the route is given, read from the environment rather than repeated — the workflow
+ * sets it and this signs with it, and a literal in both places is two definitions of one string that
+ * drift on the first edit. The default keeps `bun run e2e` working on a laptop without exporting it.
+ *
+ * It is a **fixture, not a secret**: a real `whsec_…` here would be worse than useless, because this
+ * file could not then produce a valid signature and every assertion would pass for the wrong reason.
+ */
+const SECRET = process.env.STRIPE_WEBHOOK_SECRET ?? "whsec_e2e_secret";
 
 const tmp = (name: string): string => join(mkdtempSync(join(tmpdir(), "callboard-e2e-")), name);
 
