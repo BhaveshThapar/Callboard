@@ -57,6 +57,19 @@ const seed = (): SeededComp => {
   return JSON.parse(readFileSync(out, "utf8")) as SeededComp;
 };
 
+/**
+ * A per-run prefix for every event id, and it is not cosmetic.
+ *
+ * `stripe_events` is the replay guard, so a row is **meant** to outlive the thing that created it —
+ * and a row for an *unknown* account carries a null `comp_id`, so it survives the reseed every spec
+ * in this directory performs. A fixed `evt_unknown` therefore passed on a fresh CI database and then
+ * failed on the next run against the same one, reporting `duplicate: true` where the test expected
+ * `handled: false`. The guard was working; the test assumed a database nobody had used yet.
+ *
+ * The replay test still reuses **one** id deliberately, because that is the property it is about.
+ */
+const RUN = `${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
+
 const signed = (payload: string): string => {
   const t = Math.floor(Date.now() / 1000);
   return `t=${t},v1=${createHmac("sha256", SECRET).update(`${t}.${payload}`).digest("hex")}`;
@@ -86,7 +99,7 @@ const intentEvent = (id: string, teamId: string, amountCents: number, account: s
 
 test("an unsigned or wrongly-signed webhook is refused, and writes nothing", async ({ request }) => {
   seed();
-  const payload = intentEvent("evt_unsigned", "00000000-0000-0000-0000-000000000000", 5000, "acct_x");
+  const payload = intentEvent(`evt_unsigned-${RUN}`, "00000000-0000-0000-0000-000000000000", 5000, "acct_x");
 
   const unsigned = await post(request, payload, null);
   expect(unsigned.status()).toBe(400);
@@ -107,7 +120,7 @@ test("an unsigned or wrongly-signed webhook is refused, and writes nothing", asy
 
 test("a redelivered event is answered 200 and recorded once", async ({ request }) => {
   seed();
-  const payload = intentEvent("evt_replay", "00000000-0000-0000-0000-000000000000", 5000, "acct_none");
+  const payload = intentEvent(`evt_replay-${RUN}`, "00000000-0000-0000-0000-000000000000", 5000, "acct_none");
   const signature = signed(payload);
 
   const first = await post(request, payload, signature);
@@ -125,7 +138,7 @@ test("an event for an account this deployment does not know records nothing but 
   request,
 }) => {
   seed();
-  const payload = intentEvent("evt_unknown", "00000000-0000-0000-0000-000000000000", 5000, "acct_ghost");
+  const payload = intentEvent(`evt_unknown-${RUN}`, "00000000-0000-0000-0000-000000000000", 5000, "acct_ghost");
   const response = await post(request, payload, signed(payload));
 
   expect(response.status()).toBe(200);
@@ -138,7 +151,7 @@ test("a signature from outside the tolerance window is refused, so a captured re
   request,
 }) => {
   seed();
-  const payload = intentEvent("evt_old", "00000000-0000-0000-0000-000000000000", 5000, "acct_x");
+  const payload = intentEvent(`evt_old-${RUN}`, "00000000-0000-0000-0000-000000000000", 5000, "acct_x");
   const old = Math.floor(Date.now() / 1000) - 3600;
   const stale = `t=${old},v1=${createHmac("sha256", SECRET).update(`${old}.${payload}`).digest("hex")}`;
 
