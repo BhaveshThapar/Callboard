@@ -100,23 +100,21 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('bun.lock', 'bun.lockb', 'package-lock.json') }}
 
-      # **A step timeout, and it is the load-bearing part of this block.** This step has now hung
-      # twice -- once for two hours before any job timeout existed, once for thirty minutes inside
-      # one -- because `--with-deps` shells out to apt and apt can wait forever on an unreachable
-      # mirror. Without a bound here a hang consumes the whole job budget and the failure reports as
-      # "the suite timed out", naming the wrong thing. Ten minutes is generous for a 130MB download.
+      # **No `--with-deps`, and that is the fix rather than a shortcut.** That flag shells out to apt,
+      # and apt on this runner has now hung three times: two hours before any timeout existed, a full
+      # 30-minute job budget after that, and exactly 10 minutes once the step was bounded. Three
+      # hangs, all in the apt half, none in the download.
       #
-      # It also breaks a loop worth naming: `actions/cache` saves only when the job succeeds, so a
-      # job that dies here never populates the cache, so the next run misses and dies here too. The
-      # cache has never once been written for that reason.
+      # `ubuntu-latest` already ships the system libraries Chromium needs — `--with-deps` exists for
+      # bare containers, which this is not. So the install is now a pure download, which is the part
+      # that was never failing. If a library ever is genuinely missing, Playwright says so on launch,
+      # and a named missing `.so` is a far better failure than a step that stops responding.
+      #
+      # The bound stays, because a download can stall too, and because it is what turned "the suite
+      # timed out" into "this step timed out" — the difference between a verdict and its subject.
       - if: steps.playwright-cache.outputs.cache-hit != 'true'
         timeout-minutes: 10
-        run: bunx playwright install --with-deps chromium
-      # The browser binary caches; the system libraries it links against do not, so they are
-      # installed on a hit too. Cheap, and skipping it is how a cached run dies on a missing .so.
-      - if: steps.playwright-cache.outputs.cache-hit == 'true'
-        timeout-minutes: 10
-        run: bunx playwright install-deps chromium
+        run: bunx playwright install chromium
 
       - run: bun run db:migrate
       - run: bun run e2e
