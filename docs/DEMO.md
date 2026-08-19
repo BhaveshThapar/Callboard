@@ -96,7 +96,7 @@ The raw tokens are shown exactly once. Only their sha256 is stored. Text the jud
 
 **The board link no longer stays in the address bar.** Opening it exchanges the token for an
 `HttpOnly` cookie and lands you at `/app/maryland-mayuri/mayuri-2027` — the product, with a header, a
-role badge and a nav across Overview · Roster · Money · Results · People
+role badge and a nav across Overview · Roster · Money · Results · People · Comp day — six for a board, and exactly one for a liaison
 ([ADR-0022](decisions/0022-a-link-is-exchanged-for-a-cookie.md)). Worth one sentence on the call if
 somebody is watching the URL bar: the credential stopped being screen-shared along with everything
 else, which is ADR-0003's own named hardening finally taken.
@@ -361,6 +361,20 @@ whose roster is being scored.
 Free sharpens this trap rather than dulling it. With no price to haggle over, "build me X and we'll use it" becomes the only thing a board has left to offer — and it is not an offer. Trade the feature for the signature, never for the roadmap.
 
 Anything else they ask for goes the same way. A board naming a feature is a board telling you it wants to buy — route it to the ask, not to the backlog.
+
+## Comp day, and the three beats this script did not have
+
+Added on August 18, 2026, because grepping this file for `liaison`, `duty`, `import`, `music` and `materials` returned **zero hits each** — three merged features had no step here, so "walk the beat" could not have covered them.
+
+**The liaison beat (C1).** From **Comp day**, assign somebody a duty; pick a team for a team duty. Have them accept their invitation in another browser and sign in: their nav has **one** item, and their page shows only their own duties. Acknowledge, then acknowledge again — the timestamp does not move, and the screen says *already acknowledged* rather than showing red. Revoke it and watch it leave their page.
+
+> The comp's config must carry a `duties` array. Without one the panel says *this comp has not written down what its duties are*, which is correct and is not a demo.
+
+**The run of show (G1–G4, G6).** On the same screen, record the draw, then move one act with the arrows — the two numbers **trade**, and nobody else's changes, because an emcee is reading a printed sheet. Then type a delay: *"running 15 minutes behind, from act 4."* Every later act re-times, an act that already danced does not move, dinner stays where the caterer expects it and the judges' cutoff shifts. A liaison's own page shows the new times **and says the show is late** — because PRD §9's complaint was never that the schedule is hard to build, it is that every open copy goes silently stale.
+
+**The materials beat (A4).** As a captain, file final music, an emergency contact and a dancer count. The board reads all three on the roster. **The balance has not moved** — a captain files a *claim*, and only `setTeamBilling` turns it into money.
+
+**The importer (A11).** Only demonstrable on a deployment with Google credentials. Connect the account, paste a folder, and show the preview **including the rows that cannot be imported and why** — that refusal is the feature. Confirming lands teams at `applied`, which creates no charge.
 
 ## The ask
 
